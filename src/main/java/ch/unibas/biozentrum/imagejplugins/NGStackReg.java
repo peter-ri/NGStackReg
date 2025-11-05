@@ -71,7 +71,7 @@ import org.apache.commons.lang3.SystemUtils;
 @Plugin(type = Command.class, headless = true, menuPath="Plugins>Registration>NGStackReg>NGStackReg")
 public class NGStackReg implements Command
 {
-	final static boolean debug = true;
+	final static boolean debug = false;
     public static final int MIN_SIZE = 24;
     public enum TransformationType
     {
