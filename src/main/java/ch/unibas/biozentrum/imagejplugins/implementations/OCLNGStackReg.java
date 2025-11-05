@@ -326,7 +326,7 @@ public class OCLNGStackReg extends RegistrationAndTransformation
                         break;
                     case RIGIDBODY:
                         maskBuffer = context.createDoubleBuffer((int)(width*height), GPURESIDENTRW);
-                        maskBuffer.getCLSize();
+                        maskBuffer.getCLSize(); //TODO: Remove these, they were for debugging
                         gradient0 = context.createDoubleBuffer((int) (width*height), GPURESIDENTRW);
                         gradient0.getCLSize();
                         gradient1 = context.createDoubleBuffer((int) (width*height), GPURESIDENTRW);
@@ -835,9 +835,12 @@ public class OCLNGStackReg extends RegistrationAndTransformation
                         .putArg(fullSizedGPUResidentHelperBuffer)
                         .putArg(width)
                         .putArg(height)
+                        .putArg(2*width)
+                        .putArg(2*height)
                         .putArg((float)((RigidBodyTransformation)scat.transformation).offsetx)
                         .putArg((float)((RigidBodyTransformation)scat.transformation).offsety)
-                        .putArg((float)((RigidBodyTransformation)scat.transformation).angle);
+                        .putArg((float)Math.cos(((RigidBodyTransformation)scat.transformation).angle))
+                        .putArg((float)-Math.sin(((RigidBodyTransformation)scat.transformation).angle));
             }
             else
             {
@@ -846,9 +849,12 @@ public class OCLNGStackReg extends RegistrationAndTransformation
                         .putArg(fullSizedGPUResidentHelperBuffer)
                         .putArg(width)
                         .putArg(height)
+                        .putArg(2*width)
+                        .putArg(2*height)
                         .putArg(((RigidBodyTransformation)scat.transformation).offsetx)
                         .putArg(((RigidBodyTransformation)scat.transformation).offsety)
-                        .putArg(((RigidBodyTransformation)scat.transformation).angle);
+                        .putArg((float)Math.cos(((RigidBodyTransformation)scat.transformation).angle))
+                        .putArg((float)-Math.sin(((RigidBodyTransformation)scat.transformation).angle));
             }
             queue.put1DRangeKernel(uniformBSplineTransformProgramKernels[KERNEL_transformImageWithBsplineInterpolation],0,globalWorkSize,localWorkSize);
             uniformBSplineTransformProgramKernels[KERNEL_transformImageWithBsplineInterpolation].rewind();
@@ -899,6 +905,8 @@ public class OCLNGStackReg extends RegistrationAndTransformation
                         .putArg(fullSizedGPUResidentHelperBuffer)
                         .putArg(width)
                         .putArg(height)
+                        .putArg(width * 2)
+                        .putArg(height * 2)
                         .putArg((float)((TranslationTransformation)scat.transformation).offsetx)
                         .putArg((float)((TranslationTransformation)scat.transformation).offsety);
             }
@@ -909,6 +917,8 @@ public class OCLNGStackReg extends RegistrationAndTransformation
                         .putArg(fullSizedGPUResidentHelperBuffer)
                         .putArg(width)
                         .putArg(height)
+                        .putArg(width * 2)
+                        .putArg(height * 2)
                         .putArg(((TranslationTransformation)scat.transformation).offsetx)
                         .putArg(((TranslationTransformation)scat.transformation).offsety);
             }
@@ -1149,20 +1159,24 @@ public class OCLNGStackReg extends RegistrationAndTransformation
                         .putArg((int)sourcePyramid[pyramidIndex].width)
                         .putArg((int)sourcePyramid[pyramidIndex].height)
                         .putArg((int)targetPyramid[pyramidIndex].width)
-                        .putArg((int)targetPyramid[pyramidIndex].height);
+                        .putArg((int)targetPyramid[pyramidIndex].height)
+			            .putArg((int)targetPyramid[pyramidIndex].width * 2)
+			            .putArg((int)targetPyramid[pyramidIndex].height * 2);
                 if(usesFloatGPU)
                 {
                     uniformBSplineTransformProgramKernels[KERNEL_rigidBodyErrorWithGradAndHess]
                             .putArg((float)currentoffsetx)
                             .putArg((float)curentoffsety)
-                            .putArg((float)currentangle);
+                            .putArg((float)Math.cos(currentangle))
+                            .putArg((float)-Math.sin(currentangle));
                 }
                 else
                 {
                     uniformBSplineTransformProgramKernels[KERNEL_rigidBodyErrorWithGradAndHess]
                             .putArg(currentoffsetx)
                             .putArg(curentoffsety)
-                            .putArg(currentangle);
+                            .putArg(Math.cos(currentangle))
+                            .putArg(-Math.sin(currentangle));
                 }
                 int localWorkSize = (int)Math.min(uniformBSplineTransformProgramKernels[KERNEL_rigidBodyErrorWithGradAndHess].getWorkGroupSize(device),blocksizeMultiplier*optimalMultiples[KERNEL_rigidBodyErrorWithGradAndHess]);  // Local work size dimensions
                 int globalWorkSize = StaticUtility.roundUp(localWorkSize, optimalMultiples[KERNEL_rigidBodyErrorWithGradAndHess], (int)(sourcePyramid[pyramidIndex].width*sourcePyramid[pyramidIndex].height));
@@ -1287,14 +1301,16 @@ public class OCLNGStackReg extends RegistrationAndTransformation
                     uniformBSplineTransformProgramKernels[KERNEL_rigidBodyErrorWithGradAndHessBrent]
                             .putArg((float)currentoffsetx)
                             .putArg((float)curentoffsety)
-                            .putArg((float)currentangle);
+                            .putArg((float)Math.cos(currentangle))
+                            .putArg((float)-Math.sin(currentangle));
                 }
                 else
                 {
                     uniformBSplineTransformProgramKernels[KERNEL_rigidBodyErrorWithGradAndHessBrent]
                             .putArg(currentoffsetx)
                             .putArg(curentoffsety)
-                            .putArg(currentangle);
+                            .putArg(Math.cos(currentangle))
+                            .putArg(-Math.sin(currentangle));
                 }                
                 uniformBSplineTransformProgramKernels[KERNEL_rigidBodyErrorWithGradAndHessBrent]
                         .putArg((int)targetPyramid[pyramidIndex].width*2)
@@ -1414,7 +1430,10 @@ public class OCLNGStackReg extends RegistrationAndTransformation
                         .putArg((int)sourcePyramid[pyramidIndex].width)
                         .putArg((int)sourcePyramid[pyramidIndex].height)
                         .putArg((int)targetPyramid[pyramidIndex].width)
-                        .putArg((int)targetPyramid[pyramidIndex].height);
+                        .putArg((int)targetPyramid[pyramidIndex].height)
+                        .putArg((int)targetPyramid[pyramidIndex].width*2)
+                        .putArg((int)targetPyramid[pyramidIndex].height*2);
+                
                 if(usesFloatGPU)
                 {
                     uniformBSplineTransformProgramKernels[KERNEL_translationErrorWithGradAndHess]
@@ -1607,18 +1626,22 @@ public class OCLNGStackReg extends RegistrationAndTransformation
                     .putArg((int)sourcePyramid[pyramidIndex].width)
                     .putArg((int)sourcePyramid[pyramidIndex].height)
                     .putArg((int)targetPyramid[pyramidIndex].width)
-                    .putArg((int)targetPyramid[pyramidIndex].height);
+                    .putArg((int)targetPyramid[pyramidIndex].height)
+                    .putArg((int)targetPyramid[pyramidIndex].width * 2)
+                    .putArg((int)targetPyramid[pyramidIndex].height * 2);
             
             if (usesFloatGPU) {
                 uniformBSplineTransformProgramKernels[KERNEL_rigidBodyError]
                         .putArg((float)currentoffsetx)
                         .putArg((float)curentoffsety)
-                        .putArg((float)currentangle);
+                        .putArg((float)Math.cos(currentangle))
+                        .putArg((float)-Math.sin(currentangle));
             } else {
                 uniformBSplineTransformProgramKernels[KERNEL_rigidBodyError]
                         .putArg(currentoffsetx)
                         .putArg(curentoffsety)
-                        .putArg(currentangle);
+                        .putArg(Math.cos(currentangle))
+                        .putArg(-Math.sin(currentangle));
             }           
             int localWorkSize = (int)Math.min(uniformBSplineTransformProgramKernels[KERNEL_rigidBodyError].getWorkGroupSize(device),optimalMultiples[KERNEL_rigidBodyError]*blocksizeMultiplier);  // Local work size dimensions
             int globalWorkSize = StaticUtility.roundUp(localWorkSize, optimalMultiples[KERNEL_rigidBodyError], (int)(sourcePyramid[pyramidIndex].width*sourcePyramid[pyramidIndex].height));
@@ -1717,7 +1740,9 @@ public class OCLNGStackReg extends RegistrationAndTransformation
                     .putArg((int)sourcePyramid[pyramidIndex].width)
                     .putArg((int)sourcePyramid[pyramidIndex].height)
                     .putArg((int)targetPyramid[pyramidIndex].width)
-                    .putArg((int)targetPyramid[pyramidIndex].height);
+                    .putArg((int)targetPyramid[pyramidIndex].height)
+                    .putArg((int)targetPyramid[pyramidIndex].width * 2)
+                    .putArg((int)targetPyramid[pyramidIndex].height * 2);
             
             if (usesFloatGPU) {
                 uniformBSplineTransformProgramKernels[KERNEL_translationError]

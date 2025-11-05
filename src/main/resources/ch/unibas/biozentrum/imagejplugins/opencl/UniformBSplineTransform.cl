@@ -52,23 +52,97 @@ preprocessor constants can then lead to very strange errors (mostly out of mem).
 #define FPT double
 #define UCAST (double)
 #define DCAST (float)
+__constant FPT h = 0.5;
+__constant FPT Zero = 0.0;
 __constant FPT Lambda = 6.0;
 __constant FPT Pole = -0.26794919243112270647255365849413;
 __constant FPT One = 1.0;
 __constant FPT Two = 2.0;
 __constant FPT h0D3 = 0.66666666666666666666666666666666666666666666666666666666666666667;
 __constant FPT h1D3 = 0.16666666666666666666666666666666666666666666666666666666666666667;
+#define FPTTWO double2
+#define FPTTHREE double3
+#define FPTFOUR double4
+#define FPTEIGHT double8
+__constant FPT Three = 3.0;
 #else
 #define FPT float
 #define UCAST
 #define DCAST
+__constant FPT h = 0.5f;
+__constant FPT Zero = 0.0f;
 __constant FPT Lambda = 6.0f;
 __constant FPT Pole = -0.26794919243112270647255365849413f;
 __constant FPT One = 1.0f;
 __constant FPT Two = 2.0f;
 __constant FPT h0D3 = 0.66666666666666666666666666666666666666666666666666666666666666667f;
 __constant FPT h1D3 = 0.16666666666666666666666666666666666666666666666666666666666666667f;
+#define FPTTWO float2
+#define FPTTHREE float3
+#define FPTFOUR float4
+#define FPTEIGHT float8
+__constant FPT Three = 3.0f;
 #endif
+
+
+//Utility functions
+static inline int4 calculatexInterpolationIndices(const FPT coordx, const int doubleTargetWidth, const int targetwidth)
+{
+    //Following is the calculation using mirrored boundaries of the x indices of the coefficients used for interpolation
+    __private int4 xInterpolationIndices;
+    __private int p = (coordx >= 0) ? (((int)trunc(coordx)) + 2) : (((int)trunc(coordx)) + 1);
+    /*
+    q = (p < 0) ? (-1 - p) : p;
+    is a diverging statement, although it incurs more operations the following equivalent will likely be faster
+    */
+    __private int q = abs(p) - rotate(p&(int)0x80000000,(int)1);
+    //loop iteration 0
+    q = q<doubleTargetWidth?q:q%doubleTargetWidth;
+    xInterpolationIndices.x = q >= targetwidth ? (doubleTargetWidth - 1 - q) : q;
+    //loop iteration 1
+    p--;
+    q = abs(p) - rotate(p&(int)0x80000000,(int)1);
+    q = q<doubleTargetWidth?q:q%doubleTargetWidth;
+    xInterpolationIndices.y = q >= targetwidth ? (doubleTargetWidth - 1 - q) : q;
+    //loop iteration 2
+    p--;
+    q = abs(p) - rotate(p&(int)0x80000000,(int)1);
+    q = q<doubleTargetWidth?q:q%doubleTargetWidth;
+    xInterpolationIndices.z = q >= targetwidth ? (doubleTargetWidth - 1 - q) : q;
+    //loop iteration 3
+    p--;
+    q = abs(p) - rotate(p&(int)0x80000000,(int)1);
+    q = q<doubleTargetWidth?q:q%doubleTargetWidth;
+    xInterpolationIndices.w = q >= targetwidth ? (doubleTargetWidth - 1 - q) : q;
+    return xInterpolationIndices;
+}
+
+static inline int4 calculateyInterpolationIndices(const FPT coordy, const int doubleTargetHeight, const int targetheight, const int targetwidth)
+{
+    //Following is the calculation using mirrored boundaries of the y indices of the coefficients used for interpolation
+    __private int4 yInterpolationIndices;
+    __private int p = (coordy >= 0) ? (((int)trunc(coordy)) + 2) : (((int)trunc(coordy)) + 1);
+    //loop iteration 0
+    __private int q = abs(p) - rotate(p&(int)0x80000000,(int)1);
+    q = q<doubleTargetHeight?q:q%doubleTargetHeight;
+    yInterpolationIndices.x = (targetheight <= q) ? (((doubleTargetHeight) - 1 - q) * targetwidth) : (q * targetwidth);//this is the linear absolute index NOT the row
+    //loop iteration 1
+    p--;
+    q = abs(p) - rotate(p&(int)0x80000000,(int)1);
+    q = q<doubleTargetHeight?q:q%doubleTargetHeight;
+    yInterpolationIndices.y = (targetheight <= q) ? (((doubleTargetHeight) - 1 - q) * targetwidth) : (q * targetwidth);//this is the linear absolute index NOT the row
+    //loop iteration 2
+    p--;
+    q = abs(p) - rotate(p&(int)0x80000000,(int)1);
+    q = q<doubleTargetHeight?q:q%doubleTargetHeight;
+    yInterpolationIndices.z = (targetheight <= q) ? (((doubleTargetHeight) - 1 - q) * targetwidth) : (q * targetwidth);//this is the linear absolute index NOT the row
+    //loop iteration 3
+    p--;
+    q = abs(p) - rotate(p&(int)0x80000000,(int)1);
+    q = q<doubleTargetHeight?q:q%doubleTargetHeight;
+    yInterpolationIndices.w = (targetheight <= q) ? (((doubleTargetHeight) - 1 - q) * targetwidth) : (q * targetwidth);//this is the linear absolute index NOT the row
+    return yInterpolationIndices;
+}
 
 //Conversions as implemented in 10.1109/83.650848 (more precise)
 //I read somewhere that the branch predictor typically assumes that an if statement is usually true, therefore put the most likely code in a true if statement
@@ -102,20 +176,23 @@ __kernel void CubicBSplinePrefilter2DXhp(__global FPT *image /* in global space 
         //causal initialization
         __private FPT z1 = Pole;
         __private FPT zn = pown(Pole,width);
-        __private FPT Sum = (One + Pole) * ( prow[0] + zn * prow[width - 1]);
+        //__private FPT Sum = (One + Pole) * ( prow[0] + zn * prow[width - 1]);
+        __private FPT Sum = (One + Pole) * ( fma(zn, prow[width - 1], prow[0]) );
         zn *= zn;
         for(int k = 1;k < width - 1; k++)
         {
             z1 *= Pole;
             zn /= Pole;
-            Sum += (z1 + zn) * prow[k];
+            //Sum += (z1 + zn) * prow[k];
+            Sum = fma((z1 + zn), prow[k], Sum);
         }
         prow[0] = (Sum / (One - pown(Pole, 2 * width)));
 
         //Causal recursion
         for(int k = 1; k < width; k++)
         {
-            prow[k] = prow[k] + Pole *  prow[k-1];
+            //prow[k] = prow[k] + Pole *  prow[k-1];
+            prow[k] = fma(Pole,  prow[k-1], prow[k]);
         }
         //anticausal initialization
         prow[width - 1] = (Pole * prow[width - 1] / (Pole - One));
@@ -139,20 +216,23 @@ __kernel void CubicBSplinePrefilter2DYhp(__global FPT *image /* in global space 
         //causal initialization
         __private FPT z1 = Pole;
         __private FPT zn = pown(Pole,height);
-        __private FPT Sum = (One + Pole) * ( prow[0] + zn *  prow[(height - 1)*width]);
+        //__private FPT Sum = (One + Pole) * ( prow[0] + zn *  prow[(height - 1)*width]);
+        __private FPT Sum = (One + Pole) * ( fma(zn,  prow[(height - 1)*width], prow[0]));
         zn *= zn;
         for(int k = 1;k < height - 1; k++)
         {
             z1 *= Pole;
             zn /= Pole;
-            Sum += (z1 + zn) *  prow[k * width];
+            //Sum += (z1 + zn) *  prow[k * width];
+            Sum = fma((z1 + zn),  prow[k * width], Sum);
         }
         prow[0] = (Sum / (One - pown(Pole, 2 * height)));
 
         //Causal recursion
         for(int k = 1; k < height; k++)
         {
-            prow[k * width] =  prow[k * width] + Pole *  prow[(k-1)*width];
+            //prow[k * width] =  prow[k * width] + Pole *  prow[(k-1)*width];
+            prow[k * width] =  fma(Pole, prow[(k-1)*width], prow[k * width]);
         }
 
         //anticausal initialization
@@ -187,23 +267,35 @@ __kernel void BasicToCardinal2DXhp(__global FPT *image /* in global space */,__g
         //calculate the current column
         __private int col = nIndex % width;
         __private int row = (nIndex - col)/width;
+        __private FPTTWO params = (FPTTWO)(h0D3, h1D3);
+        __private FPTTWO imgData;
         //symmetricFirMirrorOffBounds1D
         if(col > 0 && col < (width-1))
         {
             //most common case
-            target[nIndex] = h0D3 * image[nIndex] + h1D3 * (image[nIndex - 1] + image[nIndex + 1]);
+            //target[nIndex] = h0D3 * image[nIndex] + h1D3 * (image[nIndex - 1] + image[nIndex + 1]);
+            //target[nIndex] = fma(h0D3, image[nIndex], h1D3 * (image[nIndex - 1] + image[nIndex + 1]));
+            //This could be considered a dot product
+            imgData = (FPTTWO)(image[nIndex], (image[nIndex - 1] + image[nIndex + 1]));
         }
         else if(col == (width-1))
         {
             /* nIndex is already row*width+width-1 so we need not waste calculation power to get this number again */
-            target[nIndex] = h0D3 * image[nIndex] + h1D3 * (image[nIndex-1] + image[nIndex]);
+            //target[nIndex] = h0D3 * image[nIndex] + h1D3 * (image[nIndex-1] + image[nIndex]);
+            //target[nIndex] = fma(h0D3, image[nIndex], h1D3 * (image[nIndex-1] + image[nIndex]));
+            //This could be considered a dot product
+            imgData = (FPTTWO)(image[nIndex], (image[nIndex-1] + image[nIndex]));
         }
         else
         {
             //col == 0
             /* nIndex is already row*width+0 so we need not waste calculation power to get this number again */
-            target[nIndex] = h0D3 * image[nIndex] + h1D3 * (image[nIndex] + image[nIndex+1]);
+            //target[nIndex] = h0D3 * image[nIndex] + h1D3 * (image[nIndex] + image[nIndex+1]);
+            //target[nIndex] = fma(h0D3, image[nIndex], h1D3 * (image[nIndex] + image[nIndex+1]));
+            //This could be considered a dot product
+            imgData = (FPTTWO)(image[nIndex], (image[nIndex] + image[nIndex+1]));
         }
+        target[nIndex] = dot(params, imgData);
     }
 }
 __kernel void BasicToCardinal2DYhp(__global FPT *image /* in global space */,__global FPT *target/* in global space */, const int width, const int height)
@@ -219,44 +311,59 @@ __kernel void BasicToCardinal2DYhp(__global FPT *image /* in global space */,__g
         //calculate the current column
         __private int col = nIndex % width;
         __private int row = (nIndex - col)/width;
+        __private FPTTWO params = (FPTTWO)(h0D3, h1D3);
+        __private FPTTWO imgData;
         //symmetricFirMirrorOffBounds1D
         if(row > 0 && row < (height-1))
         {
             //most common case
-            target[nIndex] = h0D3 * image[nIndex] + h1D3 * (image[(row-1)*width+col] + image[(row+1)*width+col]);
+            //target[nIndex] = h0D3 * image[nIndex] + h1D3 * (image[(row-1)*width+col] + image[(row+1)*width+col]);
+            //target[nIndex] = fma(h0D3, image[nIndex], h1D3 * (image[(row-1)*width+col] + image[(row+1)*width+col]));
+            //This could be considered a dot product
+            imgData = (FPTTWO)(image[nIndex], (image[(row-1)*width+col] + image[(row+1)*width+col]));
         }
         else if(row == (height-1))
         {
             /* nIndex is already (height-1)*width+col so we need not waste calculation power to get this number again */
-            target[nIndex] = h0D3 * image[nIndex] + h1D3 * (image[(row-1)*width+col] + image[nIndex]);
+            //target[nIndex] = h0D3 * image[nIndex] + h1D3 * (image[(row-1)*width+col] + image[nIndex]);
+            //target[nIndex] = fma(h0D3, image[nIndex], h1D3 * (image[(row-1)*width+col] + image[nIndex]));
+            //This could be considered a dot product
+            imgData = (FPTTWO)(image[nIndex], (image[(row-1)*width+col] + image[nIndex]));
         }
         else
         {
             //row == 0
             /* nIndex is already col so we need not waste calculation power to get this number again */
-            target[nIndex] = h0D3 * image[nIndex] + h1D3 * (image[nIndex] + image[width+col]);
+            //target[nIndex] = h0D3 * image[nIndex] + h1D3 * (image[nIndex] + image[width+col]);
+            //target[nIndex] = fma(h0D3, image[nIndex], h1D3 * (image[nIndex] + image[width+col]));
+            //This could be considered a dot product
+            imgData = (FPTTWO)(image[nIndex], (image[nIndex] + image[width+col]));
         }
+        target[nIndex] = dot(params, imgData);
     }
 }
 #ifdef USE_DOUBLE
-__constant FPT Z0 = -0.5352804307964381655424037816816460718339231523426924148812;
-__constant FPT Z1 = -0.122554615192326690515272264359357343605486549427295558490763;
-__constant FPT Z2 = -0.0091486948096082769285930216516478534156925639545994482648003;
-__constant FPT Lambda7 = 5040.0;
-__constant FPT h0D7 = 0.4793650793650793650793650793650793650793650793650793650793650793651;
-__constant FPT h1D7 = 0.23630952380952380952380952380952380952380952380952380952380952380952;
-__constant FPT h2D7 = 0.023809523809523809523809523809523809523809523809523809523809523810;
-__constant FPT h3D7 = 0.00019841269841269841269841269841269841269841269841269841269841269841;
+__constant const FPT Z0 = -0.5352804307964381655424037816816460718339231523426924148812;
+__constant const FPT Z1 = -0.122554615192326690515272264359357343605486549427295558490763;
+__constant const FPT Z2 = -0.0091486948096082769285930216516478534156925639545994482648003;
+__constant const FPT Lambda7 = 5040.0;
+__constant const FPT h0D7 = 0.4793650793650793650793650793650793650793650793650793650793650793651;
+__constant const FPT h1D7 = 0.23630952380952380952380952380952380952380952380952380952380952380952;
+__constant const FPT h2D7 = 0.023809523809523809523809523809523809523809523809523809523809523810;
+__constant const FPT h3D7 = 0.00019841269841269841269841269841269841269841269841269841269841269841;
+__constant const FPTFOUR hD7vec = (FPTFOUR)(0.4793650793650793650793650793650793650793650793650793650793650793651, 0.23630952380952380952380952380952380952380952380952380952380952380952, 0.023809523809523809523809523809523809523809523809523809523809523810, 0.00019841269841269841269841269841269841269841269841269841269841269841);
 #else
-__constant FPT Z0 = -0.5352804307964381655424037816816460718339231523426924148812f;
-__constant FPT Z1 = -0.122554615192326690515272264359357343605486549427295558490763f;
-__constant FPT Z2 = -0.0091486948096082769285930216516478534156925639545994482648003f;
-__constant FPT Lambda7 = 5040.0f;
-__constant FPT h0D7 = 0.4793650793650793650793650793650793650793650793650793650793650793651f;
-__constant FPT h1D7 = 0.23630952380952380952380952380952380952380952380952380952380952380952f;
-__constant FPT h2D7 = 0.023809523809523809523809523809523809523809523809523809523809523810f;
-__constant FPT h3D7 = 0.00019841269841269841269841269841269841269841269841269841269841269841f;
+__constant const FPT Z0 = -0.5352804307964381655424037816816460718339231523426924148812f;
+__constant const FPT Z1 = -0.122554615192326690515272264359357343605486549427295558490763f;
+__constant const FPT Z2 = -0.0091486948096082769285930216516478534156925639545994482648003f;
+__constant const FPT Lambda7 = 5040.0f;
+__constant const FPT h0D7 = 0.4793650793650793650793650793650793650793650793650793650793650793651f;
+__constant const FPT h1D7 = 0.23630952380952380952380952380952380952380952380952380952380952380952f;
+__constant const FPT h2D7 = 0.023809523809523809523809523809523809523809523809523809523809523810f;
+__constant const FPT h3D7 = 0.00019841269841269841269841269841269841269841269841269841269841269841f;
+__constant const FPTFOUR hD7vec = (FPTFOUR)(0.4793650793650793650793650793650793650793650793650793650793650793651f, 0.23630952380952380952380952380952380952380952380952380952380952380952f, 0.023809523809523809523809523809523809523809523809523809523809523810f, 0.00019841269841269841269841269841269841269841269841269841269841269841f);
 #endif
+
 
 __kernel void CubicBSplinePrefilter2DDeg7premulhp(__global FPT *image /* in global space */, const int size)
 {
@@ -279,7 +386,8 @@ __kernel void CubicBSplinePrefilter2DXDeg7hp(__global FPT *image /* in global sp
         //causal initialization
         __private FPT z1 = Z0;
         __private FPT zn = pown(Z0,width);
-        __private FPT Sum = (One + Z0) * ( prow[0] + zn *  prow[width - 1]);
+        //__private FPT Sum = (One + Z0) * ( prow[0] + zn *  prow[width - 1]);
+        __private FPT Sum = (One + Z0) * ( fma(zn,  prow[width - 1], prow[0]));
         zn *= zn;
         for(int k = 1;k < width - 1; k++)
         {
@@ -292,7 +400,8 @@ __kernel void CubicBSplinePrefilter2DXDeg7hp(__global FPT *image /* in global sp
         //Causal recursion
         for(int k = 1; k < width; k++)
         {
-            prow[k] += Z0 *  prow[k-1];
+            //prow[k] += Z0 *  prow[k-1];
+            prow[k] = fma(Z0,  prow[k-1], prow[k]);
         }
         //anticausal initialization
         prow[width - 1] = Z0 * prow[width - 1] / (Z0 - One);
@@ -306,20 +415,23 @@ __kernel void CubicBSplinePrefilter2DXDeg7hp(__global FPT *image /* in global sp
         //causal initialization
         z1 = Z1;
         zn = pown(Z1,width);
-        Sum = (One + Z1) * ( prow[0] + zn *  prow[width - 1]);
+        //Sum = (One + Z1) * ( prow[0] + zn *  prow[width - 1]);
+        Sum = (One + Z1) * ( fma(zn, prow[width - 1], prow[0]));
         zn *= zn;
         for(int k = 1;k < width - 1; k++)
         {
             z1 *= Z1;
             zn /= Z1;
-            Sum += (z1 + zn) *  prow[k];
+            //Sum += (z1 + zn) *  prow[k];
+            Sum = fma((z1 + zn), prow[k], Sum);
         }
         prow[0] = (Sum / (One - pown(Z1, 2 * width)));
     
         //Causal recursion
         for(int k = 1; k < width; k++)
         {
-            prow[k] += Z1 *  prow[k-1];
+            //prow[k] += Z1 *  prow[k-1];
+            prow[k] = fma(Z1, prow[k-1], prow[k]);
         }
         //anticausal initialization
         prow[width - 1] = (Z1 * prow[width - 1] / (Z1 - One));
@@ -333,20 +445,23 @@ __kernel void CubicBSplinePrefilter2DXDeg7hp(__global FPT *image /* in global sp
         //causal initialization
         z1 = Z2;
         zn = pown(Z2,width);
-        Sum = (One + Z2) * ( prow[0] + zn *  prow[width - 1]);
+        //Sum = (One + Z2) * ( prow[0] + zn *  prow[width - 1]);
+        Sum = (One + Z2) * (fma(zn, prow[width - 1], prow[0]));
         zn *= zn;
         for(int k = 1;k < width - 1; k++)
         {
             z1 *= Z2;
             zn /= Z2;
-            Sum += (z1 + zn) *  prow[k];
+            //Sum += (z1 + zn) *  prow[k];
+            Sum = fma((z1 + zn),  prow[k], Sum);
         }
         prow[0] = (Sum / (One - pown(Z2, 2 * width)));
     
         //Causal recursion
         for(int k = 1; k < width; k++)
         {
-            prow[k] = prow[k] + Z2 * prow[k-1];
+            //prow[k] = prow[k] + Z2 * prow[k-1];
+            prow[k] = fma(Z2, prow[k-1], prow[k]);
         }
         //anticausal initialization
         prow[width - 1] = (Z2 *  prow[width - 1] / (Z2 - One));
@@ -371,20 +486,23 @@ __kernel void CubicBSplinePrefilter2DYDeg7hp(__global FPT *image /* in global sp
         //causal initialization
         __private FPT z1 = Z0;
         __private FPT zn = pown(Z0,height);
-        __private FPT Sum = (One + Z0) * ( prow[0] + zn *  prow[(height - 1)*width]);
+        //__private FPT Sum = (One + Z0) * ( prow[0] + zn *  prow[(height - 1)*width]);
+        __private FPT Sum = (One + Z0) * ( fma(zn, prow[(height - 1)*width], prow[0]) );
         zn *= zn;
         for(int k = 1;k < height - 1; k++)
         {
             z1 *= Z0;
             zn /= Z0;
-            Sum += (z1 + zn) *  prow[k*width];
+            //Sum += (z1 + zn) *  prow[k*width];
+            Sum = fma((z1 + zn), prow[k*width], Sum);
         }
         prow[0] = (Sum / (One - pown(Z0, 2 * height)));
     
         //Causal recursion
         for(int k = 1; k < height; k++)
         {
-            prow[k*width] += Z0 *  prow[(k-1)*width];
+            //prow[k*width] += Z0 *  prow[(k-1)*width];
+            prow[k*width] = fma(Z0,  prow[(k-1)*width], prow[k*width]);
         }
         //anticausal initialization
         prow[(height - 1)*width] = Z0 *  prow[(height - 1)*width] / (Z0 - One);
@@ -398,13 +516,15 @@ __kernel void CubicBSplinePrefilter2DYDeg7hp(__global FPT *image /* in global sp
         //causal initialization
         z1 = Z1;
         zn = pown(Z1,height);
-        Sum = (One + Z1) * ( prow[0] + zn *  prow[(height - 1)*width]);
+        //Sum = (One + Z1) * ( prow[0] + zn *  prow[(height - 1)*width]);
+        Sum = (One + Z1) * ( fma(zn, prow[(height - 1)*width],prow[0]) );
         zn *= zn;
         for(int k = 1;k < height - 1; k++)
         {
             z1 *= Z1;
             zn /= Z1;
-            Sum += (z1 + zn) *  prow[k*width];
+            //Sum += (z1 + zn) *  prow[k*width];
+            Sum = fma((z1 + zn),  prow[k*width], Sum);
         }
         prow[0] = (Sum / (One - pown(Z1, 2 * height)));
     
@@ -425,20 +545,23 @@ __kernel void CubicBSplinePrefilter2DYDeg7hp(__global FPT *image /* in global sp
         //causal initialization
         z1 = Z2;
         zn = pown(Z2,height);
-        Sum = (One + Z2) * ( prow[0] + zn *  prow[(height - 1)*width]);
+        //Sum = (One + Z2) * ( prow[0] + zn *  prow[(height - 1)*width]);
+        Sum = (One + Z2) * ( fma(zn, prow[(height - 1)*width], prow[0]) );
         zn *= zn;
         for(int k = 1;k < height - 1; k++)
         {
             z1 *= Z2;
             zn /= Z2;
-            Sum += (z1 + zn) *  prow[k*width];
+            //Sum += (z1 + zn) *  prow[k*width];
+            Sum = fma((z1 + zn),  prow[k*width], Sum);
         }
         prow[0] = (Sum / (One - pown(Z2, 2 * height)));
     
         //Causal recursion
         for(int k = 1; k < height; k++)
         {
-            prow[k*width] += Z2 *  prow[(k-1)*width];
+            //prow[k*width] += Z2 *  prow[(k-1)*width];
+            prow[k*width] = fma(Z2, prow[(k-1)*width], prow[k*width]);
         }
         //anticausal initialization
         prow[(height - 1)*width] = (Z2 *  prow[(height - 1)*width] / (Z2 - One));
@@ -474,40 +597,71 @@ __kernel void BasicToCardinal2DXhpDeg7(__global FPT *image /* in global space */
         __private int row = (nIndex - col)/width;
         //symmetricFirMirrorOffBounds1D
         //width >= 6 is guaranteed
+        __private FPTFOUR imgData;
+        __private FPTFOUR imgData2;
         if(col > 2 && col < (width-3))
         {
             //most common case
-            target[nIndex] = h0D7 * image[nIndex] + h1D7 * (image[nIndex-1] + image[nIndex+1]) + h2D7 * (image[nIndex-2] + image[nIndex+2]) + h3D7 * (image[nIndex-3] + image[nIndex+3]);
+            //target[nIndex] = h0D7 * image[nIndex] + h1D7 * (image[nIndex-1] + image[nIndex+1]) + h2D7 * (image[nIndex-2] + image[nIndex+2]) + h3D7 * (image[nIndex-3] + image[nIndex+3]);
+            //This could be considered a dot product
+            imgData = (FPTFOUR)(image[nIndex], image[nIndex-1], image[nIndex-2], image[nIndex-3]);
+            imgData2 = (FPTFOUR)(Zero, image[nIndex+1], image[nIndex+2], image[nIndex+3]);
+            imgData += imgData2;
         }
         else if(col == 1)
         {
-            target[nIndex] = h0D7 * image[nIndex] + h1D7 * (image[nIndex-1] + image[nIndex+1]) + h2D7 * (image[nIndex-1] + image[nIndex+2]) + h3D7 * (image[nIndex] + image[nIndex+3]);
+            //target[nIndex] = h0D7 * image[nIndex] + h1D7 * (image[nIndex-1] + image[nIndex+1]) + h2D7 * (image[nIndex-1] + image[nIndex+2]) + h3D7 * (image[nIndex] + image[nIndex+3]);
+            //This could be considered a dot product
+            imgData = (FPTFOUR)(image[nIndex], image[nIndex-1], image[nIndex-1], image[nIndex]);
+            imgData2 = (FPTFOUR)(Zero, image[nIndex+1], image[nIndex+2], image[nIndex+3]);
+            imgData += imgData2;
         }
         else if(col == 2)
         {
-            target[nIndex] = h0D7 * image[nIndex] + h1D7 * (image[nIndex-1] + image[nIndex+1]) + h2D7 * (image[nIndex-2] + image[nIndex+2]) + h3D7 * (image[nIndex-2] + image[nIndex+3]);
+            //target[nIndex] = h0D7 * image[nIndex] + h1D7 * (image[nIndex-1] + image[nIndex+1]) + h2D7 * (image[nIndex-2] + image[nIndex+2]) + h3D7 * (image[nIndex-2] + image[nIndex+3]);
+            //This could be considered a dot product
+            imgData = (FPTFOUR)(image[nIndex], image[nIndex-1], image[nIndex-2], image[nIndex-2]);
+            imgData2 = (FPTFOUR)(Zero, image[nIndex+1], image[nIndex+2], image[nIndex+3]);
+            imgData += imgData2;
         }
         else if(col == (width-3))
         {
             /* nIndex is already row*width+width-3 so we need not waste calculation power to get this number again */
-            target[nIndex] = h0D7 * image[nIndex] + h1D7 * (image[nIndex-1] + image[nIndex+1]) + h2D7 * (image[nIndex-2] + image[nIndex+2]) + h3D7 * (image[nIndex-3] + image[nIndex+2]);
+            //target[nIndex] = h0D7 * image[nIndex] + h1D7 * (image[nIndex-1] + image[nIndex+1]) + h2D7 * (image[nIndex-2] + image[nIndex+2]) + h3D7 * (image[nIndex-3] + image[nIndex+2]);
+            //This could be considered a dot product
+            imgData = (FPTFOUR)(image[nIndex], image[nIndex-1], image[nIndex-2], image[nIndex-3]);
+            imgData2 = (FPTFOUR)(Zero, image[nIndex+1], image[nIndex+2], image[nIndex+2]);
+            imgData += imgData2;
         }
         else if(col == (width-2))
         {
             /* nIndex is already row*width+width-2 so we need not waste calculation power to get this number again */
-            target[nIndex] = h0D7 * image[nIndex] + h1D7 * (image[nIndex-1] + image[nIndex+1]) + h2D7 * (image[nIndex-2] + image[nIndex+1]) + h3D7 * (image[nIndex-3] + image[nIndex]);
+            //target[nIndex] = h0D7 * image[nIndex] + h1D7 * (image[nIndex-1] + image[nIndex+1]) + h2D7 * (image[nIndex-2] + image[nIndex+1]) + h3D7 * (image[nIndex-3] + image[nIndex]);
+            //This could be considered a dot product
+            imgData = (FPTFOUR)(image[nIndex], image[nIndex-1], image[nIndex-2], image[nIndex-3]);
+            imgData2 = (FPTFOUR)(Zero, image[nIndex+1], image[nIndex+1], image[nIndex]);
+            imgData += imgData2;
         }
         else if(col == (width-1))
         {
             /* nIndex is already row*width+width-1 so we need not waste calculation power to get this number again */
-            target[nIndex] = h0D7 * image[nIndex] + h1D7 * (image[nIndex-1] + image[nIndex]) + h2D7 * (image[nIndex-2] + image[nIndex-1]) + h3D7 * (image[nIndex-3] + image[nIndex-2]);
+            //target[nIndex] = h0D7 * image[nIndex] + h1D7 * (image[nIndex-1] + image[nIndex]) + h2D7 * (image[nIndex-2] + image[nIndex-1]) + h3D7 * (image[nIndex-3] + image[nIndex-2]);
+            //This could be considered a dot product
+            imgData = (FPTFOUR)(image[nIndex], image[nIndex-1], image[nIndex-2], image[nIndex-3]);
+            imgData2 = (FPTFOUR)(Zero, image[nIndex], image[nIndex-1], image[nIndex-2]);
+            imgData += imgData2;
         }
         else
         {
             //col == 0
             /* nIndex is already row*width+0 so we need not waste calculation power to get this number again */
-            target[nIndex] = h0D7 * image[nIndex] + h1D7 * (image[nIndex] + image[nIndex+1]) + h2D7 * (image[nIndex+1] + image[nIndex+2])+ h3D7 * (image[nIndex+2] + image[nIndex+3]);
+            //target[nIndex] = h0D7 * image[nIndex] + h1D7 * (image[nIndex] + image[nIndex+1]) + h2D7 * (image[nIndex+1] + image[nIndex+2])+ h3D7 * (image[nIndex+2] + image[nIndex+3]);
+            //This could be considered a dot product
+            imgData = (FPTFOUR)(image[nIndex], image[nIndex], image[nIndex+1], image[nIndex+2]);
+            imgData2 = (FPTFOUR)(Zero, image[nIndex+1], image[nIndex+2], image[nIndex+3]);
+            imgData += imgData2;
         }
+        target[nIndex] = dot(hD7vec, imgData);
     }
 }
 __kernel void BasicToCardinal2DYhpDeg7(__global FPT *image /* in global space */,__global FPT *target/* in global space */, const int width, const int height)
@@ -525,40 +679,72 @@ __kernel void BasicToCardinal2DYhpDeg7(__global FPT *image /* in global space */
         __private int row = (nIndex - col)/width;
         //symmetricFirMirrorOffBounds1D
         //height >= 6 is guaranteed
+        //TODO: could use vector math to calculate the indices
+        __private FPTFOUR imgData;
+        __private FPTFOUR imgData2;
         if(row > 2 && row < (height-3))
         {
             //most common case
-            target[nIndex] = h0D7 * image[nIndex] + h1D7 * (image[nIndex-width] + image[nIndex+width]) + h2D7 * (image[nIndex-2*width] + image[nIndex+2*width]) + h3D7 * (image[nIndex-3*width] + image[nIndex+3*width]);
+            //target[nIndex] = h0D7 * image[nIndex] + h1D7 * (image[nIndex-width] + image[nIndex+width]) + h2D7 * (image[nIndex-2*width] + image[nIndex+2*width]) + h3D7 * (image[nIndex-3*width] + image[nIndex+3*width]);
+            //This could be considered a dot product
+            imgData = (FPTFOUR)(image[nIndex], image[nIndex-width], image[nIndex-2*width], image[nIndex-3*width]);
+            imgData2 = (FPTFOUR)(Zero, image[nIndex+width], image[nIndex+2*width], image[nIndex+3*width]);
+            imgData += imgData2;
         }
         else if(row == 1)
         {
-            target[nIndex] = h0D7 * image[nIndex] + h1D7 * (image[col] + image[2*width+col]) + h2D7 * (image[col] + image[3*width+col]) + h3D7 * (image[nIndex] + image[4*width+col]);
+            //target[nIndex] = h0D7 * image[nIndex] + h1D7 * (image[col] + image[2*width+col]) + h2D7 * (image[col] + image[3*width+col]) + h3D7 * (image[nIndex] + image[4*width+col]);
+            //This could be considered a dot product
+            imgData = (FPTFOUR)(image[nIndex], image[col], image[col], image[nIndex]);
+            imgData2 = (FPTFOUR)(Zero, image[2*width+col], image[3*width+col], image[4*width+col]);
+            imgData += imgData2;
         }
         else if(row == 2)
         {
-            target[nIndex] = h0D7 * image[nIndex] + h1D7 * (image[width+col] + image[3*width+col]) + h2D7 * (image[col] + image[4*width+col]) + h3D7 * (image[col] + image[5*width+col]);
+            //target[nIndex] = h0D7 * image[nIndex] + h1D7 * (image[width+col] + image[3*width+col]) + h2D7 * (image[col] + image[4*width+col]) + h3D7 * (image[col] + image[5*width+col]);
+            //This could be considered a dot product
+            imgData = (FPTFOUR)(image[nIndex], image[width+col], image[col], image[col]);
+            imgData2 = (FPTFOUR)(Zero, image[3*width+col], image[4*width+col], image[5*width+col]);
+            imgData += imgData2;
         }
         else if(row == (height-3))
         {
             /* nIndex is already row*width+width-3 so we need not waste calculation power to get this number again */
-            target[nIndex] = h0D7 * image[nIndex] + h1D7 * (image[nIndex-width] + image[nIndex+width]) + h2D7 * (image[nIndex-2*width] + image[nIndex+2*width]) + h3D7 * (image[nIndex-3*width] + image[nIndex+2*width]);
+            //target[nIndex] = h0D7 * image[nIndex] + h1D7 * (image[nIndex-width] + image[nIndex+width]) + h2D7 * (image[nIndex-2*width] + image[nIndex+2*width]) + h3D7 * (image[nIndex-3*width] + image[nIndex+2*width]);
+            //This could be considered a dot product
+            imgData = (FPTFOUR)(image[nIndex], image[nIndex-width], image[nIndex-2*width], image[nIndex-3*width]);
+            imgData2 = (FPTFOUR)(Zero, image[nIndex+width], image[nIndex+2*width], image[nIndex+2*width]);
+            imgData += imgData2;
         }
         else if(row == (height-2))
         {
             /* nIndex is already row*width+width-2 so we need not waste calculation power to get this number again */
-            target[nIndex] = h0D7 * image[nIndex] + h1D7 * (image[nIndex-width] + image[nIndex+width]) + h2D7 * (image[nIndex-2*width] + image[nIndex+2*width]) + h3D7 * (image[nIndex-3*width] + image[nIndex]);
+            //target[nIndex] = h0D7 * image[nIndex] + h1D7 * (image[nIndex-width] + image[nIndex+width]) + h2D7 * (image[nIndex-2*width] + image[nIndex+2*width]) + h3D7 * (image[nIndex-3*width] + image[nIndex]);
+            //This could be considered a dot product
+            imgData = (FPTFOUR)(image[nIndex], image[nIndex-width], image[nIndex-2*width], image[nIndex-3*width]);
+            imgData2 = (FPTFOUR)(Zero, image[nIndex+width], image[nIndex+2*width], image[nIndex]);
+            imgData += imgData2;
         }
         else if(row == (height-1))
         {
             /* nIndex is already row*width+width-1 so we need not waste calculation power to get this number again */
-            target[nIndex] = h0D7 * image[nIndex] + h1D7 * (image[nIndex-width] + image[nIndex]) + h2D7 * (image[nIndex-2*width] + image[nIndex-width]) + h3D7 * (image[nIndex-3*width] + image[nIndex-3*width]);
+            //target[nIndex] = h0D7 * image[nIndex] + h1D7 * (image[nIndex-width] + image[nIndex]) + h2D7 * (image[nIndex-2*width] + image[nIndex-width]) + h3D7 * (image[nIndex-3*width] + image[nIndex-3*width]);
+            //This could be considered a dot product
+            imgData = (FPTFOUR)(image[nIndex], image[nIndex-width], image[nIndex-2*width], image[nIndex-3*width]);
+            imgData2 = (FPTFOUR)(Zero, image[nIndex], image[nIndex-width], image[nIndex-3*width]);
+            imgData += imgData2;
         }
         else
         {
             //row == 0
             /* nIndex is already row*width+0 so we need not waste calculation power to get this number again */
-            target[nIndex] = h0D7 * image[nIndex] + h1D7 * (image[nIndex] + image[width+col]) + h2D7 * (image[width+col] + image[2*width+col])+ h3D7 * (image[2*width+col] + image[3*width+col]);
+            //target[nIndex] = h0D7 * image[nIndex] + h1D7 * (image[nIndex] + image[width+col]) + h2D7 * (image[width+col] + image[2*width+col])+ h3D7 * (image[2*width+col] + image[3*width+col]);
+            //This could be considered a dot product
+            imgData = (FPTFOUR)(image[nIndex], image[nIndex], image[width+col], image[2*width+col]);
+            imgData2 = (FPTFOUR)(Zero, image[width+col], image[2*width+col], image[3*width+col]);
+            imgData += imgData2;
         }
+        target[nIndex] = dot(hD7vec, imgData);
     }
 }
 
@@ -569,13 +755,15 @@ __kernel void BasicToCardinal2DYhpDeg7(__global FPT *image /* in global space */
 *   try to think target <- source and not source -> target
 */
 #ifdef USE_DOUBLE
-__constant FPT rh0 = 0.375;
-__constant FPT rh1 = 0.25;
-__constant FPT rh2 = 0.0625;
+__constant const FPT rh0 = 0.375;
+__constant const FPT rh1 = 0.25;
+__constant const FPT rh2 = 0.0625;
+__constant const FPTTHREE rhvec = (FPTTHREE)(0.375, 0.25, 0.0625);
 #else
-__constant FPT rh0 = 0.375f;
-__constant FPT rh1 = 0.25f;
-__constant FPT rh2 = 0.0625f;
+__constant const FPT rh0 = 0.375f;
+__constant const FPT rh1 = 0.25f;
+__constant const FPT rh2 = 0.0625f;
+__constant const FPTTHREE rhvec = (FPTTHREE)(0.375f, 0.25f, 0.0625f);
 #endif
 __kernel void reduceDual1DX(__global FPT *image /* in global space */,__global FPT *target/* in global space */, const int width, const int height, const int halfwidth)
 {
@@ -591,27 +779,42 @@ __kernel void reduceDual1DX(__global FPT *image /* in global space */,__global F
         *   is the same though so calculate everything from the corresponding row offset not nIndex
         */
         //halfwidth >= 2 is guaranteed
+        __private FPTTHREE imgData;
+        __private FPTTHREE imgData2;
         if(col > 0 && col < (halfwidth - 1))
         {
             //most common case
-            target[nIndex] = rh0 * image[row*width + col*2] + rh1 * (image[row*width + col*2 - 1] + image[row*width + col*2 + 1]) + rh2 * (image[row*width + col*2 - 2] + image[row*width + col*2 + 2]);
+            //target[nIndex] = rh0 * image[row*width + col*2] + rh1 * (image[row*width + col*2 - 1] + image[row*width + col*2 + 1]) + rh2 * (image[row*width + col*2 - 2] + image[row*width + col*2 + 2]);
+            imgData = (FPTTHREE)(image[row*width + col*2], image[row*width + col*2 - 1], image[row*width + col*2 - 2]);
+            imgData2 = (FPTTHREE)(Zero, image[row*width + col*2 + 1], image[row*width + col*2 + 2]);
+            imgData += imgData2;
         }
         else if(col == halfwidth - 1)
         {
             if(width == (2 * halfwidth))//Yes this can be different if width % 2 != 0
             {
-                target[nIndex] = rh0 * image[row*width+width-2] + rh1 * (image[row*width+width-3] + image[row*width+width-1]) + rh2 * (image[row*width+width-4] + image[row*width+width-1]);
+                //target[nIndex] = rh0 * image[row*width+width-2] + rh1 * (image[row*width+width-3] + image[row*width+width-1]) + rh2 * (image[row*width+width-4] + image[row*width+width-1]);
+                imgData = (FPTTHREE)(image[row*width+width-2], image[row*width+width-3], image[row*width+width-4]);
+                imgData2 = (FPTTHREE)(Zero, image[row*width+width-1], image[row*width+width-1]);
+                imgData += imgData2;
             }
             else
             {
-                target[nIndex] = rh0 * image[row*width+width-3] + rh1 * (image[row*width+width-4] + image[row*width+width-2]) + rh2 * (image[row*width+width-5] + image[row*width+width-1]);
+                //target[nIndex] = rh0 * image[row*width+width-3] + rh1 * (image[row*width+width-4] + image[row*width+width-2]) + rh2 * (image[row*width+width-5] + image[row*width+width-1]);
+                imgData = (FPTTHREE)(image[row*width+width-3], image[row*width+width-4], image[row*width+width-5]);
+                imgData2 = (FPTTHREE)(Zero, image[row*width+width-2], image[row*width+width-1]);
+                imgData += imgData2;
             }
         }
         else
         {
             //col == 0
-            target[nIndex] =  rh0 * image[row*width] + rh1 * (image[row*width] + image[row*width+1]) + rh2 * (image[row*width+1] + image[row*width+2]);
+            //target[nIndex] =  rh0 * image[row*width] + rh1 * (image[row*width] + image[row*width+1]) + rh2 * (image[row*width+1] + image[row*width+2]);
+            imgData = (FPTTHREE)(image[row*width], image[row*width], image[row*width+1]);
+            imgData2 = (FPTTHREE)(Zero, image[row*width+1], image[row*width+2]);
+            imgData += imgData2;
         }
+        target[nIndex] = dot(rhvec, imgData);
     }
 }
 
@@ -629,39 +832,46 @@ __kernel void reduceDual1DY(__global FPT *image /* in global space */,__global F
         *   is the same for the Y version
         */
         //halfheight >= 2 is guaranteed
+        __private FPTTHREE imgData;
+        __private FPTTHREE imgData2;
         if(row > 0 && row < (halfheight - 1))
         {
             //most common case
-            target[nIndex] = rh0 * image[2*row*halfwidth+col] + rh1 * (image[(2*row - 1)*halfwidth+col] + image[(2*row + 1)*halfwidth+col]) + rh2 * (image[(2*row - 2)*halfwidth+col] + image[(2*row + 2)*halfwidth+col]);                
+            //target[nIndex] = rh0 * image[2*row*halfwidth+col] + rh1 * (image[(2*row - 1)*halfwidth+col] + image[(2*row + 1)*halfwidth+col]) + rh2 * (image[(2*row - 2)*halfwidth+col] + image[(2*row + 2)*halfwidth+col]);
+            imgData = (FPTTHREE)(image[2*row*halfwidth+col], image[(2*row - 1)*halfwidth+col], image[(2*row - 2)*halfwidth+col]);
+            imgData2 = (FPTTHREE)(Zero, image[(2*row + 1)*halfwidth+col], image[(2*row + 2)*halfwidth+col]);
+            imgData += imgData2;                
         }
         else if(row == halfheight - 1)
         {
             if(height == (2 * halfheight))//Yes this can be different if height % 2 != 0
             {
-                target[nIndex] = rh0 * image[(height - 2)*halfwidth+col] + rh1 * (image[(height - 3)*halfwidth+col] + image[(height - 1)*halfwidth+col]) + rh2 * (image[(height - 4)*halfwidth+col] + image[(height - 1)*halfwidth+col]);
+                //target[nIndex] = rh0 * image[(height - 2)*halfwidth+col] + rh1 * (image[(height - 3)*halfwidth+col] + image[(height - 1)*halfwidth+col]) + rh2 * (image[(height - 4)*halfwidth+col] + image[(height - 1)*halfwidth+col]);
+                imgData = (FPTTHREE)(image[(height - 2)*halfwidth+col], image[(height - 3)*halfwidth+col], image[(height - 4)*halfwidth+col]);
+                imgData2 = (FPTTHREE)(Zero, image[(height - 1)*halfwidth+col], image[(height - 1)*halfwidth+col]);
+                imgData += imgData2;
             }
             else
             {
-                target[nIndex] = rh0 * image[(height - 3)*halfwidth+col] + rh1 * (image[(height - 4)*halfwidth+col] + image[(height - 2)*halfwidth+col]) + rh2 * (image[(height - 5)*halfwidth+col] + image[(height - 1)*halfwidth+col]);
+                //target[nIndex] = rh0 * image[(height - 3)*halfwidth+col] + rh1 * (image[(height - 4)*halfwidth+col] + image[(height - 2)*halfwidth+col]) + rh2 * (image[(height - 5)*halfwidth+col] + image[(height - 1)*halfwidth+col]);
+                imgData = (FPTTHREE)(image[(height - 3)*halfwidth+col], image[(height - 4)*halfwidth+col], image[(height - 5)*halfwidth+col]);
+                imgData2 = (FPTTHREE)(Zero, image[(height - 2)*halfwidth+col], image[(height - 1)*halfwidth+col]);
+                imgData += imgData2;
             }
         }
         else
         {
             //row == 0
-            target[nIndex] =  rh0 * image[col] + rh1 * (image[col] + image[halfwidth+col]) + rh2 * (image[halfwidth+col] + image[2*halfwidth+col]);
+            //target[nIndex] =  rh0 * image[col] + rh1 * (image[col] + image[halfwidth+col]) + rh2 * (image[halfwidth+col] + image[2*halfwidth+col]);
+            imgData = (FPTTHREE)(image[col], image[col], image[halfwidth+col]);
+            imgData2 = (FPTTHREE)(Zero, image[halfwidth+col], image[2*halfwidth+col]);
+            imgData += imgData2;
         }
+        target[nIndex] = dot(rhvec, imgData);
     }
 }
 
 
-
-#ifdef USE_DOUBLE
-__constant FPT h = 0.5;
-__constant FPT Zero = 0.0;
-#else
-__constant FPT h = 0.5f;
-__constant FPT Zero = 0.0f;
-#endif
 /*
 *   The following functions are for generating the derivatives of the B-splines (from the coefficients)
 */
@@ -713,17 +923,68 @@ __kernel void antiSymmetricFirMirrorOffBounds1DY(__global FPT *image ,__global F
     }
 }
 
-#ifdef USE_DOUBLE
-#define FPTTWO double2
-#define FPTFOUR double4
-__constant FPT Three = 3.0;
-#else
-#define FPTTWO float2
-#define FPTFOUR float4
-__constant FPT Three = 3.0f;
-#endif
+static inline FPT interpolate(const FPTTWO coordinates, const int4 xInterpolationIndices, const int4 yInterpolationIndices, const __global FPT* target)
+{
+    __private FPTTWO coord;
+    __private FPTTWO unusedCoordFloor;
+    //coord.x -= (coord.x >= Zero) ? (FPT)((int)trunc(coord.x)) : (FPT)(((int)trunc(coord.x)) - 1);//get the residual should also be possible with floor
+    //coord.y -= (coord.y >= Zero) ? (FPT)((int)trunc(coord.y)) : (FPT)(((int)trunc(coord.y)) - 1);//get the residual should also be possible with floor
+    coord = fract(coordinates, &unusedCoordFloor);
+
+    //Calculate the weights for interpolation
+    __private FPTFOUR xWeights;
+    __private FPTFOUR yWeights;
+    __private FPT s = One - coord.x;
+    
+    xWeights.w = pown(s,3) / Lambda;
+    s = coord.x * coord.x;
+    xWeights.z = Two / Three - h * s * (Two - coord.x);
+    xWeights.x = s * coord.x / Lambda;
+    xWeights.y = One - xWeights.x - xWeights.z - xWeights.w;
+    
+    s = One - coord.y;
+    yWeights.w = pown(s,3) / Lambda;
+    s = coord.y * coord.y;
+    yWeights.z = Two / Three - h * s * (Two - coord.y);
+    yWeights.x = s * coord.y / Lambda;
+    yWeights.y = One - yWeights.x - yWeights.z - yWeights.w;
+
+    __private int4 interpolationIndices = (int4)yInterpolationIndices.x;
+    interpolationIndices += xInterpolationIndices;
+    __private FPTFOUR intermediate;
+    __private FPTFOUR values = (FPTFOUR)(target[interpolationIndices.x],
+                                         target[interpolationIndices.y],
+                                         target[interpolationIndices.z],
+                                         target[interpolationIndices.w]);
+    intermediate.x = dot(xWeights, values);
+    interpolationIndices = (int4)yInterpolationIndices.y;
+    interpolationIndices += xInterpolationIndices;
+    values = (FPTFOUR)(target[interpolationIndices.x],
+                       target[interpolationIndices.y],
+                       target[interpolationIndices.z],
+                       target[interpolationIndices.w]);
+    intermediate.y = dot(xWeights, values);
+    interpolationIndices = (int4)yInterpolationIndices.z;
+    interpolationIndices += xInterpolationIndices;
+    values = (FPTFOUR)(target[interpolationIndices.x],
+                       target[interpolationIndices.y],
+                       target[interpolationIndices.z],
+                       target[interpolationIndices.w]);
+    intermediate.z = dot(xWeights, values);
+    interpolationIndices = (int4)yInterpolationIndices.w;
+    interpolationIndices += xInterpolationIndices;
+    values = (FPTFOUR)(target[interpolationIndices.x],
+                       target[interpolationIndices.y],
+                       target[interpolationIndices.z],
+                       target[interpolationIndices.w]);
+    intermediate.w = dot(xWeights, values);
+    s = dot(yWeights, intermediate);
+    //now s is the value
+    return s;
+}
+
 //calculate the square error
-__kernel void rigidBodyError(const __global FPT *source ,const __global FPT *target, __global FPT *diffout, __global FPT *mask, const int sourcewidth, const int sourceheight, const int targetwidth, const int targetheight, const FPT offsetx, const FPT offsety, const FPT angle)
+__kernel void rigidBodyError(const __global FPT *source ,const __global FPT *target, __global FPT *diffout, __global FPT *mask, const int sourcewidth, const int sourceheight, const int targetwidth, const int targetheight, const int doubletargetwidth, const int doubletargetheight, const FPT offsetx, const FPT offsety, const FPT cosangle, const FPT negsinangle)
 {
     __private int nIndex = get_global_id(0);//this directly corresponds to the linear address of the !SOURCE! pixel
     if(nIndex < sourcewidth * sourceheight)
@@ -731,112 +992,19 @@ __kernel void rigidBodyError(const __global FPT *source ,const __global FPT *tar
         __private int column = nIndex % sourcewidth;
         __private int row = (nIndex - column)/sourcewidth;
 
-        __private FPTTWO xvec = (FPTTWO)(cos(angle),-sin(angle));//warning: this is not the x vector but it is the vector added in the x direction
+        __private FPTTWO xvec = (FPTTWO)(cosangle,negsinangle);//warning: this is not the x vector but it is the vector added in the x direction
         __private FPTTWO yvec = (FPTTWO)(-xvec.y,xvec.x);//warning: this is not the y vector but it is the vector added in the y direction
         __private FPTTWO coord = (FPTTWO)(offsetx, offsety) + ((FPT)column) * xvec + ((FPT)row) * yvec;
 
         __private int2 Msk = (int2)((int)round(coord.x), (int)round(coord.y));
-        __private int doubletargetwidth = 2*targetwidth;
-        __private int doubletargetheight = 2*targetheight;
+        __private int4 xInterpolationIndices;
+        __private int4 yInterpolationIndices;
         if ((Msk.x >= 0) && (Msk.x < targetwidth) && (Msk.y >= 0) && (Msk.y < targetheight))
         {
             mask[nIndex] = One;
-            //Following is the calculation using mirrored boundaries of the x and y indices of the coefficients used for interpolation
-            //calculate the x coordinates for interpolation (loop unwrapped) for speed
-            __private int4 xInterpolationIndices;
-            __private int p = (coord.x >= 0) ? (((int)trunc(coord.x)) + 2) : (((int)trunc(coord.x)) + 1);
-            //loop iteration 0
-            __private int q = (p < 0) ? (-1 - p) : p;
-            //kick out divergence (but calculating the modulo ma actually be slower than divergence so maybe use a slightly diverging statement)
-            q = q<doubletargetwidth?q:q%doubletargetwidth;
-            //q %= doubletargetwidth; //will allways give the right answer
-            /*
-            if(q >= doubletargetwidth)
-            {
-                //q -= (2*targetwidth) * (q / (2*targetwidth)); //Warning: this is an integer division it doesn't yield q (in fact it is a simple modulo operation)
-                
-            }
-            */
-            xInterpolationIndices.x = q >= targetwidth ? (doubletargetwidth - 1 - q) : q;
-            //loop iteration 1
-            p--;
-            q = (p < 0) ? (-1 - p) : p;
-            q = q<doubletargetwidth?q:q%doubletargetwidth;
-            xInterpolationIndices.y = q >= targetwidth ? (doubletargetwidth - 1 - q) : q;
-            //loop iteration 2
-            p--;
-            q = (p < 0) ? (-1 - p) : p;
-            q = q<doubletargetwidth?q:q%doubletargetwidth;
-            xInterpolationIndices.z = q >= targetwidth ? (doubletargetwidth - 1 - q) : q;
-            //loop iteration 3
-            p--;
-            q = (p < 0) ? (-1 - p) : p;
-            q = q<doubletargetwidth?q:q%doubletargetwidth;
-            xInterpolationIndices.w = q >= targetwidth ? (doubletargetwidth - 1 - q) : q;
-
-            __private int4 yInterpolationIndices;
-            p = (coord.y >= 0) ? (((int)trunc(coord.y)) + 2) : (((int)trunc(coord.y)) + 1);
-            //loop iteration 0
-            q = (p < 0) ? (-1 - p) : p;
-            q = q<doubletargetheight?q:q%doubletargetheight;
-            yInterpolationIndices.x = (targetheight <= q) ? (((doubletargetheight) - 1 - q) * targetwidth) : (q * targetwidth);//this is the linear absolute index NOT the row
-            //loop iteration 1
-            p--;
-            q = (p < 0) ? (-1 - p) : p;
-            q = q<doubletargetheight?q:q%doubletargetheight;
-            yInterpolationIndices.y = (targetheight <= q) ? (((doubletargetheight) - 1 - q) * targetwidth) : (q * targetwidth);//this is the linear absolute index NOT the row
-            //loop iteration 2
-            p--;
-            q = (p < 0) ? (-1 - p) : p;
-            q = q<doubletargetheight?q:q%doubletargetheight;
-            yInterpolationIndices.z = (targetheight <= q) ? (((doubletargetheight) - 1 - q) * targetwidth) : (q * targetwidth);//this is the linear absolute index NOT the row
-            //loop iteration 3
-            p--;
-            q = (p < 0) ? (-1 - p) : p;
-            q = q<doubletargetheight?q:q%doubletargetheight;
-            yInterpolationIndices.w = (targetheight <= q) ? (((doubletargetheight) - 1 - q) * targetwidth) : (q * targetwidth);//this is the linear absolute index NOT the row
-
-            coord.x -= (coord.x >= Zero) ? (FPT)((int)trunc(coord.x)) : (FPT)(((int)trunc(coord.x)) - 1);//get the residual should also be possible with floor
-            coord.y -= (coord.y >= Zero) ? (FPT)((int)trunc(coord.y)) : (FPT)(((int)trunc(coord.y)) - 1);//get the residual should also be possible with floor
-
-            //Calculate the weights for interpolation
-            __private FPTFOUR xWeights;
-            __private FPT s = One - coord.x;
-            xWeights.w = pown(s,3) / Lambda;
-            s = coord.x * coord.x;
-            xWeights.z = Two / Three - h * s * (Two - coord.x);
-            xWeights.x = s * coord.x / Lambda;
-            xWeights.y = One - xWeights.x - xWeights.z - xWeights.w;
-            __private FPTFOUR yWeights;
-            s = One - coord.y;
-            yWeights.w = pown(s,3) / Lambda;
-            s = coord.y * coord.y;
-            yWeights.z = Two / Three - h * s * (Two - coord.y);
-            yWeights.x = s * coord.y / Lambda;
-            yWeights.y = One - yWeights.x - yWeights.z - yWeights.w;
-
-            //unwrapped interpolation loop (sorry 16 iterations) 4x4 interpolation coefficients
-            //y loop 0
-            s = yWeights.x * (xWeights.x * target[yInterpolationIndices.x + xInterpolationIndices.x]
-                + xWeights.y * target[yInterpolationIndices.x + xInterpolationIndices.y]
-                + xWeights.z * target[yInterpolationIndices.x + xInterpolationIndices.z]
-                + xWeights.w * target[yInterpolationIndices.x + xInterpolationIndices.w]);
-            //y loop 1
-            s += yWeights.y * (xWeights.x * target[yInterpolationIndices.y + xInterpolationIndices.x]
-                + xWeights.y * target[yInterpolationIndices.y + xInterpolationIndices.y]
-                + xWeights.z * target[yInterpolationIndices.y + xInterpolationIndices.z]
-                + xWeights.w * target[yInterpolationIndices.y + xInterpolationIndices.w]);
-            //y loop 2
-            s += yWeights.z * (xWeights.x * target[yInterpolationIndices.z + xInterpolationIndices.x]
-                + xWeights.y * target[yInterpolationIndices.z + xInterpolationIndices.y]
-                + xWeights.z * target[yInterpolationIndices.z + xInterpolationIndices.z]
-                + xWeights.w * target[yInterpolationIndices.z + xInterpolationIndices.w]);
-            //y loop 3
-            s += yWeights.w * (xWeights.x * target[yInterpolationIndices.w + xInterpolationIndices.x]
-                + xWeights.y * target[yInterpolationIndices.w + xInterpolationIndices.y]
-                + xWeights.z * target[yInterpolationIndices.w + xInterpolationIndices.z]
-                + xWeights.w * target[yInterpolationIndices.w + xInterpolationIndices.w]);
-            //now s is the value
+            xInterpolationIndices = calculatexInterpolationIndices(coord.x, doubletargetwidth, targetwidth);
+            yInterpolationIndices = calculateyInterpolationIndices(coord.y, doubletargetheight, targetheight, targetwidth); 
+            __private FPT s = interpolate(coord, xInterpolationIndices, yInterpolationIndices, target);
             diffout[nIndex] = pown(source[nIndex] - s,2);
         }
         else
@@ -848,7 +1016,7 @@ __kernel void rigidBodyError(const __global FPT *source ,const __global FPT *tar
 }
 
 //calculate the square error
-__kernel void translationError(const __global FPT *source ,const __global FPT *target, __global FPT *diffout, __global FPT *mask, const int sourcewidth, const int sourceheight, const int targetwidth, const int targetheight, const FPT offsetx, const FPT offsety)
+__kernel void translationError(const __global FPT *source ,const __global FPT *target, __global FPT *diffout, __global FPT *mask, const int sourcewidth, const int sourceheight, const int targetwidth, const int targetheight, const int doubletargetwidth, const int doubletargetheight, const FPT offsetx, const FPT offsety)
 {
     __private int nIndex = get_global_id(0);//this directly corresponds to the linear address of the !SOURCE! pixel
     if(nIndex < sourcewidth * sourceheight)
@@ -859,107 +1027,14 @@ __kernel void translationError(const __global FPT *source ,const __global FPT *t
         __private FPTTWO coord = (FPTTWO)(offsetx + ((FPT)column), offsety + ((FPT)row));
 
         __private int2 Msk = (int2)((int)round(coord.x), (int)round(coord.y));
-        __private int doubletargetwidth = 2*targetwidth;
-        __private int doubletargetheight = 2*targetheight;
+        __private int4 xInterpolationIndices;
+        __private int4 yInterpolationIndices;
         if ((Msk.x >= 0) && (Msk.x < targetwidth) && (Msk.y >= 0) && (Msk.y < targetheight))
         {
             mask[nIndex] = One;
-            //Following is the calculation using mirrored boundaries of the x and y indices of the coefficients used for interpolation
-            //calculate the x coordinates for interpolation (loop unwrapped) for speed
-            __private int4 xInterpolationIndices;
-            __private int p = (coord.x >= 0) ? (((int)trunc(coord.x)) + 2) : (((int)trunc(coord.x)) + 1);
-            //loop iteration 0
-            __private int q = (p < 0) ? (-1 - p) : p;
-            //kick out divergence (but calculating the modulo ma actually be slower than divergence so maybe use a slightly diverging statement)
-            q = q<doubletargetwidth?q:q%doubletargetwidth;
-            //q %= doubletargetwidth; //will allways give the right answer
-            /*
-            if(q >= doubletargetwidth)
-            {
-                //q -= (2*targetwidth) * (q / (2*targetwidth)); //Warning: this is an integer division it doesn't yield q (in fact it is a simple modulo operation)
-                
-            }
-            */
-            xInterpolationIndices.x = q >= targetwidth ? (doubletargetwidth - 1 - q) : q;
-            //loop iteration 1
-            p--;
-            q = (p < 0) ? (-1 - p) : p;
-            q = q<doubletargetwidth?q:q%doubletargetwidth;
-            xInterpolationIndices.y = q >= targetwidth ? (doubletargetwidth - 1 - q) : q;
-            //loop iteration 2
-            p--;
-            q = (p < 0) ? (-1 - p) : p;
-            q = q<doubletargetwidth?q:q%doubletargetwidth;
-            xInterpolationIndices.z = q >= targetwidth ? (doubletargetwidth - 1 - q) : q;
-            //loop iteration 3
-            p--;
-            q = (p < 0) ? (-1 - p) : p;
-            q = q<doubletargetwidth?q:q%doubletargetwidth;
-            xInterpolationIndices.w = q >= targetwidth ? (doubletargetwidth - 1 - q) : q;
-
-            __private int4 yInterpolationIndices;
-            p = (coord.y >= 0) ? (((int)trunc(coord.y)) + 2) : (((int)trunc(coord.y)) + 1);
-            //loop iteration 0
-            q = (p < 0) ? (-1 - p) : p;
-            q = q<doubletargetheight?q:q%doubletargetheight;
-            yInterpolationIndices.x = (targetheight <= q) ? (((doubletargetheight) - 1 - q) * targetwidth) : (q * targetwidth);//this is the linear absolute index NOT the row
-            //loop iteration 1
-            p--;
-            q = (p < 0) ? (-1 - p) : p;
-            q = q<doubletargetheight?q:q%doubletargetheight;
-            yInterpolationIndices.y = (targetheight <= q) ? (((doubletargetheight) - 1 - q) * targetwidth) : (q * targetwidth);//this is the linear absolute index NOT the row
-            //loop iteration 2
-            p--;
-            q = (p < 0) ? (-1 - p) : p;
-            q = q<doubletargetheight?q:q%doubletargetheight;
-            yInterpolationIndices.z = (targetheight <= q) ? (((doubletargetheight) - 1 - q) * targetwidth) : (q * targetwidth);//this is the linear absolute index NOT the row
-            //loop iteration 3
-            p--;
-            q = (p < 0) ? (-1 - p) : p;
-            q = q<doubletargetheight?q:q%doubletargetheight;
-            yInterpolationIndices.w = (targetheight <= q) ? (((doubletargetheight) - 1 - q) * targetwidth) : (q * targetwidth);//this is the linear absolute index NOT the row
-
-            coord.x -= (coord.x >= Zero) ? (FPT)((int)trunc(coord.x)) : (FPT)(((int)trunc(coord.x)) - 1);//get the residual should also be possible with floor
-            coord.y -= (coord.y >= Zero) ? (FPT)((int)trunc(coord.y)) : (FPT)(((int)trunc(coord.y)) - 1);//get the residual should also be possible with floor
-
-            //Calculate the weights for interpolation
-            __private FPTFOUR xWeights;
-            __private FPT s = One - coord.x;
-            xWeights.w = pown(s,3) / Lambda;
-            s = coord.x * coord.x;
-            xWeights.z = Two / Three - h * s * (Two - coord.x);
-            xWeights.x = s * coord.x / Lambda;
-            xWeights.y = One - xWeights.x - xWeights.z - xWeights.w;
-            __private FPTFOUR yWeights;
-            s = One - coord.y;
-            yWeights.w = pown(s,3) / Lambda;
-            s = coord.y * coord.y;
-            yWeights.z = Two / Three - h * s * (Two - coord.y);
-            yWeights.x = s * coord.y / Lambda;
-            yWeights.y = One - yWeights.x - yWeights.z - yWeights.w;
-
-            //unwrapped interpolation loop (sorry 16 iterations) 4x4 interpolation coefficients
-            //y loop 0
-            s = yWeights.x * (xWeights.x * target[yInterpolationIndices.x + xInterpolationIndices.x]
-                + xWeights.y * target[yInterpolationIndices.x + xInterpolationIndices.y]
-                + xWeights.z * target[yInterpolationIndices.x + xInterpolationIndices.z]
-                + xWeights.w * target[yInterpolationIndices.x + xInterpolationIndices.w]);
-            //y loop 1
-            s += yWeights.y * (xWeights.x * target[yInterpolationIndices.y + xInterpolationIndices.x]
-                + xWeights.y * target[yInterpolationIndices.y + xInterpolationIndices.y]
-                + xWeights.z * target[yInterpolationIndices.y + xInterpolationIndices.z]
-                + xWeights.w * target[yInterpolationIndices.y + xInterpolationIndices.w]);
-            //y loop 2
-            s += yWeights.z * (xWeights.x * target[yInterpolationIndices.z + xInterpolationIndices.x]
-                + xWeights.y * target[yInterpolationIndices.z + xInterpolationIndices.y]
-                + xWeights.z * target[yInterpolationIndices.z + xInterpolationIndices.z]
-                + xWeights.w * target[yInterpolationIndices.z + xInterpolationIndices.w]);
-            //y loop 3
-            s += yWeights.w * (xWeights.x * target[yInterpolationIndices.w + xInterpolationIndices.x]
-                + xWeights.y * target[yInterpolationIndices.w + xInterpolationIndices.y]
-                + xWeights.z * target[yInterpolationIndices.w + xInterpolationIndices.z]
-                + xWeights.w * target[yInterpolationIndices.w + xInterpolationIndices.w]);
-            //now s is the value
+            xInterpolationIndices = calculatexInterpolationIndices(coord.x, doubletargetwidth, targetwidth);
+            yInterpolationIndices = calculateyInterpolationIndices(coord.y, doubletargetheight, targetheight, targetwidth);
+            __private FPT s = interpolate(coord, xInterpolationIndices, yInterpolationIndices, target);
             diffout[nIndex] = pown(source[nIndex] - s,2);
         }
         else
@@ -970,7 +1045,7 @@ __kernel void translationError(const __global FPT *source ,const __global FPT *t
     }   
 }
 
-__kernel void rigidBodyErrorWithGradAndHess(const __global FPT *source ,const __global FPT *target,const __global FPT *xGradient,const __global FPT *yGradient,__global FPT *grad0,__global FPT *grad1,__global FPT *grad2,__global FPT *hessian00,__global FPT *hessian01,__global FPT *hessian02,__global FPT *hessian11,__global FPT *hessian12,__global FPT *hessian22, __global FPT *diffout, __global FPT *mask, const int sourcewidth, const int sourceheight, const int targetwidth, const int targetheight, const FPT offsetx, const FPT offsety, const FPT angle)
+__kernel void rigidBodyErrorWithGradAndHess(const __global FPT *source ,const __global FPT *target,const __global FPT *xGradient,const __global FPT *yGradient,__global FPT *grad0,__global FPT *grad1,__global FPT *grad2,__global FPT *hessian00,__global FPT *hessian01,__global FPT *hessian02,__global FPT *hessian11,__global FPT *hessian12,__global FPT *hessian22, __global FPT *diffout, __global FPT *mask, const int sourcewidth, const int sourceheight, const int targetwidth, const int targetheight, const int doubletargetwidth, const int doubletargetheight, const FPT offsetx, const FPT offsety, const FPT cosangle, const FPT negsinangle)
 {
     __private int nIndex = get_global_id(0);//this directly corresponds to the linear address of the !SOURCE! pixel
     if(nIndex < sourcewidth * sourceheight)
@@ -978,115 +1053,45 @@ __kernel void rigidBodyErrorWithGradAndHess(const __global FPT *source ,const __
         __private int column = nIndex % sourcewidth;
         __private int row = (nIndex - column)/sourcewidth;
 
-        __private FPTTWO xvec = (FPTTWO)(cos(angle),-sin(angle));//warning: this is not the x vector but it is the vector added in the x direction
+        __private FPTTWO xvec = (FPTTWO)(cosangle,negsinangle);//warning: this is not the x vector but it is the vector added in the x direction
         __private FPTTWO yvec = (FPTTWO)(-xvec.y,xvec.x);//warning: this is not the y vector but it is the vector added in the y direction
         __private FPTTWO coord = (FPTTWO)(offsetx, offsety) + ((FPT)column) * xvec + ((FPT)row) * yvec;
 
         __private int2 Msk = (int2)((int)round(coord.x), (int)round(coord.y));
-        __private int doubletargetwidth = 2*targetwidth;
-        __private int doubletargetheight = 2*targetheight;
+        __private int4 xInterpolationIndices;
+        __private int4 yInterpolationIndices;
         if ((Msk.x >= 0) && (Msk.x < targetwidth) && (Msk.y >= 0) && (Msk.y < targetheight))
         {
             mask[nIndex] = One;
-            //Following is the calculation using mirrored boundaries of the x and y indices of the coefficients used for interpolation
-            //calculate the x coordinates for interpolation (loop unwrapped) for speed
-            __private int4 xInterpolationIndices;
-            __private int p = (coord.x >= 0) ? (((int)trunc(coord.x)) + 2) : (((int)trunc(coord.x)) + 1);
-            //loop iteration 0
-            __private int q = (p < 0) ? (-1 - p) : p;
-            q = q<targetwidth?q:q%targetwidth;
-            xInterpolationIndices.x = q >= targetwidth ? (targetwidth - 1 - q) : q;
-            //loop iteration 1
-            p--;
-            q = (p < 0) ? (-1 - p) : p;
-            q = q<targetwidth?q:q%targetwidth;
-            xInterpolationIndices.y = q >= targetwidth ? (targetwidth - 1 - q) : q;
-            //loop iteration 2
-            p--;
-            q = (p < 0) ? (-1 - p) : p;
-            q = q<targetwidth?q:q%targetwidth;
-            xInterpolationIndices.z = q >= targetwidth ? (targetwidth - 1 - q) : q;
-            //loop iteration 3
-            p--;
-            q = (p < 0) ? (-1 - p) : p;
-            q = q<targetwidth?q:q%targetwidth;
-            xInterpolationIndices.w = q >= targetwidth ? (targetwidth - 1 - q) : q;
-
-            __private int4 yInterpolationIndices;
-            p = (coord.y >= 0) ? (((int)trunc(coord.y)) + 2) : (((int)trunc(coord.y)) + 1);
-            //loop iteration 0
-            q = (p < 0) ? (-1 - p) : p;
-            q = q<doubletargetheight?q:q%doubletargetheight;
-            yInterpolationIndices.x = (targetheight <= q) ? (((doubletargetheight) - 1 - q) * targetwidth) : (q * targetwidth);//this is the linear absolute index NOT the row
-            //loop iteration 1
-            p--;
-            q = (p < 0) ? (-1 - p) : p;
-            q = q<doubletargetheight?q:q%doubletargetheight;
-            yInterpolationIndices.y = (targetheight <= q) ? (((doubletargetheight) - 1 - q) * targetwidth) : (q * targetwidth);//this is the linear absolute index NOT the row
-            //loop iteration 2
-            p--;
-            q = (p < 0) ? (-1 - p) : p;
-            q = q<doubletargetheight?q:q%doubletargetheight;
-            yInterpolationIndices.z = (targetheight <= q) ? (((doubletargetheight) - 1 - q) * targetwidth) : (q * targetwidth);//this is the linear absolute index NOT the row
-            //loop iteration 3
-            p--;
-            q = (p < 0) ? (-1 - p) : p;
-            q = q<doubletargetheight?q:q%doubletargetheight;
-            yInterpolationIndices.w = (targetheight <= q) ? (((doubletargetheight) - 1 - q) * targetwidth) : (q * targetwidth);//this is the linear absolute index NOT the row
-
-            coord.x -= (coord.x >= Zero) ? (FPT)((int)trunc(coord.x)) : (FPT)(((int)trunc(coord.x)) - 1);//get the residual should also be possible with floor
-            coord.y -= (coord.y >= Zero) ? (FPT)((int)trunc(coord.y)) : (FPT)(((int)trunc(coord.y)) - 1);//get the residual should also be possible with floor
-
-            //Calculate the weights for interpolation
-            __private FPTFOUR xWeights;
-            __private FPT s = One - coord.x;
-            xWeights.w = pown(s,3) / Lambda;
-            s = coord.x * coord.x;
-            xWeights.z = Two / Three - h * s * (Two - coord.x);
-            xWeights.x = s * coord.x / Lambda;
-            xWeights.y = One - xWeights.x - xWeights.z - xWeights.w;
-            __private FPTFOUR yWeights;
-            s = One - coord.y;
-            yWeights.w = pown(s,3) / Lambda;
-            s = coord.y * coord.y;
-            yWeights.z = Two / Three - h * s * (Two - coord.y);
-            yWeights.x = s * coord.y / Lambda;
-            yWeights.y = One - yWeights.x - yWeights.z - yWeights.w;
-
-            //unwrapped interpolation loop (sorry 16 iterations) 4x4 interpolation coefficients
-            //y loop 0
-            s = yWeights.x * (xWeights.x * target[yInterpolationIndices.x + xInterpolationIndices.x]
-                + xWeights.y * target[yInterpolationIndices.x + xInterpolationIndices.y]
-                + xWeights.z * target[yInterpolationIndices.x + xInterpolationIndices.z]
-                + xWeights.w * target[yInterpolationIndices.x + xInterpolationIndices.w]);
-            //y loop 1
-            s += yWeights.y * (xWeights.x * target[yInterpolationIndices.y + xInterpolationIndices.x]
-                + xWeights.y * target[yInterpolationIndices.y + xInterpolationIndices.y]
-                + xWeights.z * target[yInterpolationIndices.y + xInterpolationIndices.z]
-                + xWeights.w * target[yInterpolationIndices.y + xInterpolationIndices.w]);
-            //y loop 2
-            s += yWeights.z * (xWeights.x * target[yInterpolationIndices.z + xInterpolationIndices.x]
-                + xWeights.y * target[yInterpolationIndices.z + xInterpolationIndices.y]
-                + xWeights.z * target[yInterpolationIndices.z + xInterpolationIndices.z]
-                + xWeights.w * target[yInterpolationIndices.z + xInterpolationIndices.w]);
-            //y loop 3
-            s += yWeights.w * (xWeights.x * target[yInterpolationIndices.w + xInterpolationIndices.x]
-                + xWeights.y * target[yInterpolationIndices.w + xInterpolationIndices.y]
-                + xWeights.z * target[yInterpolationIndices.w + xInterpolationIndices.z]
-                + xWeights.w * target[yInterpolationIndices.w + xInterpolationIndices.w]);
-            //now s is the value
+            xInterpolationIndices = calculatexInterpolationIndices(coord.x, doubletargetwidth, targetwidth);
+            yInterpolationIndices = calculateyInterpolationIndices(coord.y, doubletargetheight, targetheight, targetwidth);
+            __private FPT s = interpolate(coord, xInterpolationIndices, yInterpolationIndices, target);
             __private FPT diff = source[nIndex] - s;
-            diffout[nIndex] = pown(diff,2);
-            __private FPT Theta = yGradient[nIndex] * (FPT)column - xGradient[nIndex] * (FPT)row;
-            grad0[nIndex] = diff * Theta;
-            grad1[nIndex] = diff * xGradient[nIndex];
-            grad2[nIndex] = diff * yGradient[nIndex];
-            hessian00[nIndex] = pown(Theta,2);
-            hessian01[nIndex] = Theta * xGradient[nIndex];
-            hessian02[nIndex] = Theta * yGradient[nIndex];
-            hessian11[nIndex] = pown(xGradient[nIndex],2);
-            hessian12[nIndex] = xGradient[nIndex] * yGradient[nIndex];
-            hessian22[nIndex] = pown(yGradient[nIndex],2);
+            //__private FPT Theta = yGradient[nIndex] * (FPT)column - xGradient[nIndex] * (FPT)row;
+            __private FPT Theta = dot((FPTTWO)(yGradient[nIndex], -xGradient[nIndex]), (FPTTWO)((FPT)column, (FPT)row));
+            //diffout[nIndex] = pown(diff,2);
+            //grad0[nIndex] = diff * Theta;
+            //grad1[nIndex] = diff * xGradient[nIndex];
+            //grad2[nIndex] = diff * yGradient[nIndex];
+            __private FPTFOUR tmp4 = (FPTFOUR)(diff, Theta, xGradient[nIndex], yGradient[nIndex]) * diff; //Slightly less accurate
+            diffout[nIndex] = tmp4.x;
+            grad0[nIndex] = tmp4.y;
+            grad1[nIndex] = tmp4.z;
+            grad2[nIndex] = tmp4.w;
+            //hessian00[nIndex] = pown(Theta,2); //this is more accurate
+            //hessian01[nIndex] = Theta * xGradient[nIndex];
+            //hessian02[nIndex] = Theta * yGradient[nIndex];
+            __private FPTTHREE tmp = (FPTTHREE)(Theta, xGradient[nIndex], yGradient[nIndex]) * Theta; //Slightly less accurate
+            hessian00[nIndex] = tmp.x;
+            hessian01[nIndex] = tmp.y;
+            hessian02[nIndex] = tmp.z;
+            //hessian11[nIndex] = pown(xGradient[nIndex],2);
+            //hessian12[nIndex] = xGradient[nIndex] * yGradient[nIndex];
+            //hessian22[nIndex] = pown(yGradient[nIndex],2);
+            tmp = ((FPTTHREE)(xGradient[nIndex], xGradient[nIndex], yGradient[nIndex])) * ((FPTTHREE)(xGradient[nIndex], yGradient[nIndex], yGradient[nIndex])); //Slightly less accurate
+            hessian11[nIndex] = tmp.x;
+            hessian12[nIndex] = tmp.y;
+            hessian22[nIndex] = tmp.z;
         }
         else
         {
@@ -1106,7 +1111,7 @@ __kernel void rigidBodyErrorWithGradAndHess(const __global FPT *source ,const __
 }
 
 
-__kernel void translationErrorWithGradAndHess(const __global FPT *source ,const __global FPT *target,const __global FPT *xGradient,const __global FPT *yGradient,__global FPT *grad0,__global FPT *grad1,__global FPT *hessian00,__global FPT *hessian01,__global FPT *hessian11, __global FPT *diffout, __global FPT *mask, const int sourcewidth, const int sourceheight, const int targetwidth, const int targetheight, const FPT offsetx, const FPT offsety)
+__kernel void translationErrorWithGradAndHess(const __global FPT *source ,const __global FPT *target,const __global FPT *xGradient,const __global FPT *yGradient,__global FPT *grad0,__global FPT *grad1,__global FPT *hessian00,__global FPT *hessian01,__global FPT *hessian11, __global FPT *diffout, __global FPT *mask, const int sourcewidth, const int sourceheight, const int targetwidth, const int targetheight, const int doubletargetwidth, const int doubletargetheight, const FPT offsetx, const FPT offsety)
 {
     __private int nIndex = get_global_id(0);//this directly corresponds to the linear address of the !SOURCE! pixel
     if(nIndex < sourcewidth * sourceheight)
@@ -1117,105 +1122,29 @@ __kernel void translationErrorWithGradAndHess(const __global FPT *source ,const 
         __private FPTTWO coord = (FPTTWO)(offsetx + ((FPT)column), offsety + ((FPT)row));
 
         __private int2 Msk = (int2)((int)round(coord.x), (int)round(coord.y));
-        __private int doubletargetwidth = 2*targetwidth;
-        __private int doubletargetheight = 2*targetheight;
+        __private int4 xInterpolationIndices;
+        __private int4 yInterpolationIndices;
         if ((Msk.x >= 0) && (Msk.x < targetwidth) && (Msk.y >= 0) && (Msk.y < targetheight))
         {
             mask[nIndex] = One;
-            //Following is the calculation using mirrored boundaries of the x and y indices of the coefficients used for interpolation
-            //calculate the x coordinates for interpolation (loop unwrapped) for speed
-            __private int4 xInterpolationIndices;
-            __private int p = (coord.x >= 0) ? (((int)trunc(coord.x)) + 2) : (((int)trunc(coord.x)) + 1);
-            //loop iteration 0
-            __private int q = (p < 0) ? (-1 - p) : p;
-            q = q<targetwidth?q:q%targetwidth;
-            xInterpolationIndices.x = q >= targetwidth ? (targetwidth - 1 - q) : q;
-            //loop iteration 1
-            p--;
-            q = (p < 0) ? (-1 - p) : p;
-            q = q<targetwidth?q:q%targetwidth;
-            xInterpolationIndices.y = q >= targetwidth ? (targetwidth - 1 - q) : q;
-            //loop iteration 2
-            p--;
-            q = (p < 0) ? (-1 - p) : p;
-            q = q<targetwidth?q:q%targetwidth;
-            xInterpolationIndices.z = q >= targetwidth ? (targetwidth - 1 - q) : q;
-            //loop iteration 3
-            p--;
-            q = (p < 0) ? (-1 - p) : p;
-            q = q<targetwidth?q:q%targetwidth;
-            xInterpolationIndices.w = q >= targetwidth ? (targetwidth - 1 - q) : q;
-
-            __private int4 yInterpolationIndices;
-            p = (coord.y >= 0) ? (((int)trunc(coord.y)) + 2) : (((int)trunc(coord.y)) + 1);
-            //loop iteration 0
-            q = (p < 0) ? (-1 - p) : p;
-            q = q<doubletargetheight?q:q%doubletargetheight;
-            yInterpolationIndices.x = (targetheight <= q) ? (((doubletargetheight) - 1 - q) * targetwidth) : (q * targetwidth);//this is the linear absolute index NOT the row
-            //loop iteration 1
-            p--;
-            q = (p < 0) ? (-1 - p) : p;
-            q = q<doubletargetheight?q:q%doubletargetheight;
-            yInterpolationIndices.y = (targetheight <= q) ? (((doubletargetheight) - 1 - q) * targetwidth) : (q * targetwidth);//this is the linear absolute index NOT the row
-            //loop iteration 2
-            p--;
-            q = (p < 0) ? (-1 - p) : p;
-            q = q<doubletargetheight?q:q%doubletargetheight;
-            yInterpolationIndices.z = (targetheight <= q) ? (((doubletargetheight) - 1 - q) * targetwidth) : (q * targetwidth);//this is the linear absolute index NOT the row
-            //loop iteration 3
-            p--;
-            q = (p < 0) ? (-1 - p) : p;
-            q = q<doubletargetheight?q:q%doubletargetheight;
-            yInterpolationIndices.w = (targetheight <= q) ? (((doubletargetheight) - 1 - q) * targetwidth) : (q * targetwidth);//this is the linear absolute index NOT the row
-
-            coord.x -= (coord.x >= Zero) ? (FPT)((int)trunc(coord.x)) : (FPT)(((int)trunc(coord.x)) - 1);//get the residual should also be possible with floor
-            coord.y -= (coord.y >= Zero) ? (FPT)((int)trunc(coord.y)) : (FPT)(((int)trunc(coord.y)) - 1);//get the residual should also be possible with floor
-
-            //Calculate the weights for interpolation
-            __private FPTFOUR xWeights;
-            __private FPT s = One - coord.x;
-            xWeights.w = pown(s,3) / Lambda;
-            s = coord.x * coord.x;
-            xWeights.z = Two / Three - h * s * (Two - coord.x);
-            xWeights.x = s * coord.x / Lambda;
-            xWeights.y = One - xWeights.x - xWeights.z - xWeights.w;
-            __private FPTFOUR yWeights;
-            s = One - coord.y;
-            yWeights.w = pown(s,3) / Lambda;
-            s = coord.y * coord.y;
-            yWeights.z = Two / Three - h * s * (Two - coord.y);
-            yWeights.x = s * coord.y / Lambda;
-            yWeights.y = One - yWeights.x - yWeights.z - yWeights.w;
-
-            //unwrapped interpolation loop (sorry 16 iterations) 4x4 interpolation coefficients
-            //y loop 0
-            s = yWeights.x * (xWeights.x * target[yInterpolationIndices.x + xInterpolationIndices.x]
-                + xWeights.y * target[yInterpolationIndices.x + xInterpolationIndices.y]
-                + xWeights.z * target[yInterpolationIndices.x + xInterpolationIndices.z]
-                + xWeights.w * target[yInterpolationIndices.x + xInterpolationIndices.w]);
-            //y loop 1
-            s += yWeights.y * (xWeights.x * target[yInterpolationIndices.y + xInterpolationIndices.x]
-                + xWeights.y * target[yInterpolationIndices.y + xInterpolationIndices.y]
-                + xWeights.z * target[yInterpolationIndices.y + xInterpolationIndices.z]
-                + xWeights.w * target[yInterpolationIndices.y + xInterpolationIndices.w]);
-            //y loop 2
-            s += yWeights.z * (xWeights.x * target[yInterpolationIndices.z + xInterpolationIndices.x]
-                + xWeights.y * target[yInterpolationIndices.z + xInterpolationIndices.y]
-                + xWeights.z * target[yInterpolationIndices.z + xInterpolationIndices.z]
-                + xWeights.w * target[yInterpolationIndices.z + xInterpolationIndices.w]);
-            //y loop 3
-            s += yWeights.w * (xWeights.x * target[yInterpolationIndices.w + xInterpolationIndices.x]
-                + xWeights.y * target[yInterpolationIndices.w + xInterpolationIndices.y]
-                + xWeights.z * target[yInterpolationIndices.w + xInterpolationIndices.z]
-                + xWeights.w * target[yInterpolationIndices.w + xInterpolationIndices.w]);
-            //now s is the value
+            xInterpolationIndices = calculatexInterpolationIndices(coord.x, doubletargetwidth, targetwidth);
+            yInterpolationIndices = calculateyInterpolationIndices(coord.y, doubletargetheight, targetheight, targetwidth);
+            __private FPT s = interpolate(coord, xInterpolationIndices, yInterpolationIndices, target);
             __private FPT diff = source[nIndex] - s;
-            diffout[nIndex] = pown(diff,2);
-            grad0[nIndex] = diff * xGradient[nIndex];
-            grad1[nIndex] = diff * yGradient[nIndex];
-            hessian00[nIndex] = pown(xGradient[nIndex],2);
-            hessian01[nIndex] = xGradient[nIndex] * yGradient[nIndex];
-            hessian11[nIndex] = pown(yGradient[nIndex],2);
+            //diffout[nIndex] = pown(diff,2);
+            //grad0[nIndex] = diff * xGradient[nIndex];
+            //grad1[nIndex] = diff * yGradient[nIndex];
+            __private FPTTHREE tmp = (FPTTHREE)(diff, xGradient[nIndex], yGradient[nIndex]) * diff;
+            diffout[nIndex] = tmp.x;
+            grad0[nIndex] = tmp.y;
+            grad1[nIndex] = tmp.z;
+            //hessian00[nIndex] = pown(xGradient[nIndex],2);
+            //hessian01[nIndex] = xGradient[nIndex] * yGradient[nIndex];
+            //hessian11[nIndex] = pown(yGradient[nIndex],2);
+            tmp = ((FPTTHREE)(xGradient[nIndex], xGradient[nIndex], yGradient[nIndex])) * ((FPTTHREE)(xGradient[nIndex], yGradient[nIndex], yGradient[nIndex])); 
+            hessian00[nIndex] = tmp.x;
+            hessian01[nIndex] = tmp.y;
+            hessian11[nIndex] = tmp.z;
         }
         else
         {
@@ -1961,7 +1890,6 @@ __kernel void parallelGroupedSumReduction(__global const FPT *gdata, __global FP
     }
 }
 
-
 __kernel void rigidBodyErrorWithGradAndHessBrent(const __global FPT *source,
 const __global FPT *target,
 const __global FPT *xGradient,
@@ -1994,7 +1922,8 @@ const int targetwidth,
 const int targetheight,
 const FPT offsetx,
 const FPT offsety,
-const FPT angle,
+const FPT cosangle,
+const FPT negsinangle,
 const int doubleTargetWidth,
 const int doubleTargetHeight)
 {
@@ -2018,7 +1947,7 @@ const int doubleTargetHeight)
     lmask[nIndex] = Zero;
 
     //These vectors remain the same during the loops
-    __private FPTTWO xvec = (FPTTWO)(cos(angle),-sin(angle));//warning: this is not the x vector but it is the vector added in the x direction
+    __private FPTTWO xvec = (FPTTWO)(cosangle,negsinangle);//warning: this is not the x vector but it is the vector added in the x direction
     __private FPTTWO yvec = (FPTTWO)(-xvec.y,xvec.x);//warning: this is not the y vector but it is the vector added in the y direction
     while(i < sourcewidth * sourceheight)
     {
@@ -2031,8 +1960,6 @@ const int doubleTargetHeight)
         __private int4 combinedInterpolationIndices;
         __private FPTFOUR xWeights;
         __private FPTFOUR yWeights;
-        __private int p;
-        __private int q;
         __private FPT s;
         __private FPT diff;
         __private FPT Theta;
@@ -2041,110 +1968,35 @@ const int doubleTargetHeight)
         if ((Msk.x >= 0) && (Msk.x < targetwidth) && (Msk.y >= 0) && (Msk.y < targetheight))
         {
             lmask[nIndex] += One;
-            //Following is the calculation using mirrored boundaries of the x and y indices of the coefficients used for interpolation
-            //calculate the x coordinates for interpolation (loop unwrapped) for speed
-            p = (coord.x >= 0) ? (((int)trunc(coord.x)) + 2) : (((int)trunc(coord.x)) + 1);
-            //loop iteration 0
-            /*
-            q = (p < 0) ? (-1 - p) : p;
-            is a diverging statement, although it incurs more operations the following equivalent will likely be faster
-            */
-            q = abs(p) - rotate(p&(int)0x80000000,(int)1);
-            q = q<doubleTargetWidth?q:q%doubleTargetWidth;
-            xInterpolationIndices.x = q >= targetwidth ? (doubleTargetWidth - 1 - q) : q;
-            //loop iteration 1
-            p--;
-            q = abs(p) - rotate(p&(int)0x80000000,(int)1);
-            q = q<doubleTargetWidth?q:q%doubleTargetWidth;
-            xInterpolationIndices.y = q >= targetwidth ? (doubleTargetWidth - 1 - q) : q;
-            //loop iteration 2
-            p--;
-            q = abs(p) - rotate(p&(int)0x80000000,(int)1);
-            q = q<doubleTargetWidth?q:q%doubleTargetWidth;
-            xInterpolationIndices.z = q >= targetwidth ? (doubleTargetWidth - 1 - q) : q;
-            //loop iteration 3
-            p--;
-            q = abs(p) - rotate(p&(int)0x80000000,(int)1);
-            q = q<doubleTargetWidth?q:q%doubleTargetWidth;
-            xInterpolationIndices.w = q >= targetwidth ? (doubleTargetWidth - 1 - q) : q;
-
-            p = (coord.y >= 0) ? (((int)trunc(coord.y)) + 2) : (((int)trunc(coord.y)) + 1);
-            //loop iteration 0
-            q = abs(p) - rotate(p&(int)0x80000000,(int)1);
-            q = q<doubleTargetHeight?q:q%doubleTargetHeight;
-            yInterpolationIndices.x = (targetheight <= q) ? (((doubleTargetHeight) - 1 - q) * targetwidth) : (q * targetwidth);//this is the linear absolute index NOT the row
-            //loop iteration 1
-            p--;
-            q = abs(p) - rotate(p&(int)0x80000000,(int)1);
-            q = q<doubleTargetHeight?q:q%doubleTargetHeight;
-            yInterpolationIndices.y = (targetheight <= q) ? (((doubleTargetHeight) - 1 - q) * targetwidth) : (q * targetwidth);//this is the linear absolute index NOT the row
-            //loop iteration 2
-            p--;
-            q = abs(p) - rotate(p&(int)0x80000000,(int)1);
-            q = q<doubleTargetHeight?q:q%doubleTargetHeight;
-            yInterpolationIndices.z = (targetheight <= q) ? (((doubleTargetHeight) - 1 - q) * targetwidth) : (q * targetwidth);//this is the linear absolute index NOT the row
-            //loop iteration 3
-            p--;
-            q = abs(p) - rotate(p&(int)0x80000000,(int)1);
-            q = q<doubleTargetHeight?q:q%doubleTargetHeight;
-            yInterpolationIndices.w = (targetheight <= q) ? (((doubleTargetHeight) - 1 - q) * targetwidth) : (q * targetwidth);//this is the linear absolute index NOT the row
-
-            coord.x -= (coord.x >= Zero) ? (FPT)((int)trunc(coord.x)) : (FPT)(((int)trunc(coord.x)) - 1);//get the residual should also be possible with floor
-            coord.y -= (coord.y >= Zero) ? (FPT)((int)trunc(coord.y)) : (FPT)(((int)trunc(coord.y)) - 1);//get the residual should also be possible with floor
-
-            //Calculate the weights for interpolation
-            s = One - coord.x;
-            xWeights.w = pown(s,3) / Lambda;
-            s = coord.x * coord.x;
-            xWeights.z = Two / Three - h * s * (Two - coord.x);
-            xWeights.x = s * coord.x / Lambda;
-            xWeights.y = One - xWeights.x - xWeights.z - xWeights.w;
-            s = One - coord.y;
-            yWeights.w = pown(s,3) / Lambda;
-            s = coord.y * coord.y;
-            yWeights.z = Two / Three - h * s * (Two - coord.y);
-            yWeights.x = s * coord.y / Lambda;
-            yWeights.y = One - yWeights.x - yWeights.z - yWeights.w;
-
-            //unwrapped interpolation loop (sorry 16 iterations) 4x4 interpolation coefficients
-            //y loop 0
-            //broadcast then add
-            combinedInterpolationIndices = (int4)(yInterpolationIndices.x) + xInterpolationIndices;
-            s = yWeights.x * (xWeights.x * target[combinedInterpolationIndices.x]
-                + xWeights.y * target[combinedInterpolationIndices.y]
-                + xWeights.z * target[combinedInterpolationIndices.z]
-                + xWeights.w * target[combinedInterpolationIndices.w]);
-            //y loop 1
-            combinedInterpolationIndices = (int4)(yInterpolationIndices.y) + xInterpolationIndices;
-            s += yWeights.y * (xWeights.x * target[combinedInterpolationIndices.x]
-                + xWeights.y * target[combinedInterpolationIndices.y]
-                + xWeights.z * target[combinedInterpolationIndices.z]
-                + xWeights.w * target[combinedInterpolationIndices.w]);
-            //y loop 2
-            combinedInterpolationIndices = (int4)(yInterpolationIndices.z) + xInterpolationIndices;
-            s += yWeights.z * (xWeights.x * target[combinedInterpolationIndices.x]
-                + xWeights.y * target[combinedInterpolationIndices.y]
-                + xWeights.z * target[combinedInterpolationIndices.z]
-                + xWeights.w * target[combinedInterpolationIndices.w]);
-            //y loop 3
-            combinedInterpolationIndices = (int4)(yInterpolationIndices.w) + xInterpolationIndices;
-            s += yWeights.w * (xWeights.x * target[combinedInterpolationIndices.x]
-                + xWeights.y * target[combinedInterpolationIndices.y]
-                + xWeights.z * target[combinedInterpolationIndices.z]
-                + xWeights.w * target[combinedInterpolationIndices.w]);
-            //now s is the value
+            xInterpolationIndices = calculatexInterpolationIndices(coord.x, doubleTargetWidth, targetwidth);
+            yInterpolationIndices = calculateyInterpolationIndices(coord.y, doubleTargetHeight, targetheight, targetwidth);            
+            s = interpolate(coord, xInterpolationIndices, yInterpolationIndices, target);
             diff = source[i] - s;
-            ldiffout[nIndex] += pown(diff,2);
-            Theta = yGradient[i] * (FPT)column - xGradient[i] * (FPT)row;
-            lgrad0[nIndex] += diff * Theta;
-            lgrad1[nIndex] += diff * xGradient[i];
-            lgrad2[nIndex] += diff * yGradient[i];
-            lhessian00[nIndex] += pown(Theta,2);
-            lhessian01[nIndex] += Theta * xGradient[i];
-            lhessian02[nIndex] += Theta * yGradient[i];
-            lhessian11[nIndex] += pown(xGradient[i],2);
-            lhessian12[nIndex] += xGradient[i] * yGradient[i];
-            lhessian22[nIndex] += pown(yGradient[i],2);
+            //Theta = yGradient[i] * (FPT)column - xGradient[i] * (FPT)row;
+            Theta = dot((FPTTWO)(yGradient[i], -xGradient[i]), (FPTTWO)((FPT)column, (FPT)row));
+            //ldiffout[nIndex] += pown(diff,2);
+            //lgrad0[nIndex] += diff * Theta;
+            //lgrad1[nIndex] += diff * xGradient[i];
+            //lgrad2[nIndex] += diff * yGradient[i];
+            __private FPTFOUR tmp4 = fma((FPTFOUR)(diff, Theta, xGradient[i], yGradient[i]), (FPTFOUR)diff, (FPTFOUR)(ldiffout[nIndex], lgrad0[nIndex], lgrad1[nIndex], lgrad2[nIndex]));
+            ldiffout[nIndex] = tmp4.x;
+            lgrad0[nIndex] = tmp4.y;
+            lgrad1[nIndex] = tmp4.z;
+            lgrad2[nIndex] = tmp4.w;
+            //lhessian00[nIndex] += pown(Theta,2);
+            //lhessian01[nIndex] += Theta * xGradient[i];
+            //lhessian02[nIndex] += Theta * yGradient[i];
+            __private FPTTHREE tmp = fma((FPTTHREE)(Theta, xGradient[i], yGradient[i]), (FPTTHREE)Theta, (FPTTHREE)(lhessian00[nIndex], lhessian01[nIndex], lhessian02[nIndex])); //Slightly less accurate
+            lhessian00[nIndex] = tmp.x;
+            lhessian01[nIndex] = tmp.y;
+            lhessian02[nIndex] = tmp.z;
+            //lhessian11[nIndex] += pown(xGradient[i],2);
+            //lhessian12[nIndex] += xGradient[i] * yGradient[i];
+            //lhessian22[nIndex] += pown(yGradient[i],2);
+            tmp = fma((FPTTHREE)(xGradient[i], xGradient[i], yGradient[i]), (FPTTHREE)(xGradient[i], yGradient[i], yGradient[i]), (FPTTHREE)(lhessian11[nIndex], lhessian12[nIndex], lhessian22[nIndex]));
+            lhessian11[nIndex] = tmp.x;
+            lhessian12[nIndex] = tmp.y;
+            lhessian22[nIndex] = tmp.z;
         }
         // ensure reads are not out of bounds
         if(i + blockSize < sourcewidth * sourceheight)
@@ -2157,134 +2009,35 @@ const int doubleTargetHeight)
             if ((Msk.x >= 0) && (Msk.x < targetwidth) && (Msk.y >= 0) && (Msk.y < targetheight))
             {
                 lmask[nIndex] += One;
-                //Following is the calculation using mirrored boundaries of the x and y indices of the coefficients used for interpolation
-                //calculate the x coordinates for interpolation (loop unwrapped) for speed
-                p = (coord.x >= 0) ? (((int)trunc(coord.x)) + 2) : (((int)trunc(coord.x)) + 1);
-                //loop iteration 0
-                /*
-                q = (p < 0) ? (-1 - p) : p;
-                is a diverging statement, although it incurs more operations the following equivalent will likely be faster
-                */
-                q = abs(p) - rotate(p&(int)0x80000000,(int)1);
-                if(q >= doubleTargetWidth)
-                {
-                    q -= (doubleTargetWidth) * (q / (doubleTargetWidth)); //Warning: this is an integer division it doesn't yield q
-                }
-                xInterpolationIndices.x = q >= targetwidth ? (doubleTargetWidth - 1 - q) : q;
-                //loop iteration 1
-                p--;
-                q = abs(p) - rotate(p&(int)0x80000000,(int)1);
-                if(q >= doubleTargetWidth)
-                {
-                    q -= (doubleTargetWidth) * (q / (doubleTargetWidth)); //Warning: this is an integer division it doesn't yield q
-                }
-                xInterpolationIndices.y = q >= targetwidth ? (doubleTargetWidth - 1 - q) : q;
-                //loop iteration 2
-                p--;
-                q = abs(p) - rotate(p&(int)0x80000000,(int)1);
-                if(q >= doubleTargetWidth)
-                {
-                    q -= (doubleTargetWidth) * (q / (doubleTargetWidth)); //Warning: this is an integer division it doesn't yield q
-                }
-                xInterpolationIndices.z = q >= targetwidth ? (doubleTargetWidth - 1 - q) : q;
-                //loop iteration 3
-                p--;
-                q = abs(p) - rotate(p&(int)0x80000000,(int)1);
-                if(q >= doubleTargetWidth)
-                {
-                    q -= (doubleTargetWidth) * (q / (doubleTargetWidth)); //Warning: this is an integer division it doesn't yield q
-                }
-                xInterpolationIndices.w = q >= targetwidth ? (doubleTargetWidth - 1 - q) : q;
-
-                p = (coord.y >= 0) ? (((int)trunc(coord.y)) + 2) : (((int)trunc(coord.y)) + 1);
-                //loop iteration 0
-                q = abs(p) - rotate(p&(int)0x80000000,(int)1);
-                if(q >= doubleTargetHeight)
-                {
-                    q -= (doubleTargetHeight) * (q / (doubleTargetHeight));//WARNING: this is an integer division which may not yield q
-                }
-                yInterpolationIndices.x = (targetheight <= q) ? (((doubleTargetHeight) - 1 - q) * targetwidth) : (q * targetwidth);//this is the linear absolute index NOT the row
-                //loop iteration 1
-                p--;
-                q = abs(p) - rotate(p&(int)0x80000000,(int)1);
-                if(q >= doubleTargetHeight)
-                {
-                    q -= (doubleTargetHeight) * (q / (doubleTargetHeight));//WARNING: this is an integer division which may not yield q
-                }
-                yInterpolationIndices.y = (targetheight <= q) ? (((doubleTargetHeight) - 1 - q) * targetwidth) : (q * targetwidth);//this is the linear absolute index NOT the row
-                //loop iteration 2
-                p--;
-                q = abs(p) - rotate(p&(int)0x80000000,(int)1);
-                if(q >= doubleTargetHeight)
-                {
-                    q -= (doubleTargetHeight) * (q / (doubleTargetHeight));//WARNING: this is an integer division which may not yield q
-                }
-                yInterpolationIndices.z = (targetheight <= q) ? (((doubleTargetHeight) - 1 - q) * targetwidth) : (q * targetwidth);//this is the linear absolute index NOT the row
-                //loop iteration 3
-                p--;
-                q = abs(p) - rotate(p&(int)0x80000000,(int)1);
-                if(q >= doubleTargetHeight)
-                {
-                    q -= (doubleTargetHeight) * (q / (doubleTargetHeight));//WARNING: this is an integer division which may not yield q
-                }
-                yInterpolationIndices.w = (targetheight <= q) ? (((doubleTargetHeight) - 1 - q) * targetwidth) : (q * targetwidth);//this is the linear absolute index NOT the row
-
-                coord.x -= (coord.x >= Zero) ? (FPT)((int)trunc(coord.x)) : (FPT)(((int)trunc(coord.x)) - 1);//get the residual should also be possible with floor
-                coord.y -= (coord.y >= Zero) ? (FPT)((int)trunc(coord.y)) : (FPT)(((int)trunc(coord.y)) - 1);//get the residual should also be possible with floor
-
-                //Calculate the weights for interpolation
-                s = One - coord.x;
-                xWeights.w = pown(s,3) / Lambda;
-                s = coord.x * coord.x;
-                xWeights.z = Two / Three - h * s * (Two - coord.x);
-                xWeights.x = s * coord.x / Lambda;
-                xWeights.y = One - xWeights.x - xWeights.z - xWeights.w;
-                s = One - coord.y;
-                yWeights.w = pown(s,3) / Lambda;
-                s = coord.y * coord.y;
-                yWeights.z = Two / Three - h * s * (Two - coord.y);
-                yWeights.x = s * coord.y / Lambda;
-                yWeights.y = One - yWeights.x - yWeights.z - yWeights.w;
-
-                //unwrapped interpolation loop (sorry 16 iterations) 4x4 interpolation coefficients
-                //y loop 0
-                //broadcast then add
-                combinedInterpolationIndices = (int4)(yInterpolationIndices.x) + xInterpolationIndices;
-                s = yWeights.x * (xWeights.x * target[combinedInterpolationIndices.x]
-                    + xWeights.y * target[combinedInterpolationIndices.y]
-                    + xWeights.z * target[combinedInterpolationIndices.z]
-                    + xWeights.w * target[combinedInterpolationIndices.w]);
-                //y loop 1
-                combinedInterpolationIndices = (int4)(yInterpolationIndices.y) + xInterpolationIndices;
-                s += yWeights.y * (xWeights.x * target[combinedInterpolationIndices.x]
-                    + xWeights.y * target[combinedInterpolationIndices.y]
-                    + xWeights.z * target[combinedInterpolationIndices.z]
-                    + xWeights.w * target[combinedInterpolationIndices.w]);
-                //y loop 2
-                combinedInterpolationIndices = (int4)(yInterpolationIndices.z) + xInterpolationIndices;
-                s += yWeights.z * (xWeights.x * target[combinedInterpolationIndices.x]
-                    + xWeights.y * target[combinedInterpolationIndices.y]
-                    + xWeights.z * target[combinedInterpolationIndices.z]
-                    + xWeights.w * target[combinedInterpolationIndices.w]);
-                //y loop 3
-                combinedInterpolationIndices = (int4)(yInterpolationIndices.w) + xInterpolationIndices;
-                s += yWeights.w * (xWeights.x * target[combinedInterpolationIndices.x]
-                    + xWeights.y * target[combinedInterpolationIndices.y]
-                    + xWeights.z * target[combinedInterpolationIndices.z]
-                    + xWeights.w * target[combinedInterpolationIndices.w]);
-                //now s is the value
+                xInterpolationIndices = calculatexInterpolationIndices(coord.x, doubleTargetWidth, targetwidth);
+                yInterpolationIndices = calculateyInterpolationIndices(coord.y, doubleTargetHeight, targetheight, targetwidth); 
+                s = interpolate(coord, xInterpolationIndices, yInterpolationIndices, target);
                 diff = source[lIdx] - s;
-                ldiffout[nIndex] += pown(diff,2);
-                Theta = yGradient[lIdx] * (FPT)column - xGradient[lIdx] * (FPT)row;
-                lgrad0[nIndex] += diff * Theta;
-                lgrad1[nIndex] += diff * xGradient[lIdx];
-                lgrad2[nIndex] += diff * yGradient[lIdx];
-                lhessian00[nIndex] += pown(Theta,2);
-                lhessian01[nIndex] += Theta * xGradient[lIdx];
-                lhessian02[nIndex] += Theta * yGradient[lIdx];
-                lhessian11[nIndex] += pown(xGradient[lIdx],2);
-                lhessian12[nIndex] += xGradient[lIdx] * yGradient[lIdx];
-                lhessian22[nIndex] += pown(yGradient[lIdx],2);
+                //Theta = yGradient[lIdx] * (FPT)column - xGradient[lIdx] * (FPT)row;
+                Theta = dot((FPTTWO)(yGradient[lIdx], -xGradient[lIdx]), (FPTTWO)((FPT)column, (FPT)row));
+                //ldiffout[nIndex] += pown(diff,2);
+                //lgrad0[nIndex] += diff * Theta;
+                //lgrad1[nIndex] += diff * xGradient[lIdx];
+                //lgrad2[nIndex] += diff * yGradient[lIdx];
+                __private FPTFOUR tmp4 = fma((FPTFOUR)(diff, Theta, xGradient[lIdx], yGradient[lIdx]), (FPTFOUR)diff, (FPTFOUR)(ldiffout[nIndex], lgrad0[nIndex], lgrad1[nIndex], lgrad2[nIndex]));
+                ldiffout[nIndex] = tmp4.x;
+                lgrad0[nIndex] = tmp4.y;
+                lgrad1[nIndex] = tmp4.z;
+                lgrad2[nIndex] = tmp4.w;
+                //lhessian00[nIndex] += pown(Theta,2);
+                //lhessian01[nIndex] += Theta * xGradient[lIdx];
+                //lhessian02[nIndex] += Theta * yGradient[lIdx];
+                __private FPTTHREE tmp = fma((FPTTHREE)(Theta, xGradient[lIdx], yGradient[lIdx]), (FPTTHREE)Theta, (FPTTHREE)(lhessian00[nIndex], lhessian01[nIndex], lhessian02[nIndex])); //Slightly less accurate
+                lhessian00[nIndex] = tmp.x;
+                lhessian01[nIndex] = tmp.y;
+                lhessian02[nIndex] = tmp.z;
+                //lhessian11[nIndex] += pown(xGradient[lIdx],2);
+                //lhessian12[nIndex] += xGradient[lIdx] * yGradient[lIdx];
+                //lhessian22[nIndex] += pown(yGradient[lIdx],2);
+                tmp = fma((FPTTHREE)(xGradient[lIdx], xGradient[lIdx], yGradient[lIdx]), (FPTTHREE)(xGradient[lIdx], yGradient[lIdx], yGradient[lIdx]), (FPTTHREE)(lhessian11[nIndex], lhessian12[nIndex], lhessian22[nIndex]));
+                lhessian11[nIndex] = tmp.x;
+                lhessian12[nIndex] = tmp.y;
+                lhessian22[nIndex] = tmp.z;
             }
         }
         i += gridSize;
@@ -2379,15 +2132,13 @@ const int doubleTargetHeight)
     {
         __private int column = i % sourcewidth;
         __private int row = (i - column)/sourcewidth;
-        __private FPTTWO coord = (FPTTWO)(offsetx + ((FPT)column), offsety + ((FPT)row));
+        __private FPTTWO coord = (FPTTWO)(offsetx, offsety) + (FPTTWO)(((FPT)column), ((FPT)row));
         
         __private int4 xInterpolationIndices;
         __private int4 yInterpolationIndices;
         __private int4 combinedInterpolationIndices;
         __private FPTFOUR xWeights;
         __private FPTFOUR yWeights;
-        __private int p;
-        __private int q;
         __private FPT s;
         __private FPT diff;
         
@@ -2395,105 +2146,24 @@ const int doubleTargetHeight)
         if ((Msk.x >= 0) && (Msk.x < targetwidth) && (Msk.y >= 0) && (Msk.y < targetheight))
         {
             lmask[nIndex] += One;
-            //Following is the calculation using mirrored boundaries of the x and y indices of the coefficients used for interpolation
-            //calculate the x coordinates for interpolation (loop unwrapped) for speed
-            p = (coord.x >= 0) ? (((int)trunc(coord.x)) + 2) : (((int)trunc(coord.x)) + 1);
-            //loop iteration 0
-            /*
-            q = (p < 0) ? (-1 - p) : p;
-            is a diverging statement, although it incurs more operations the following equivalent will likely be faster
-            */
-            q = abs(p) - rotate(p&(int)0x80000000,(int)1);
-            q = q<doubleTargetWidth?q:q%doubleTargetWidth;
-            xInterpolationIndices.x = q >= targetwidth ? (doubleTargetWidth - 1 - q) : q;
-            //loop iteration 1
-            p--;
-            q = abs(p) - rotate(p&(int)0x80000000,(int)1);
-            q = q<doubleTargetWidth?q:q%doubleTargetWidth;
-            xInterpolationIndices.y = q >= targetwidth ? (doubleTargetWidth - 1 - q) : q;
-            //loop iteration 2
-            p--;
-            q = abs(p) - rotate(p&(int)0x80000000,(int)1);
-            q = q<doubleTargetWidth?q:q%doubleTargetWidth;
-            xInterpolationIndices.z = q >= targetwidth ? (doubleTargetWidth - 1 - q) : q;
-            //loop iteration 3
-            p--;
-            q = abs(p) - rotate(p&(int)0x80000000,(int)1);
-            q = q<doubleTargetWidth?q:q%doubleTargetWidth;
-            xInterpolationIndices.w = q >= targetwidth ? (doubleTargetWidth - 1 - q) : q;
-
-            p = (coord.y >= 0) ? (((int)trunc(coord.y)) + 2) : (((int)trunc(coord.y)) + 1);
-            //loop iteration 0
-            q = abs(p) - rotate(p&(int)0x80000000,(int)1);
-            q = q<doubleTargetHeight?q:q%doubleTargetHeight;
-            yInterpolationIndices.x = (targetheight <= q) ? (((doubleTargetHeight) - 1 - q) * targetwidth) : (q * targetwidth);//this is the linear absolute index NOT the row
-            //loop iteration 1
-            p--;
-            q = abs(p) - rotate(p&(int)0x80000000,(int)1);
-            q = q<doubleTargetHeight?q:q%doubleTargetHeight;
-            yInterpolationIndices.y = (targetheight <= q) ? (((doubleTargetHeight) - 1 - q) * targetwidth) : (q * targetwidth);//this is the linear absolute index NOT the row
-            //loop iteration 2
-            p--;
-            q = abs(p) - rotate(p&(int)0x80000000,(int)1);
-            q = q<doubleTargetHeight?q:q%doubleTargetHeight;
-            yInterpolationIndices.z = (targetheight <= q) ? (((doubleTargetHeight) - 1 - q) * targetwidth) : (q * targetwidth);//this is the linear absolute index NOT the row
-            //loop iteration 3
-            p--;
-            q = abs(p) - rotate(p&(int)0x80000000,(int)1);
-            q = q<doubleTargetHeight?q:q%doubleTargetHeight;
-            yInterpolationIndices.w = (targetheight <= q) ? (((doubleTargetHeight) - 1 - q) * targetwidth) : (q * targetwidth);//this is the linear absolute index NOT the row
-
-            coord.x -= (coord.x >= Zero) ? (FPT)((int)trunc(coord.x)) : (FPT)(((int)trunc(coord.x)) - 1);//get the residual should also be possible with floor
-            coord.y -= (coord.y >= Zero) ? (FPT)((int)trunc(coord.y)) : (FPT)(((int)trunc(coord.y)) - 1);//get the residual should also be possible with floor
-
-            //Calculate the weights for interpolation
-            s = One - coord.x;
-            xWeights.w = pown(s,3) / Lambda;
-            s = coord.x * coord.x;
-            xWeights.z = Two / Three - h * s * (Two - coord.x);
-            xWeights.x = s * coord.x / Lambda;
-            xWeights.y = One - xWeights.x - xWeights.z - xWeights.w;
-            s = One - coord.y;
-            yWeights.w = pown(s,3) / Lambda;
-            s = coord.y * coord.y;
-            yWeights.z = Two / Three - h * s * (Two - coord.y);
-            yWeights.x = s * coord.y / Lambda;
-            yWeights.y = One - yWeights.x - yWeights.z - yWeights.w;
-
-            //unwrapped interpolation loop (sorry 16 iterations) 4x4 interpolation coefficients
-            //y loop 0
-            //broadcast then add
-            combinedInterpolationIndices = (int4)(yInterpolationIndices.x) + xInterpolationIndices;
-            s = yWeights.x * (xWeights.x * target[combinedInterpolationIndices.x]
-                + xWeights.y * target[combinedInterpolationIndices.y]
-                + xWeights.z * target[combinedInterpolationIndices.z]
-                + xWeights.w * target[combinedInterpolationIndices.w]);
-            //y loop 1
-            combinedInterpolationIndices = (int4)(yInterpolationIndices.y) + xInterpolationIndices;
-            s += yWeights.y * (xWeights.x * target[combinedInterpolationIndices.x]
-                + xWeights.y * target[combinedInterpolationIndices.y]
-                + xWeights.z * target[combinedInterpolationIndices.z]
-                + xWeights.w * target[combinedInterpolationIndices.w]);
-            //y loop 2
-            combinedInterpolationIndices = (int4)(yInterpolationIndices.z) + xInterpolationIndices;
-            s += yWeights.z * (xWeights.x * target[combinedInterpolationIndices.x]
-                + xWeights.y * target[combinedInterpolationIndices.y]
-                + xWeights.z * target[combinedInterpolationIndices.z]
-                + xWeights.w * target[combinedInterpolationIndices.w]);
-            //y loop 3
-            combinedInterpolationIndices = (int4)(yInterpolationIndices.w) + xInterpolationIndices;
-            s += yWeights.w * (xWeights.x * target[combinedInterpolationIndices.x]
-                + xWeights.y * target[combinedInterpolationIndices.y]
-                + xWeights.z * target[combinedInterpolationIndices.z]
-                + xWeights.w * target[combinedInterpolationIndices.w]);
-            //now s is the value
+            xInterpolationIndices = calculatexInterpolationIndices(coord.x, doubleTargetWidth, targetwidth);
+            yInterpolationIndices = calculateyInterpolationIndices(coord.y, doubleTargetHeight, targetheight, targetwidth);
+            s = interpolate(coord, xInterpolationIndices, yInterpolationIndices, target);
             diff = source[i] - s;
-            ldiffout[nIndex] += pown(diff,2);
-            lgrad0[nIndex] += diff * xGradient[i];
-            lgrad1[nIndex] += diff * yGradient[i];
-            lhessian00[nIndex] += pown(xGradient[i],2);
-            lhessian01[nIndex] += xGradient[i] * yGradient[i];
-            lhessian11[nIndex] += pown(yGradient[i],2);
+            //ldiffout[nIndex] += pown(diff,2);
+            //lgrad0[nIndex] += diff * xGradient[i];
+            //lgrad1[nIndex] += diff * yGradient[i];
+            __private FPTTHREE tmp3 = fma((FPTTHREE)(diff, xGradient[i], yGradient[i]), (FPTTHREE)diff, (FPTTHREE)(ldiffout[nIndex], lgrad0[nIndex], lgrad1[nIndex]));
+            ldiffout[nIndex] = tmp3.x;
+            lgrad0[nIndex] = tmp3.y;
+            lgrad1[nIndex] = tmp3.z;
+            //lhessian00[nIndex] += pown(xGradient[i],2);
+            //lhessian01[nIndex] += xGradient[i] * yGradient[i];
+            //lhessian11[nIndex] += pown(yGradient[i],2);
+            tmp3 = fma((FPTTHREE)(xGradient[i], xGradient[i], yGradient[i]), (FPTTHREE)(xGradient[i], yGradient[i], yGradient[i]), (FPTTHREE)(lhessian00[nIndex], lhessian01[nIndex], lhessian11[nIndex]));
+            lhessian00[nIndex] = tmp3.x;
+            lhessian01[nIndex] = tmp3.y;
+            lhessian11[nIndex] = tmp3.z;
         }
         // ensure reads are not out of bounds
         if(i + blockSize < sourcewidth * sourceheight)
@@ -2501,134 +2171,29 @@ const int doubleTargetHeight)
             __private int lIdx = i + blockSize;
             column = lIdx % sourcewidth;
             row = (lIdx - column)/sourcewidth;
-            coord = (FPTTWO)(offsetx + ((FPT)column), offsety + ((FPT)row));
+            coord = (FPTTWO)(offsetx, offsety) + (FPTTWO)(((FPT)column), ((FPT)row));
             Msk = (int2)((int)round(coord.x), (int)round(coord.y));
             if ((Msk.x >= 0) && (Msk.x < targetwidth) && (Msk.y >= 0) && (Msk.y < targetheight))
             {
                 lmask[nIndex] += One;
-                //Following is the calculation using mirrored boundaries of the x and y indices of the coefficients used for interpolation
-                //calculate the x coordinates for interpolation (loop unwrapped) for speed
-                p = (coord.x >= 0) ? (((int)trunc(coord.x)) + 2) : (((int)trunc(coord.x)) + 1);
-                //loop iteration 0
-                /*
-                q = (p < 0) ? (-1 - p) : p;
-                is a diverging statement, although it incurs more operations the following equivalent will likely be faster
-                */
-                q = abs(p) - rotate(p&(int)0x80000000,(int)1);
-                if(q >= doubleTargetWidth)
-                {
-                    q -= (doubleTargetWidth) * (q / (doubleTargetWidth)); //Warning: this is an integer division it doesn't yield q
-                }
-                xInterpolationIndices.x = q >= targetwidth ? (doubleTargetWidth - 1 - q) : q;
-                //loop iteration 1
-                p--;
-                q = abs(p) - rotate(p&(int)0x80000000,(int)1);
-                if(q >= doubleTargetWidth)
-                {
-                    q -= (doubleTargetWidth) * (q / (doubleTargetWidth)); //Warning: this is an integer division it doesn't yield q
-                }
-                xInterpolationIndices.y = q >= targetwidth ? (doubleTargetWidth - 1 - q) : q;
-                //loop iteration 2
-                p--;
-                q = abs(p) - rotate(p&(int)0x80000000,(int)1);
-                if(q >= doubleTargetWidth)
-                {
-                    q -= (doubleTargetWidth) * (q / (doubleTargetWidth)); //Warning: this is an integer division it doesn't yield q
-                }
-                xInterpolationIndices.z = q >= targetwidth ? (doubleTargetWidth - 1 - q) : q;
-                //loop iteration 3
-                p--;
-                q = abs(p) - rotate(p&(int)0x80000000,(int)1);
-                if(q >= doubleTargetWidth)
-                {
-                    q -= (doubleTargetWidth) * (q / (doubleTargetWidth)); //Warning: this is an integer division it doesn't yield q
-                }
-                xInterpolationIndices.w = q >= targetwidth ? (doubleTargetWidth - 1 - q) : q;
-
-                p = (coord.y >= 0) ? (((int)trunc(coord.y)) + 2) : (((int)trunc(coord.y)) + 1);
-                //loop iteration 0
-                q = abs(p) - rotate(p&(int)0x80000000,(int)1);
-                if(q >= doubleTargetHeight)
-                {
-                    q -= (doubleTargetHeight) * (q / (doubleTargetHeight));//WARNING: this is an integer division which may not yield q
-                }
-                yInterpolationIndices.x = (targetheight <= q) ? (((doubleTargetHeight) - 1 - q) * targetwidth) : (q * targetwidth);//this is the linear absolute index NOT the row
-                //loop iteration 1
-                p--;
-                q = abs(p) - rotate(p&(int)0x80000000,(int)1);
-                if(q >= doubleTargetHeight)
-                {
-                    q -= (doubleTargetHeight) * (q / (doubleTargetHeight));//WARNING: this is an integer division which may not yield q
-                }
-                yInterpolationIndices.y = (targetheight <= q) ? (((doubleTargetHeight) - 1 - q) * targetwidth) : (q * targetwidth);//this is the linear absolute index NOT the row
-                //loop iteration 2
-                p--;
-                q = abs(p) - rotate(p&(int)0x80000000,(int)1);
-                if(q >= doubleTargetHeight)
-                {
-                    q -= (doubleTargetHeight) * (q / (doubleTargetHeight));//WARNING: this is an integer division which may not yield q
-                }
-                yInterpolationIndices.z = (targetheight <= q) ? (((doubleTargetHeight) - 1 - q) * targetwidth) : (q * targetwidth);//this is the linear absolute index NOT the row
-                //loop iteration 3
-                p--;
-                q = abs(p) - rotate(p&(int)0x80000000,(int)1);
-                if(q >= doubleTargetHeight)
-                {
-                    q -= (doubleTargetHeight) * (q / (doubleTargetHeight));//WARNING: this is an integer division which may not yield q
-                }
-                yInterpolationIndices.w = (targetheight <= q) ? (((doubleTargetHeight) - 1 - q) * targetwidth) : (q * targetwidth);//this is the linear absolute index NOT the row
-
-                coord.x -= (coord.x >= Zero) ? (FPT)((int)trunc(coord.x)) : (FPT)(((int)trunc(coord.x)) - 1);//get the residual should also be possible with floor
-                coord.y -= (coord.y >= Zero) ? (FPT)((int)trunc(coord.y)) : (FPT)(((int)trunc(coord.y)) - 1);//get the residual should also be possible with floor
-
-                //Calculate the weights for interpolation
-                s = One - coord.x;
-                xWeights.w = pown(s,3) / Lambda;
-                s = coord.x * coord.x;
-                xWeights.z = Two / Three - h * s * (Two - coord.x);
-                xWeights.x = s * coord.x / Lambda;
-                xWeights.y = One - xWeights.x - xWeights.z - xWeights.w;
-                s = One - coord.y;
-                yWeights.w = pown(s,3) / Lambda;
-                s = coord.y * coord.y;
-                yWeights.z = Two / Three - h * s * (Two - coord.y);
-                yWeights.x = s * coord.y / Lambda;
-                yWeights.y = One - yWeights.x - yWeights.z - yWeights.w;
-
-                //unwrapped interpolation loop (sorry 16 iterations) 4x4 interpolation coefficients
-                //y loop 0
-                //broadcast then add
-                combinedInterpolationIndices = (int4)(yInterpolationIndices.x) + xInterpolationIndices;
-                s = yWeights.x * (xWeights.x * target[combinedInterpolationIndices.x]
-                    + xWeights.y * target[combinedInterpolationIndices.y]
-                    + xWeights.z * target[combinedInterpolationIndices.z]
-                    + xWeights.w * target[combinedInterpolationIndices.w]);
-                //y loop 1
-                combinedInterpolationIndices = (int4)(yInterpolationIndices.y) + xInterpolationIndices;
-                s += yWeights.y * (xWeights.x * target[combinedInterpolationIndices.x]
-                    + xWeights.y * target[combinedInterpolationIndices.y]
-                    + xWeights.z * target[combinedInterpolationIndices.z]
-                    + xWeights.w * target[combinedInterpolationIndices.w]);
-                //y loop 2
-                combinedInterpolationIndices = (int4)(yInterpolationIndices.z) + xInterpolationIndices;
-                s += yWeights.z * (xWeights.x * target[combinedInterpolationIndices.x]
-                    + xWeights.y * target[combinedInterpolationIndices.y]
-                    + xWeights.z * target[combinedInterpolationIndices.z]
-                    + xWeights.w * target[combinedInterpolationIndices.w]);
-                //y loop 3
-                combinedInterpolationIndices = (int4)(yInterpolationIndices.w) + xInterpolationIndices;
-                s += yWeights.w * (xWeights.x * target[combinedInterpolationIndices.x]
-                    + xWeights.y * target[combinedInterpolationIndices.y]
-                    + xWeights.z * target[combinedInterpolationIndices.z]
-                    + xWeights.w * target[combinedInterpolationIndices.w]);
-                //now s is the value
+                xInterpolationIndices = calculatexInterpolationIndices(coord.x, doubleTargetWidth, targetwidth);
+                yInterpolationIndices = calculateyInterpolationIndices(coord.y, doubleTargetHeight, targetheight, targetwidth);
+                s = interpolate(coord, xInterpolationIndices, yInterpolationIndices, target);
                 diff = source[lIdx] - s;
-                ldiffout[nIndex] += pown(diff,2);
-                lgrad0[nIndex] += diff * xGradient[lIdx];
-                lgrad1[nIndex] += diff * yGradient[lIdx];
-                lhessian00[nIndex] += pown(xGradient[lIdx],2);
-                lhessian01[nIndex] += xGradient[lIdx] * yGradient[lIdx];
-                lhessian11[nIndex] += pown(yGradient[lIdx],2);
+                //ldiffout[nIndex] += pown(diff,2);
+                //lgrad0[nIndex] += diff * xGradient[lIdx];
+                //lgrad1[nIndex] += diff * yGradient[lIdx];
+                __private FPTTHREE tmp3 = fma((FPTTHREE)(diff, xGradient[lIdx], yGradient[lIdx]), (FPTTHREE)diff, (FPTTHREE)(ldiffout[nIndex], lgrad0[nIndex], lgrad1[nIndex]));
+                ldiffout[nIndex] = tmp3.x;
+                lgrad0[nIndex] = tmp3.y;
+                lgrad1[nIndex] = tmp3.z;
+                //lhessian00[nIndex] += pown(xGradient[lIdx],2);
+                //lhessian01[nIndex] += xGradient[lIdx] * yGradient[lIdx];
+                //lhessian11[nIndex] += pown(yGradient[lIdx],2);
+                tmp3 = fma((FPTTHREE)(xGradient[lIdx], xGradient[lIdx], yGradient[lIdx]), (FPTTHREE)(xGradient[lIdx], yGradient[lIdx], yGradient[lIdx]), (FPTTHREE)(lhessian00[nIndex], lhessian01[nIndex], lhessian11[nIndex]));
+                lhessian00[nIndex] = tmp3.x;
+                lhessian01[nIndex] = tmp3.y;
+                lhessian11[nIndex] = tmp3.z;
             }
         }
         i += gridSize;
@@ -2669,7 +2234,7 @@ const int doubleTargetHeight)
 }
 
 
-__kernel void transformImageWithBsplineInterpolation(const __global FPT *source ,__global FPT *target, const int sourcewidth, const int sourceheight, const FPT offsetx, const FPT offsety, const FPT angle)
+__kernel void transformImageWithBsplineInterpolation(const __global FPT *source ,__global FPT *target, const int sourcewidth, const int sourceheight, const int doubleSourceWidth, const int doubleSourceHeight, const FPT offsetx, const FPT offsety, const FPT cosangle, const FPT negsinangle)
 {
     __private int nIndex = get_global_id(0);//this directly corresponds to the linear address of the !SOURCE! pixel
     if(nIndex < sourcewidth * sourceheight)
@@ -2677,125 +2242,19 @@ __kernel void transformImageWithBsplineInterpolation(const __global FPT *source 
         __private int column = nIndex % sourcewidth;
         __private int row = (nIndex - column)/sourcewidth;
 
-        __private FPTTWO xvec = (FPTTWO)(cos(angle),-sin(angle));//warning: this is not the x vector but it is the vector added in the x direction
-        __private FPTTWO yvec = (FPTTWO)(-xvec.y,xvec.x);//warning: this is not the y vector but it is the vector added in the y direction
+        //TODO: pass as parameter
+        __private FPTTWO xvec = (FPTTWO)(cosangle, negsinangle);//warning: this is not the x vector but it is the vector added in the x direction
+        __private FPTTWO yvec = (FPTTWO)(-xvec.y, xvec.x);//warning: this is not the y vector but it is the vector added in the y direction
         __private FPTTWO coord = (FPTTWO)(offsetx, offsety) + ((FPT)column) * xvec + ((FPT)row) * yvec;
 
         __private int2 Msk = (int2)((int)round(coord.x), (int)round(coord.y));
+        __private int4 xInterpolationIndices;
+        __private int4 yInterpolationIndices;
         if ((Msk.x >= 0) && (Msk.x < sourcewidth) && (Msk.y >= 0) && (Msk.y < sourceheight))
         {
-            //Following is the calculation using mirrored boundaries of the x and y indices of the coefficients used for interpolation
-            //calculate the x coordinates for interpolation (loop unwrapped) for speed
-            __private int4 xInterpolationIndices;
-            __private int p = (coord.x >= 0) ? (((int)trunc(coord.x)) + 2) : (((int)trunc(coord.x)) + 1);
-            //loop iteration 0
-            __private int q = (p < 0) ? (-1 - p) : p;
-            if(q >= 2*sourcewidth)
-            {
-                q -= (2*sourcewidth) * (q / (2*sourcewidth)); //Warning: this is an integer division it doesn't yield q
-            }
-            xInterpolationIndices.x = q >= sourcewidth ? (2*sourcewidth - 1 - q) : q;
-            //loop iteration 1
-            p--;
-            q = (p < 0) ? (-1 - p) : p;
-            if(q >= 2*sourcewidth)
-            {
-                q -= (2*sourcewidth) * (q / (2*sourcewidth)); //Warning: this is an integer division it doesn't yield q
-            }
-            xInterpolationIndices.y = q >= sourcewidth ? (2*sourcewidth - 1 - q) : q;
-            //loop iteration 2
-            p--;
-            q = (p < 0) ? (-1 - p) : p;
-            if(q >= 2*sourcewidth)
-            {
-                q -= (2*sourcewidth) * (q / (2*sourcewidth)); //Warning: this is an integer division it doesn't yield q
-            }
-            xInterpolationIndices.z = q >= sourcewidth ? (2*sourcewidth - 1 - q) : q;
-            //loop iteration 3
-            p--;
-            q = (p < 0) ? (-1 - p) : p;
-            if(q >= 2*sourcewidth)
-            {
-                q -= (2*sourcewidth) * (q / (2*sourcewidth)); //Warning: this is an integer division it doesn't yield q
-            }
-            xInterpolationIndices.w = q >= sourcewidth ? (2*sourcewidth - 1 - q) : q;
-
-            __private int4 yInterpolationIndices;
-            p = (coord.y >= 0) ? (((int)trunc(coord.y)) + 2) : (((int)trunc(coord.y)) + 1);
-            //loop iteration 0
-            q = (p < 0) ? (-1 - p) : p;
-            if(q >= 2*sourceheight)
-            {
-                q -= (2*sourceheight) * (q / (2*sourceheight));//WARNING: this is an integer division which may not yield q
-            }
-            yInterpolationIndices.x = (sourceheight <= q) ? (((2*sourceheight) - 1 - q) * sourcewidth) : (q * sourcewidth);//this is the linear absolute index NOT the row
-            //loop iteration 1
-            p--;
-            q = (p < 0) ? (-1 - p) : p;
-            if(q >= 2*sourceheight)
-            {
-                q -= (2*sourceheight) * (q / (2*sourceheight));//WARNING: this is an integer division which may not yield q
-            }
-            yInterpolationIndices.y = (sourceheight <= q) ? (((2*sourceheight) - 1 - q) * sourcewidth) : (q * sourcewidth);//this is the linear absolute index NOT the row
-            //loop iteration 2
-            p--;
-            q = (p < 0) ? (-1 - p) : p;
-            if(q >= 2*sourceheight)
-            {
-                q -= (2*sourceheight) * (q / (2*sourceheight));//WARNING: this is an integer division which may not yield q
-            }
-            yInterpolationIndices.z = (sourceheight <= q) ? (((2*sourceheight) - 1 - q) * sourcewidth) : (q * sourcewidth);//this is the linear absolute index NOT the row
-            //loop iteration 3
-            p--;
-            q = (p < 0) ? (-1 - p) : p;
-            if(q >= 2*sourceheight)
-            {
-                q -= (2*sourceheight) * (q / (2*sourceheight));//WARNING: this is an integer division which may not yield q
-            }
-            yInterpolationIndices.w = (sourceheight <= q) ? (((2*sourceheight) - 1 - q) * sourcewidth) : (q * sourcewidth);//this is the linear absolute index NOT the row
-
-            coord.x -= (coord.x >= Zero) ? (FPT)((int)trunc(coord.x)) : (FPT)(((int)trunc(coord.x)) - 1);//get the residual should also be possible with floor
-            coord.y -= (coord.y >= Zero) ? (FPT)((int)trunc(coord.y)) : (FPT)(((int)trunc(coord.y)) - 1);//get the residual should also be possible with floor
-
-            //Calculate the weights for interpolation
-            __private FPTFOUR xWeights;
-            __private FPT s = One - coord.x;
-            xWeights.w = pown(s,3) / Lambda;
-            s = coord.x * coord.x;
-            xWeights.z = Two / Three - h * s * (Two - coord.x);
-            xWeights.x = s * coord.x / Lambda;
-            xWeights.y = One - xWeights.x - xWeights.z - xWeights.w;
-            __private FPTFOUR yWeights;
-            s = One - coord.y;
-            yWeights.w = pown(s,3) / Lambda;
-            s = coord.y * coord.y;
-            yWeights.z = Two / Three - h * s * (Two - coord.y);
-            yWeights.x = s * coord.y / Lambda;
-            yWeights.y = One - yWeights.x - yWeights.z - yWeights.w;
-
-            //unwrapped interpolation loop (sorry 16 iterations) 4x4 interpolation coefficients
-            //y loop 0
-            s = yWeights.x * (xWeights.x * source[yInterpolationIndices.x + xInterpolationIndices.x]
-                + xWeights.y * source[yInterpolationIndices.x + xInterpolationIndices.y]
-                + xWeights.z * source[yInterpolationIndices.x + xInterpolationIndices.z]
-                + xWeights.w * source[yInterpolationIndices.x + xInterpolationIndices.w]);
-            //y loop 1
-            s += yWeights.y * (xWeights.x * source[yInterpolationIndices.y + xInterpolationIndices.x]
-                + xWeights.y * source[yInterpolationIndices.y + xInterpolationIndices.y]
-                + xWeights.z * source[yInterpolationIndices.y + xInterpolationIndices.z]
-                + xWeights.w * source[yInterpolationIndices.y + xInterpolationIndices.w]);
-            //y loop 2
-            s += yWeights.z * (xWeights.x * source[yInterpolationIndices.z + xInterpolationIndices.x]
-                + xWeights.y * source[yInterpolationIndices.z + xInterpolationIndices.y]
-                + xWeights.z * source[yInterpolationIndices.z + xInterpolationIndices.z]
-                + xWeights.w * source[yInterpolationIndices.z + xInterpolationIndices.w]);
-            //y loop 3
-            s += yWeights.w * (xWeights.x * source[yInterpolationIndices.w + xInterpolationIndices.x]
-                + xWeights.y * source[yInterpolationIndices.w + xInterpolationIndices.y]
-                + xWeights.z * source[yInterpolationIndices.w + xInterpolationIndices.z]
-                + xWeights.w * source[yInterpolationIndices.w + xInterpolationIndices.w]);
-            //now s is the value
-            target[nIndex] = s;
+            xInterpolationIndices = calculatexInterpolationIndices(coord.x, doubleSourceWidth, sourcewidth);
+            yInterpolationIndices = calculateyInterpolationIndices(coord.y, doubleSourceHeight, sourceheight, sourcewidth);
+            target[nIndex] = interpolate(coord, xInterpolationIndices, yInterpolationIndices, source);
         }
         else
         {
@@ -2804,7 +2263,7 @@ __kernel void transformImageWithBsplineInterpolation(const __global FPT *source 
     }   
 }
 
-__kernel void translationTransformImageWithBsplineInterpolation(const __global FPT *source ,__global FPT *target, const int sourcewidth, const int sourceheight, const FPT offsetx, const FPT offsety)
+__kernel void translationTransformImageWithBsplineInterpolation(const __global FPT *source ,__global FPT *target, const int sourcewidth, const int sourceheight, const int doubleSourceWidth, const int doubleSourceHeight, const FPT offsetx, const FPT offsety)
 {
     __private int nIndex = get_global_id(0);//this directly corresponds to the linear address of the !SOURCE! pixel
     if(nIndex < sourcewidth * sourceheight)
@@ -2812,123 +2271,16 @@ __kernel void translationTransformImageWithBsplineInterpolation(const __global F
         __private int column = nIndex % sourcewidth;
         __private int row = (nIndex - column)/sourcewidth;
 
-        __private FPTTWO coord = (FPTTWO)(offsetx + ((FPT)column), offsety + ((FPT)row));
+        __private FPTTWO coord = (FPTTWO)(offsetx, offsety) + (FPTTWO)(((FPT)column), ((FPT)row));
 
         __private int2 Msk = (int2)((int)round(coord.x), (int)round(coord.y));
+        __private int4 xInterpolationIndices;
+        __private int4 yInterpolationIndices;
         if ((Msk.x >= 0) && (Msk.x < sourcewidth) && (Msk.y >= 0) && (Msk.y < sourceheight))
         {
-            //Following is the calculation using mirrored boundaries of the x and y indices of the coefficients used for interpolation
-            //calculate the x coordinates for interpolation (loop unwrapped) for speed
-            __private int4 xInterpolationIndices;
-            __private int p = (coord.x >= 0) ? (((int)trunc(coord.x)) + 2) : (((int)trunc(coord.x)) + 1);
-            //loop iteration 0
-            __private int q = (p < 0) ? (-1 - p) : p;
-            if(q >= 2*sourcewidth)
-            {
-                q -= (2*sourcewidth) * (q / (2*sourcewidth)); //Warning: this is an integer division it doesn't yield q
-            }
-            xInterpolationIndices.x = q >= sourcewidth ? (2*sourcewidth - 1 - q) : q;
-            //loop iteration 1
-            p--;
-            q = (p < 0) ? (-1 - p) : p;
-            if(q >= 2*sourcewidth)
-            {
-                q -= (2*sourcewidth) * (q / (2*sourcewidth)); //Warning: this is an integer division it doesn't yield q
-            }
-            xInterpolationIndices.y = q >= sourcewidth ? (2*sourcewidth - 1 - q) : q;
-            //loop iteration 2
-            p--;
-            q = (p < 0) ? (-1 - p) : p;
-            if(q >= 2*sourcewidth)
-            {
-                q -= (2*sourcewidth) * (q / (2*sourcewidth)); //Warning: this is an integer division it doesn't yield q
-            }
-            xInterpolationIndices.z = q >= sourcewidth ? (2*sourcewidth - 1 - q) : q;
-            //loop iteration 3
-            p--;
-            q = (p < 0) ? (-1 - p) : p;
-            if(q >= 2*sourcewidth)
-            {
-                q -= (2*sourcewidth) * (q / (2*sourcewidth)); //Warning: this is an integer division it doesn't yield q
-            }
-            xInterpolationIndices.w = q >= sourcewidth ? (2*sourcewidth - 1 - q) : q;
-
-            __private int4 yInterpolationIndices;
-            p = (coord.y >= 0) ? (((int)trunc(coord.y)) + 2) : (((int)trunc(coord.y)) + 1);
-            //loop iteration 0
-            q = (p < 0) ? (-1 - p) : p;
-            if(q >= 2*sourceheight)
-            {
-                q -= (2*sourceheight) * (q / (2*sourceheight));//WARNING: this is an integer division which may not yield q
-            }
-            yInterpolationIndices.x = (sourceheight <= q) ? (((2*sourceheight) - 1 - q) * sourcewidth) : (q * sourcewidth);//this is the linear absolute index NOT the row
-            //loop iteration 1
-            p--;
-            q = (p < 0) ? (-1 - p) : p;
-            if(q >= 2*sourceheight)
-            {
-                q -= (2*sourceheight) * (q / (2*sourceheight));//WARNING: this is an integer division which may not yield q
-            }
-            yInterpolationIndices.y = (sourceheight <= q) ? (((2*sourceheight) - 1 - q) * sourcewidth) : (q * sourcewidth);//this is the linear absolute index NOT the row
-            //loop iteration 2
-            p--;
-            q = (p < 0) ? (-1 - p) : p;
-            if(q >= 2*sourceheight)
-            {
-                q -= (2*sourceheight) * (q / (2*sourceheight));//WARNING: this is an integer division which may not yield q
-            }
-            yInterpolationIndices.z = (sourceheight <= q) ? (((2*sourceheight) - 1 - q) * sourcewidth) : (q * sourcewidth);//this is the linear absolute index NOT the row
-            //loop iteration 3
-            p--;
-            q = (p < 0) ? (-1 - p) : p;
-            if(q >= 2*sourceheight)
-            {
-                q -= (2*sourceheight) * (q / (2*sourceheight));//WARNING: this is an integer division which may not yield q
-            }
-            yInterpolationIndices.w = (sourceheight <= q) ? (((2*sourceheight) - 1 - q) * sourcewidth) : (q * sourcewidth);//this is the linear absolute index NOT the row
-
-            coord.x -= (coord.x >= Zero) ? (FPT)((int)trunc(coord.x)) : (FPT)(((int)trunc(coord.x)) - 1);//get the residual should also be possible with floor
-            coord.y -= (coord.y >= Zero) ? (FPT)((int)trunc(coord.y)) : (FPT)(((int)trunc(coord.y)) - 1);//get the residual should also be possible with floor
-
-            //Calculate the weights for interpolation
-            __private FPTFOUR xWeights;
-            __private FPT s = One - coord.x;
-            xWeights.w = pown(s,3) / Lambda;
-            s = coord.x * coord.x;
-            xWeights.z = Two / Three - h * s * (Two - coord.x);
-            xWeights.x = s * coord.x / Lambda;
-            xWeights.y = One - xWeights.x - xWeights.z - xWeights.w;
-            __private FPTFOUR yWeights;
-            s = One - coord.y;
-            yWeights.w = pown(s,3) / Lambda;
-            s = coord.y * coord.y;
-            yWeights.z = Two / Three - h * s * (Two - coord.y);
-            yWeights.x = s * coord.y / Lambda;
-            yWeights.y = One - yWeights.x - yWeights.z - yWeights.w;
-
-            //unwrapped interpolation loop (sorry 16 iterations) 4x4 interpolation coefficients
-            //y loop 0
-            s = yWeights.x * (xWeights.x * source[yInterpolationIndices.x + xInterpolationIndices.x]
-                + xWeights.y * source[yInterpolationIndices.x + xInterpolationIndices.y]
-                + xWeights.z * source[yInterpolationIndices.x + xInterpolationIndices.z]
-                + xWeights.w * source[yInterpolationIndices.x + xInterpolationIndices.w]);
-            //y loop 1
-            s += yWeights.y * (xWeights.x * source[yInterpolationIndices.y + xInterpolationIndices.x]
-                + xWeights.y * source[yInterpolationIndices.y + xInterpolationIndices.y]
-                + xWeights.z * source[yInterpolationIndices.y + xInterpolationIndices.z]
-                + xWeights.w * source[yInterpolationIndices.y + xInterpolationIndices.w]);
-            //y loop 2
-            s += yWeights.z * (xWeights.x * source[yInterpolationIndices.z + xInterpolationIndices.x]
-                + xWeights.y * source[yInterpolationIndices.z + xInterpolationIndices.y]
-                + xWeights.z * source[yInterpolationIndices.z + xInterpolationIndices.z]
-                + xWeights.w * source[yInterpolationIndices.z + xInterpolationIndices.w]);
-            //y loop 3
-            s += yWeights.w * (xWeights.x * source[yInterpolationIndices.w + xInterpolationIndices.x]
-                + xWeights.y * source[yInterpolationIndices.w + xInterpolationIndices.y]
-                + xWeights.z * source[yInterpolationIndices.w + xInterpolationIndices.z]
-                + xWeights.w * source[yInterpolationIndices.w + xInterpolationIndices.w]);
-            //now s is the value
-            target[nIndex] = s;
+            xInterpolationIndices = calculatexInterpolationIndices(coord.x, doubleSourceWidth, sourcewidth);
+            yInterpolationIndices = calculateyInterpolationIndices(coord.y, doubleSourceHeight, sourceheight, sourcewidth);
+            target[nIndex] = interpolate(coord, xInterpolationIndices, yInterpolationIndices, source);
         }
         else
         {

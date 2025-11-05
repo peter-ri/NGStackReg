@@ -32,14 +32,73 @@ __constant const double dh = 0.5;
 __constant const double dZero = 0.0;
 __constant const double dThree = 3.0;
 
+
+//Utility functions
+static inline int4 dcalculatexInterpolationIndices(const double coordx, const int doubleTargetWidth, const int targetwidth)
+{
+    //Following is the calculation using mirrored boundaries of the x indices of the coefficients used for interpolation
+    __private int4 xInterpolationIndices;
+    __private int p = (coordx >= 0) ? (((int)trunc(coordx)) + 2) : (((int)trunc(coordx)) + 1);
+    /*
+    q = (p < 0) ? (-1 - p) : p;
+    is a diverging statement, although it incurs more operations the following equivalent will likely be faster
+    */
+    __private int q = abs(p) - rotate(p&(int)0x80000000,(int)1);
+    //loop iteration 0
+    q = q<doubleTargetWidth?q:q%doubleTargetWidth;
+    xInterpolationIndices.x = q >= targetwidth ? (doubleTargetWidth - 1 - q) : q;
+    //loop iteration 1
+    p--;
+    q = abs(p) - rotate(p&(int)0x80000000,(int)1);
+    q = q<doubleTargetWidth?q:q%doubleTargetWidth;
+    xInterpolationIndices.y = q >= targetwidth ? (doubleTargetWidth - 1 - q) : q;
+    //loop iteration 2
+    p--;
+    q = abs(p) - rotate(p&(int)0x80000000,(int)1);
+    q = q<doubleTargetWidth?q:q%doubleTargetWidth;
+    xInterpolationIndices.z = q >= targetwidth ? (doubleTargetWidth - 1 - q) : q;
+    //loop iteration 3
+    p--;
+    q = abs(p) - rotate(p&(int)0x80000000,(int)1);
+    q = q<doubleTargetWidth?q:q%doubleTargetWidth;
+    xInterpolationIndices.w = q >= targetwidth ? (doubleTargetWidth - 1 - q) : q;
+    return xInterpolationIndices;
+}
+
+static inline int4 dcalculateyInterpolationIndices(const double coordy, const int doubleTargetHeight, const int targetheight, const int targetwidth)
+{
+    //Following is the calculation using mirrored boundaries of the y indices of the coefficients used for interpolation
+    __private int4 yInterpolationIndices;
+    __private int p = (coordy >= 0) ? (((int)trunc(coordy)) + 2) : (((int)trunc(coordy)) + 1);
+    //loop iteration 0
+    __private int q = abs(p) - rotate(p&(int)0x80000000,(int)1);
+    q = q<doubleTargetHeight?q:q%doubleTargetHeight;
+    yInterpolationIndices.x = (targetheight <= q) ? (((doubleTargetHeight) - 1 - q) * targetwidth) : (q * targetwidth);//this is the linear absolute index NOT the row
+    //loop iteration 1
+    p--;
+    q = abs(p) - rotate(p&(int)0x80000000,(int)1);
+    q = q<doubleTargetHeight?q:q%doubleTargetHeight;
+    yInterpolationIndices.y = (targetheight <= q) ? (((doubleTargetHeight) - 1 - q) * targetwidth) : (q * targetwidth);//this is the linear absolute index NOT the row
+    //loop iteration 2
+    p--;
+    q = abs(p) - rotate(p&(int)0x80000000,(int)1);
+    q = q<doubleTargetHeight?q:q%doubleTargetHeight;
+    yInterpolationIndices.z = (targetheight <= q) ? (((doubleTargetHeight) - 1 - q) * targetwidth) : (q * targetwidth);//this is the linear absolute index NOT the row
+    //loop iteration 3
+    p--;
+    q = abs(p) - rotate(p&(int)0x80000000,(int)1);
+    q = q<doubleTargetHeight?q:q%doubleTargetHeight;
+    yInterpolationIndices.w = (targetheight <= q) ? (((doubleTargetHeight) - 1 - q) * targetwidth) : (q * targetwidth);//this is the linear absolute index NOT the row
+    return yInterpolationIndices;
+}
+
 __kernel void ConvertDoubleToFloat(__global const double *source, __global float *target, const int size)
 {
     __private int nIndex = get_global_id(0); // this directly corresponds to the offset
-    if(nIndex >= size)
+    if(nIndex < size)
     {
-        return;
+        target[nIndex] = (float)(source[nIndex]); // There is a bug in my version of the NVidia driver preventing me from using convert_float_sat_rte
     }
-    target[nIndex] = (float)(source[nIndex]); // There is a bug in my version of the NVidia driver preventing me from using convert_float_sat_rte
 }
 __kernel void dCubicBSplinePrefilter2Dpremulhp(__global double *image, const int size)
 {
@@ -50,7 +109,7 @@ __kernel void dCubicBSplinePrefilter2Dpremulhp(__global double *image, const int
     }
     
 }
-__kernel void dTargetedCubicBSplinePrefilter2Dpremulhp(__global double *image, __global double *target, const int size)
+__kernel void dTargetedCubicBSplinePrefilter2Dpremulhp(__global const double *image, __global double *target, const int size)
 {
     __private int nIndex = get_global_id(0); // this directly corresponds to the offset
     if(nIndex < size)
@@ -69,20 +128,23 @@ __kernel void dCubicBSplinePrefilter2DXhp(__global double *image, const int widt
         // causal initialization
         __private double z1 = dPole;
         __private double zn = pown(dPole,width);
-        __private double Sum = (dOne + dPole) * ( prow[0] + zn * prow[width - 1]);
+        //__private double Sum = (dOne + dPole) * ( prow[0] + zn * prow[width - 1]);
+        __private double Sum = (dOne + dPole) * ( fma(zn, prow[width - 1], prow[0]) );
         zn *= zn;
         for(int k = 1;k < width - 1; k++)
         {
             z1 *= dPole;
             zn /= dPole;
-            Sum += (z1 + zn) * prow[k];
+            //Sum += (z1 + zn) * prow[k];
+            Sum = fma((z1 + zn), prow[k], Sum);
         }
         prow[0] = (Sum / (dOne - pown(dPole, 2 * width)));
 
         // Causal recursion
         for(int k = 1; k < width; k++)
         {
-            prow[k] += dPole *  prow[k-1];
+            //prow[k] += dPole *  prow[k-1];
+            prow[k] = fma(dPole,  prow[k-1], prow[k]);
         }
         // anticausal initialization
         prow[width - 1] = (dPole * prow[width - 1] / (dPole - dOne));
@@ -106,20 +168,23 @@ __kernel void dCubicBSplinePrefilter2DYhp(__global double *image, const int widt
         // causal initialization
         __private double z1 = dPole;
         __private double zn = pown(dPole,height);
-        __private double Sum = (dOne + dPole) * ( prow[0] + zn *  prow[(height - 1)*width]);
+        //__private double Sum = (dOne + dPole) * ( prow[0] + zn *  prow[(height - 1)*width]);
+        __private double Sum = (dOne + dPole) * ( fma(zn,  prow[(height - 1)*width], prow[0]));
         zn *= zn;
         for(int k = 1;k < height - 1; k++)
         {
             z1 *= dPole;
             zn /= dPole;
-            Sum += (z1 + zn) *  prow[k * width];
+            //Sum += (z1 + zn) *  prow[k * width];
+            Sum = fma((z1 + zn),  prow[k * width], Sum);
         }
         prow[0] = (Sum / (dOne - pown(dPole, 2 * height)));
 
         // Causal recursion
         for(int k = 1; k < height; k++)
         {
-            prow[k * width] += dPole *  prow[(k-1)*width];
+            //prow[k * width] += dPole *  prow[(k-1)*width];
+            prow[k * width] =  fma(dPole, prow[(k-1)*width], prow[k * width]);
         }
 
         // anticausal initialization
@@ -181,7 +246,68 @@ __kernel void dantiSymmetricFirMirrorOffBounds1DY(__global double *image ,__glob
     }
 }
 
-__kernel void drigidBodyError(const __global double *source ,const __global double *target, __global double *diffout, __global double *mask, const int sourcewidth, const int sourceheight, const int targetwidth, const int targetheight, const double offsetx, const double offsety, const double angle)
+static inline double dinterpolate(const double2 coordinates, const int4 xInterpolationIndices, const int4 yInterpolationIndices, const __global double* target)
+{
+    __private double2 coord;
+    __private double2 unusedCoordFloor;
+    //coord.x -= (coord.x >= Zero) ? (double)((int)trunc(coord.x)) : (double)(((int)trunc(coord.x)) - 1);//get the residual should also be possible with floor
+    //coord.y -= (coord.y >= Zero) ? (double)((int)trunc(coord.y)) : (double)(((int)trunc(coord.y)) - 1);//get the residual should also be possible with floor
+    coord = fract(coordinates, &unusedCoordFloor);
+
+    //Calculate the weights for interpolation
+    __private double4 xWeights;
+    __private double4 yWeights;
+    __private double s = dOne - coord.x;
+    
+    xWeights.w = pown(s,3) / dLambda;
+    s = coord.x * coord.x;
+    xWeights.z = dTwo / dThree - dh * s * (dTwo - coord.x);
+    xWeights.x = s * coord.x / dLambda;
+    xWeights.y = dOne - xWeights.x - xWeights.z - xWeights.w;
+    
+    s = dOne - coord.y;
+    yWeights.w = pown(s,3) / dLambda;
+    s = coord.y * coord.y;
+    yWeights.z = dTwo / dThree - dh * s * (dTwo - coord.y);
+    yWeights.x = s * coord.y / dLambda;
+    yWeights.y = dOne - yWeights.x - yWeights.z - yWeights.w;
+
+    __private int4 interpolationIndices = (int4)yInterpolationIndices.x;
+    interpolationIndices += xInterpolationIndices;
+    __private double4 intermediate;
+    __private double4 values = (double4)(target[interpolationIndices.x],
+                                         target[interpolationIndices.y],
+                                         target[interpolationIndices.z],
+                                         target[interpolationIndices.w]);
+    intermediate.x = dot(xWeights, values);
+    interpolationIndices = (int4)yInterpolationIndices.y;
+    interpolationIndices += xInterpolationIndices;
+    values = (double4)(target[interpolationIndices.x],
+                       target[interpolationIndices.y],
+                       target[interpolationIndices.z],
+                       target[interpolationIndices.w]);
+    intermediate.y = dot(xWeights, values);
+    interpolationIndices = (int4)yInterpolationIndices.z;
+    interpolationIndices += xInterpolationIndices;
+    values = (double4)(target[interpolationIndices.x],
+                       target[interpolationIndices.y],
+                       target[interpolationIndices.z],
+                       target[interpolationIndices.w]);
+    intermediate.z = dot(xWeights, values);
+    interpolationIndices = (int4)yInterpolationIndices.w;
+    interpolationIndices += xInterpolationIndices;
+    values = (double4)(target[interpolationIndices.x],
+                       target[interpolationIndices.y],
+                       target[interpolationIndices.z],
+                       target[interpolationIndices.w]);
+    intermediate.w = dot(xWeights, values);
+    s = dot(yWeights, intermediate);
+    //now s is the value
+    return s;
+}
+
+
+__kernel void drigidBodyError(const __global double *source ,const __global double *target, __global double *diffout, __global double *mask, const int sourcewidth, const int sourceheight, const int targetwidth, const int targetheight, const int doubletargetwidth, const int doubletargetheight, const double offsetx, const double offsety, const double cosangle, const double negsinangle)
 {
     __private int nIndex = get_global_id(0); // this directly corresponds to the linear address of the !SOURCE! pixel
     if(nIndex < sourcewidth * sourceheight)
@@ -189,112 +315,19 @@ __kernel void drigidBodyError(const __global double *source ,const __global doub
         __private int column = nIndex % sourcewidth;
         __private int row = (nIndex - column)/sourcewidth;
 
-        __private double2 xvec = (double2)(cos(angle),-sin(angle)); // Warning: this is not the x vector but it is the vector added in the x direction
-        __private double2 yvec = (double2)(-xvec.y,xvec.x); // Warning: this is not the y vector but it is the vector added in the y direction
+        __private double2 xvec = (double2)(cosangle,negsinangle);//warning: this is not the x vector but it is the vector added in the x direction
+        __private double2 yvec = (double2)(-xvec.y,xvec.x);//warning: this is not the y vector but it is the vector added in the y direction
         __private double2 coord = (double2)(offsetx, offsety) + ((double)column) * xvec + ((double)row) * yvec;
 
         __private int2 Msk = (int2)((int)round(coord.x), (int)round(coord.y));
-        __private int doubletargetwidth = 2*targetwidth;
-        __private int doubletargetheight = 2*targetheight;
+        __private int4 xInterpolationIndices;
+        __private int4 yInterpolationIndices;
         if ((Msk.x >= 0) && (Msk.x < targetwidth) && (Msk.y >= 0) && (Msk.y < targetheight))
         {
             mask[nIndex] = dOne;
-            // Following is the calculation using mirrored boundaries of the x and y indices of the coefficients used for interpolation
-            // calculate the x coordinates for interpolation (loop unwrapped) for speed
-            __private int4 xInterpolationIndices;
-            __private int p = (coord.x >= 0) ? (((int)trunc(coord.x)) + 2) : (((int)trunc(coord.x)) + 1);
-            // loop iteration 0
-            __private int q = (p < 0) ? (-1 - p) : p;
-            // kick out divergence (but calculating the modulo may actually be slower than divergence so maybe use a slightly diverging statement)
-            q = q<doubletargetwidth?q:q%doubletargetwidth;
-            // q %= doubletargetwidth; //will allways give the right answer
-            /*
-            if(q >= doubletargetwidth)
-            {
-                //q -= (2*targetwidth) * (q / (2*targetwidth)); //Warning: this is an integer division, it doesn't yield q (in fact it is a simple modulo operation)
-                
-            }
-            */
-            xInterpolationIndices.x = q >= targetwidth ? (doubletargetwidth - 1 - q) : q;
-            //loop iteration 1
-            p--;
-            q = (p < 0) ? (-1 - p) : p;
-            q = q<doubletargetwidth?q:q%doubletargetwidth;
-            xInterpolationIndices.y = q >= targetwidth ? (doubletargetwidth - 1 - q) : q;
-            //loop iteration 2
-            p--;
-            q = (p < 0) ? (-1 - p) : p;
-            q = q<doubletargetwidth?q:q%doubletargetwidth;
-            xInterpolationIndices.z = q >= targetwidth ? (doubletargetwidth - 1 - q) : q;
-            //loop iteration 3
-            p--;
-            q = (p < 0) ? (-1 - p) : p;
-            q = q<doubletargetwidth?q:q%doubletargetwidth;
-            xInterpolationIndices.w = q >= targetwidth ? (doubletargetwidth - 1 - q) : q;
-
-            __private int4 yInterpolationIndices;
-            p = (coord.y >= 0) ? (((int)trunc(coord.y)) + 2) : (((int)trunc(coord.y)) + 1);
-            // loop iteration 0
-            q = (p < 0) ? (-1 - p) : p;
-            q = q<doubletargetheight?q:q%doubletargetheight;
-            yInterpolationIndices.x = (targetheight <= q) ? (((doubletargetheight) - 1 - q) * targetwidth) : (q * targetwidth); // this is the linear absolute index NOT the row
-            // loop iteration 1
-            p--;
-            q = (p < 0) ? (-1 - p) : p;
-            q = q<doubletargetheight?q:q%doubletargetheight;
-            yInterpolationIndices.y = (targetheight <= q) ? (((doubletargetheight) - 1 - q) * targetwidth) : (q * targetwidth); // this is the linear absolute index NOT the row
-            // loop iteration 2
-            p--;
-            q = (p < 0) ? (-1 - p) : p;
-            q = q<doubletargetheight?q:q%doubletargetheight;
-            yInterpolationIndices.z = (targetheight <= q) ? (((doubletargetheight) - 1 - q) * targetwidth) : (q * targetwidth); // this is the linear absolute index NOT the row
-            // loop iteration 3
-            p--;
-            q = (p < 0) ? (-1 - p) : p;
-            q = q<doubletargetheight?q:q%doubletargetheight;
-            yInterpolationIndices.w = (targetheight <= q) ? (((doubletargetheight) - 1 - q) * targetwidth) : (q * targetwidth); // this is the linear absolute index NOT the row
-
-            coord.x -= (coord.x >= dZero) ? (double)((int)trunc(coord.x)) : (double)(((int)trunc(coord.x)) - 1); // get the residual should also be possible with trunc
-            coord.y -= (coord.y >= dZero) ? (double)((int)trunc(coord.y)) : (double)(((int)trunc(coord.y)) - 1); // get the residual should also be possible with trunc
-
-            // Calculate the weights for interpolation
-            __private double4 xWeights;
-            __private double s = dOne - coord.x;
-            xWeights.w = pown(s,3) / dLambda;
-            s = coord.x * coord.x;
-            xWeights.z = dTwo / dThree - dh * s * (dTwo - coord.x);
-            xWeights.x = s * coord.x / dLambda;
-            xWeights.y = dOne - xWeights.x - xWeights.z - xWeights.w;
-            __private double4 yWeights;
-            s = dOne - coord.y;
-            yWeights.w = pown(s,3) / dLambda;
-            s = coord.y * coord.y;
-            yWeights.z = dTwo / dThree - dh * s * (dTwo - coord.y);
-            yWeights.x = s * coord.y / dLambda;
-            yWeights.y = dOne - yWeights.x - yWeights.z - yWeights.w;
-
-            // unwrapped interpolation loop (sorry 16 iterations) 4x4 interpolation coefficients
-            // y loop 0
-            s = yWeights.x * (xWeights.x * target[yInterpolationIndices.x + xInterpolationIndices.x]
-                + xWeights.y * target[yInterpolationIndices.x + xInterpolationIndices.y]
-                + xWeights.z * target[yInterpolationIndices.x + xInterpolationIndices.z]
-                + xWeights.w * target[yInterpolationIndices.x + xInterpolationIndices.w]);
-            // y loop 1
-            s += yWeights.y * (xWeights.x * target[yInterpolationIndices.y + xInterpolationIndices.x]
-                + xWeights.y * target[yInterpolationIndices.y + xInterpolationIndices.y]
-                + xWeights.z * target[yInterpolationIndices.y + xInterpolationIndices.z]
-                + xWeights.w * target[yInterpolationIndices.y + xInterpolationIndices.w]);
-            // y loop 2
-            s += yWeights.z * (xWeights.x * target[yInterpolationIndices.z + xInterpolationIndices.x]
-                + xWeights.y * target[yInterpolationIndices.z + xInterpolationIndices.y]
-                + xWeights.z * target[yInterpolationIndices.z + xInterpolationIndices.z]
-                + xWeights.w * target[yInterpolationIndices.z + xInterpolationIndices.w]);
-            // y loop 3
-            s += yWeights.w * (xWeights.x * target[yInterpolationIndices.w + xInterpolationIndices.x]
-                + xWeights.y * target[yInterpolationIndices.w + xInterpolationIndices.y]
-                + xWeights.z * target[yInterpolationIndices.w + xInterpolationIndices.z]
-                + xWeights.w * target[yInterpolationIndices.w + xInterpolationIndices.w]);
-            // now s is the value
+            xInterpolationIndices = dcalculatexInterpolationIndices(coord.x, doubletargetwidth, targetwidth);
+            yInterpolationIndices = dcalculateyInterpolationIndices(coord.y, doubletargetheight, targetheight, targetwidth);
+            __private double s = dinterpolate(coord, xInterpolationIndices, yInterpolationIndices, target);
             diffout[nIndex] = pown(source[nIndex] - s,2);
         }
         else
@@ -306,7 +339,7 @@ __kernel void drigidBodyError(const __global double *source ,const __global doub
 }
 
 
-__kernel void dtranslationError(const __global double *source ,const __global double *target, __global double *diffout, __global double *mask, const int sourcewidth, const int sourceheight, const int targetwidth, const int targetheight, const double offsetx, const double offsety)
+__kernel void dtranslationError(const __global double *source ,const __global double *target, __global double *diffout, __global double *mask, const int sourcewidth, const int sourceheight, const int targetwidth, const int targetheight, const int doubletargetwidth, const int doubletargetheight, const double offsetx, const double offsety)
 {
     __private int nIndex = get_global_id(0); // this directly corresponds to the linear address of the !SOURCE! pixel
     if(nIndex < sourcewidth * sourceheight)
@@ -317,107 +350,14 @@ __kernel void dtranslationError(const __global double *source ,const __global do
         __private double2 coord = (double2)(offsetx + ((double)column), offsety + ((double)row));
 
         __private int2 Msk = (int2)((int)round(coord.x), (int)round(coord.y));
-        __private int doubletargetwidth = 2*targetwidth;
-        __private int doubletargetheight = 2*targetheight;
+        __private int4 xInterpolationIndices;
+        __private int4 yInterpolationIndices;
         if ((Msk.x >= 0) && (Msk.x < targetwidth) && (Msk.y >= 0) && (Msk.y < targetheight))
         {
             mask[nIndex] = dOne;
-            // Following is the calculation using mirrored boundaries of the x and y indices of the coefficients used for interpolation
-            // calculate the x coordinates for interpolation (loop unwrapped) for speed
-            __private int4 xInterpolationIndices;
-            __private int p = (coord.x >= 0) ? (((int)trunc(coord.x)) + 2) : (((int)trunc(coord.x)) + 1);
-            // loop iteration 0
-            __private int q = (p < 0) ? (-1 - p) : p;
-            // kick out divergence (but calculating the modulo may actually be slower than divergence so maybe use a slightly diverging statement)
-            q = q<doubletargetwidth?q:q%doubletargetwidth;
-            // q %= doubletargetwidth; //will allways give the right answer
-            /*
-            if(q >= doubletargetwidth)
-            {
-                //q -= (2*targetwidth) * (q / (2*targetwidth)); //Warning: this is an integer division, it doesn't yield q (in fact it is a simple modulo operation)
-                
-            }
-            */
-            xInterpolationIndices.x = q >= targetwidth ? (doubletargetwidth - 1 - q) : q;
-            // loop iteration 1
-            p--;
-            q = (p < 0) ? (-1 - p) : p;
-            q = q<doubletargetwidth?q:q%doubletargetwidth;
-            xInterpolationIndices.y = q >= targetwidth ? (doubletargetwidth - 1 - q) : q;
-            // loop iteration 2
-            p--;
-            q = (p < 0) ? (-1 - p) : p;
-            q = q<doubletargetwidth?q:q%doubletargetwidth;
-            xInterpolationIndices.z = q >= targetwidth ? (doubletargetwidth - 1 - q) : q;
-            // loop iteration 3
-            p--;
-            q = (p < 0) ? (-1 - p) : p;
-            q = q<doubletargetwidth?q:q%doubletargetwidth;
-            xInterpolationIndices.w = q >= targetwidth ? (doubletargetwidth - 1 - q) : q;
-
-            __private int4 yInterpolationIndices;
-            p = (coord.y >= 0) ? (((int)trunc(coord.y)) + 2) : (((int)trunc(coord.y)) + 1);
-            // loop iteration 0
-            q = (p < 0) ? (-1 - p) : p;
-            q = q<doubletargetheight?q:q%doubletargetheight;
-            yInterpolationIndices.x = (targetheight <= q) ? (((doubletargetheight) - 1 - q) * targetwidth) : (q * targetwidth); // this is the linear absolute index NOT the row
-            // loop iteration 1
-            p--;
-            q = (p < 0) ? (-1 - p) : p;
-            q = q<doubletargetheight?q:q%doubletargetheight;
-            yInterpolationIndices.y = (targetheight <= q) ? (((doubletargetheight) - 1 - q) * targetwidth) : (q * targetwidth); // this is the linear absolute index NOT the row
-            // loop iteration 2
-            p--;
-            q = (p < 0) ? (-1 - p) : p;
-            q = q<doubletargetheight?q:q%doubletargetheight;
-            yInterpolationIndices.z = (targetheight <= q) ? (((doubletargetheight) - 1 - q) * targetwidth) : (q * targetwidth); // this is the linear absolute index NOT the row
-            // loop iteration 3
-            p--;
-            q = (p < 0) ? (-1 - p) : p;
-            q = q<doubletargetheight?q:q%doubletargetheight;
-            yInterpolationIndices.w = (targetheight <= q) ? (((doubletargetheight) - 1 - q) * targetwidth) : (q * targetwidth); // this is the linear absolute index NOT the row
-
-            coord.x -= (coord.x >= dZero) ? (double)((int)trunc(coord.x)) : (double)(((int)trunc(coord.x)) - 1); // get the residual should also be possible with trunc
-            coord.y -= (coord.y >= dZero) ? (double)((int)trunc(coord.y)) : (double)(((int)trunc(coord.y)) - 1); // get the residual should also be possible with trunc
-
-            // Calculate the weights for interpolation
-            __private double4 xWeights;
-            __private double s = dOne - coord.x;
-            xWeights.w = pown(s,3) / dLambda;
-            s = coord.x * coord.x;
-            xWeights.z = dTwo / dThree - dh * s * (dTwo - coord.x);
-            xWeights.x = s * coord.x / dLambda;
-            xWeights.y = dOne - xWeights.x - xWeights.z - xWeights.w;
-            __private double4 yWeights;
-            s = dOne - coord.y;
-            yWeights.w = pown(s,3) / dLambda;
-            s = coord.y * coord.y;
-            yWeights.z = dTwo / dThree - dh * s * (dTwo - coord.y);
-            yWeights.x = s * coord.y / dLambda;
-            yWeights.y = dOne - yWeights.x - yWeights.z - yWeights.w;
-
-            // unwrapped interpolation loop (sorry 16 iterations) 4x4 interpolation coefficients
-            // y loop 0
-            s = yWeights.x * (xWeights.x * target[yInterpolationIndices.x + xInterpolationIndices.x]
-                + xWeights.y * target[yInterpolationIndices.x + xInterpolationIndices.y]
-                + xWeights.z * target[yInterpolationIndices.x + xInterpolationIndices.z]
-                + xWeights.w * target[yInterpolationIndices.x + xInterpolationIndices.w]);
-            // y loop 1
-            s += yWeights.y * (xWeights.x * target[yInterpolationIndices.y + xInterpolationIndices.x]
-                + xWeights.y * target[yInterpolationIndices.y + xInterpolationIndices.y]
-                + xWeights.z * target[yInterpolationIndices.y + xInterpolationIndices.z]
-                + xWeights.w * target[yInterpolationIndices.y + xInterpolationIndices.w]);
-            // y loop 2
-            s += yWeights.z * (xWeights.x * target[yInterpolationIndices.z + xInterpolationIndices.x]
-                + xWeights.y * target[yInterpolationIndices.z + xInterpolationIndices.y]
-                + xWeights.z * target[yInterpolationIndices.z + xInterpolationIndices.z]
-                + xWeights.w * target[yInterpolationIndices.z + xInterpolationIndices.w]);
-            // y loop 3
-            s += yWeights.w * (xWeights.x * target[yInterpolationIndices.w + xInterpolationIndices.x]
-                + xWeights.y * target[yInterpolationIndices.w + xInterpolationIndices.y]
-                + xWeights.z * target[yInterpolationIndices.w + xInterpolationIndices.z]
-                + xWeights.w * target[yInterpolationIndices.w + xInterpolationIndices.w]);
-            // now s is the value
+            xInterpolationIndices = dcalculatexInterpolationIndices(coord.x, doubletargetwidth, targetwidth);
+            yInterpolationIndices = dcalculateyInterpolationIndices(coord.y, doubletargetheight, targetheight, targetwidth);
+            __private double s = dinterpolate(coord, xInterpolationIndices, yInterpolationIndices, target);
             diffout[nIndex] = pown(source[nIndex] - s,2);
         }
         else
@@ -428,7 +368,7 @@ __kernel void dtranslationError(const __global double *source ,const __global do
     }   
 }
 
-__kernel void drigidBodyErrorWithGradAndHess(const __global double *source ,const __global double *target,const __global double *xGradient,const __global double *yGradient,__global double *grad0,__global double *grad1,__global double *grad2,__global double *hessian00,__global double *hessian01,__global double *hessian02,__global double *hessian11,__global double *hessian12,__global double *hessian22, __global double *diffout, __global double *mask, const int sourcewidth, const int sourceheight, const int targetwidth, const int targetheight, const double offsetx, const double offsety, const double angle)
+__kernel void drigidBodyErrorWithGradAndHess(const __global double *source ,const __global double *target,const __global double *xGradient,const __global double *yGradient,__global double *grad0,__global double *grad1,__global double *grad2,__global double *hessian00,__global double *hessian01,__global double *hessian02,__global double *hessian11,__global double *hessian12,__global double *hessian22, __global double *diffout, __global double *mask, const int sourcewidth, const int sourceheight, const int targetwidth, const int targetheight, const int doubletargetwidth, const int doubletargetheight, const double offsetx, const double offsety, const double cosangle, const double negsinangle)
 {
     __private int nIndex = get_global_id(0); // this directly corresponds to the linear address of the !SOURCE! pixel
     if(nIndex < sourcewidth * sourceheight)
@@ -436,115 +376,45 @@ __kernel void drigidBodyErrorWithGradAndHess(const __global double *source ,cons
         __private int column = nIndex % sourcewidth;
         __private int row = (nIndex - column)/sourcewidth;
 
-        __private double2 xvec = (double2)(cos(angle),-sin(angle)); // Warning: this is not the x vector but it is the vector added in the x direction
+        __private double2 xvec = (double2)(cosangle,negsinangle);//warning: this is not the x vector but it is the vector added in the x direction
         __private double2 yvec = (double2)(-xvec.y,xvec.x); // Warning: this is not the y vector but it is the vector added in the y direction
         __private double2 coord = (double2)(offsetx, offsety) + ((double)column) * xvec + ((double)row) * yvec;
 
         __private int2 Msk = (int2)((int)round(coord.x), (int)round(coord.y));
-        __private int doubletargetwidth = 2*targetwidth;
-        __private int doubletargetheight = 2*targetheight;
+        __private int4 xInterpolationIndices;
+        __private int4 yInterpolationIndices;
         if ((Msk.x >= 0) && (Msk.x < targetwidth) && (Msk.y >= 0) && (Msk.y < targetheight))
         {
             mask[nIndex] = dOne;
-            // Following is the calculation using mirrored boundaries of the x and y indices of the coefficients used for interpolation
-            // calculate the x coordinates for interpolation (loop unwrapped) for speed
-            __private int4 xInterpolationIndices;
-            __private int p = (coord.x >= 0) ? (((int)trunc(coord.x)) + 2) : (((int)trunc(coord.x)) + 1);
-            // loop iteration 0
-            __private int q = (p < 0) ? (-1 - p) : p;
-            q = q<targetwidth?q:q%targetwidth;
-            xInterpolationIndices.x = q >= targetwidth ? (targetwidth - 1 - q) : q;
-            // loop iteration 1
-            p--;
-            q = (p < 0) ? (-1 - p) : p;
-            q = q<targetwidth?q:q%targetwidth;
-            xInterpolationIndices.y = q >= targetwidth ? (targetwidth - 1 - q) : q;
-            // loop iteration 2
-            p--;
-            q = (p < 0) ? (-1 - p) : p;
-            q = q<targetwidth?q:q%targetwidth;
-            xInterpolationIndices.z = q >= targetwidth ? (targetwidth - 1 - q) : q;
-            // loop iteration 3
-            p--;
-            q = (p < 0) ? (-1 - p) : p;
-            q = q<targetwidth?q:q%targetwidth;
-            xInterpolationIndices.w = q >= targetwidth ? (targetwidth - 1 - q) : q;
-
-            __private int4 yInterpolationIndices;
-            p = (coord.y >= 0) ? (((int)trunc(coord.y)) + 2) : (((int)trunc(coord.y)) + 1);
-            // loop iteration 0
-            q = (p < 0) ? (-1 - p) : p;
-            q = q<doubletargetheight?q:q%doubletargetheight;
-            yInterpolationIndices.x = (targetheight <= q) ? (((doubletargetheight) - 1 - q) * targetwidth) : (q * targetwidth); // this is the linear absolute index NOT the row
-            // loop iteration 1
-            p--;
-            q = (p < 0) ? (-1 - p) : p;
-            q = q<doubletargetheight?q:q%doubletargetheight;
-            yInterpolationIndices.y = (targetheight <= q) ? (((doubletargetheight) - 1 - q) * targetwidth) : (q * targetwidth); // this is the linear absolute index NOT the row
-            // loop iteration 2
-            p--;
-            q = (p < 0) ? (-1 - p) : p;
-            q = q<doubletargetheight?q:q%doubletargetheight;
-            yInterpolationIndices.z = (targetheight <= q) ? (((doubletargetheight) - 1 - q) * targetwidth) : (q * targetwidth); // this is the linear absolute index NOT the row
-            // loop iteration 3
-            p--;
-            q = (p < 0) ? (-1 - p) : p;
-            q = q<doubletargetheight?q:q%doubletargetheight;
-            yInterpolationIndices.w = (targetheight <= q) ? (((doubletargetheight) - 1 - q) * targetwidth) : (q * targetwidth); // this is the linear absolute index NOT the row
-
-            coord.x -= (coord.x >= dZero) ? (double)((int)trunc(coord.x)) : (double)(((int)trunc(coord.x)) - 1); // get the residual should also be possible with floor
-            coord.y -= (coord.y >= dZero) ? (double)((int)trunc(coord.y)) : (double)(((int)trunc(coord.y)) - 1); // get the residual should also be possible with floor
-
-            // Calculate the weights for interpolation
-            __private double4 xWeights;
-            __private double s = dOne - coord.x;
-            xWeights.w = pown(s,3) / dLambda;
-            s = coord.x * coord.x;
-            xWeights.z = dTwo / dThree - dh * s * (dTwo - coord.x);
-            xWeights.x = s * coord.x / dLambda;
-            xWeights.y = dOne - xWeights.x - xWeights.z - xWeights.w;
-            __private double4 yWeights;
-            s = dOne - coord.y;
-            yWeights.w = pown(s,3) / dLambda;
-            s = coord.y * coord.y;
-            yWeights.z = dTwo / dThree - dh * s * (dTwo - coord.y);
-            yWeights.x = s * coord.y / dLambda;
-            yWeights.y = dOne - yWeights.x - yWeights.z - yWeights.w;
-
-            // unwrapped interpolation loop (sorry 16 iterations) 4x4 interpolation coefficients
-            // y loop 0
-            s = yWeights.x * (xWeights.x * target[yInterpolationIndices.x + xInterpolationIndices.x]
-                + xWeights.y * target[yInterpolationIndices.x + xInterpolationIndices.y]
-                + xWeights.z * target[yInterpolationIndices.x + xInterpolationIndices.z]
-                + xWeights.w * target[yInterpolationIndices.x + xInterpolationIndices.w]);
-            // y loop 1
-            s += yWeights.y * (xWeights.x * target[yInterpolationIndices.y + xInterpolationIndices.x]
-                + xWeights.y * target[yInterpolationIndices.y + xInterpolationIndices.y]
-                + xWeights.z * target[yInterpolationIndices.y + xInterpolationIndices.z]
-                + xWeights.w * target[yInterpolationIndices.y + xInterpolationIndices.w]);
-            // y loop 2
-            s += yWeights.z * (xWeights.x * target[yInterpolationIndices.z + xInterpolationIndices.x]
-                + xWeights.y * target[yInterpolationIndices.z + xInterpolationIndices.y]
-                + xWeights.z * target[yInterpolationIndices.z + xInterpolationIndices.z]
-                + xWeights.w * target[yInterpolationIndices.z + xInterpolationIndices.w]);
-            // y loop 3
-            s += yWeights.w * (xWeights.x * target[yInterpolationIndices.w + xInterpolationIndices.x]
-                + xWeights.y * target[yInterpolationIndices.w + xInterpolationIndices.y]
-                + xWeights.z * target[yInterpolationIndices.w + xInterpolationIndices.z]
-                + xWeights.w * target[yInterpolationIndices.w + xInterpolationIndices.w]);
-            // now s is the value
+            xInterpolationIndices = dcalculatexInterpolationIndices(coord.x, doubletargetwidth, targetwidth);
+            yInterpolationIndices = dcalculateyInterpolationIndices(coord.y, doubletargetheight, targetheight, targetwidth);
+            __private double s = dinterpolate(coord, xInterpolationIndices, yInterpolationIndices, target);
             __private double diff = source[nIndex] - s;
-            diffout[nIndex] = pown(diff,2);
-            __private double Theta = yGradient[nIndex] * (double)column - xGradient[nIndex] * (double)row;
-            grad0[nIndex] = diff * Theta;
-            grad1[nIndex] = diff * xGradient[nIndex];
-            grad2[nIndex] = diff * yGradient[nIndex];
-            hessian00[nIndex] = pown(Theta,2);
-            hessian01[nIndex] = Theta * xGradient[nIndex];
-            hessian02[nIndex] = Theta * yGradient[nIndex];
-            hessian11[nIndex] = pown(xGradient[nIndex],2);
-            hessian12[nIndex] = xGradient[nIndex] * yGradient[nIndex];
-            hessian22[nIndex] = pown(yGradient[nIndex],2);
+            //__private double Theta = yGradient[nIndex] * (double)column - xGradient[nIndex] * (double)row;
+            __private double Theta = dot((double2)(yGradient[nIndex], -xGradient[nIndex]), (double2)((double)column, (double)row));
+            //diffout[nIndex] = pown(diff,2);
+            //grad0[nIndex] = diff * Theta;
+            //grad1[nIndex] = diff * xGradient[nIndex];
+            //grad2[nIndex] = diff * yGradient[nIndex];
+            __private double4 tmp4 = (double4)(diff, Theta, xGradient[nIndex], yGradient[nIndex]) * diff; //Slightly less accurate
+            diffout[nIndex] = tmp4.x;
+            grad0[nIndex] = tmp4.y;
+            grad1[nIndex] = tmp4.z;
+            grad2[nIndex] = tmp4.w;
+            //hessian00[nIndex] = pown(Theta,2);
+            //hessian01[nIndex] = Theta * xGradient[nIndex];
+            //hessian02[nIndex] = Theta * yGradient[nIndex];
+            __private double3 tmp = (double3)(Theta, xGradient[nIndex], yGradient[nIndex]) * Theta; //Slightly less accurate
+            hessian00[nIndex] = tmp.x;
+            hessian01[nIndex] = tmp.y;
+            hessian02[nIndex] = tmp.z;
+            //hessian11[nIndex] = pown(xGradient[nIndex],2);
+            //hessian12[nIndex] = xGradient[nIndex] * yGradient[nIndex];
+            //hessian22[nIndex] = pown(yGradient[nIndex],2);
+            tmp = ((double3)(xGradient[nIndex], xGradient[nIndex], yGradient[nIndex])) * ((double3)(xGradient[nIndex], yGradient[nIndex], yGradient[nIndex])); //Slightly less accurate
+            hessian11[nIndex] = tmp.x;
+            hessian12[nIndex] = tmp.y;
+            hessian22[nIndex] = tmp.z;
         }
         else
         {
@@ -563,7 +433,7 @@ __kernel void drigidBodyErrorWithGradAndHess(const __global double *source ,cons
     }
 }
 
-__kernel void dtranslationErrorWithGradAndHess(const __global double *source ,const __global double *target,const __global double *xGradient,const __global double *yGradient,__global double *grad0,__global double *grad1,__global double *hessian00,__global double *hessian01,__global double *hessian11, __global double *diffout, __global double *mask, const int sourcewidth, const int sourceheight, const int targetwidth, const int targetheight, const double offsetx, const double offsety)
+__kernel void dtranslationErrorWithGradAndHess(const __global double *source ,const __global double *target,const __global double *xGradient,const __global double *yGradient,__global double *grad0,__global double *grad1,__global double *hessian00,__global double *hessian01,__global double *hessian11, __global double *diffout, __global double *mask, const int sourcewidth, const int sourceheight, const int targetwidth, const int targetheight, const int doubletargetwidth, const int doubletargetheight, const double offsetx, const double offsety)
 {
     __private int nIndex = get_global_id(0); // this directly corresponds to the linear address of the !SOURCE! pixel
     if(nIndex < sourcewidth * sourceheight)
@@ -574,105 +444,29 @@ __kernel void dtranslationErrorWithGradAndHess(const __global double *source ,co
         __private double2 coord = (double2)(offsetx + ((double)column), offsety + ((double)row));
 
         __private int2 Msk = (int2)((int)round(coord.x), (int)round(coord.y));
-        __private int doubletargetwidth = 2*targetwidth;
-        __private int doubletargetheight = 2*targetheight;
+        __private int4 xInterpolationIndices;
+        __private int4 yInterpolationIndices;
         if ((Msk.x >= 0) && (Msk.x < targetwidth) && (Msk.y >= 0) && (Msk.y < targetheight))
         {
             mask[nIndex] = dOne;
-            // Following is the calculation using mirrored boundaries of the x and y indices of the coefficients used for interpolation
-            // calculate the x coordinates for interpolation (loop unwrapped) for speed
-            __private int4 xInterpolationIndices;
-            __private int p = (coord.x >= 0) ? (((int)trunc(coord.x)) + 2) : (((int)trunc(coord.x)) + 1);
-            // loop iteration 0
-            __private int q = (p < 0) ? (-1 - p) : p;
-            q = q<targetwidth?q:q%targetwidth;
-            xInterpolationIndices.x = q >= targetwidth ? (targetwidth - 1 - q) : q;
-            // loop iteration 1
-            p--;
-            q = (p < 0) ? (-1 - p) : p;
-            q = q<targetwidth?q:q%targetwidth;
-            xInterpolationIndices.y = q >= targetwidth ? (targetwidth - 1 - q) : q;
-            // loop iteration 2
-            p--;
-            q = (p < 0) ? (-1 - p) : p;
-            q = q<targetwidth?q:q%targetwidth;
-            xInterpolationIndices.z = q >= targetwidth ? (targetwidth - 1 - q) : q;
-            // loop iteration 3
-            p--;
-            q = (p < 0) ? (-1 - p) : p;
-            q = q<targetwidth?q:q%targetwidth;
-            xInterpolationIndices.w = q >= targetwidth ? (targetwidth - 1 - q) : q;
-
-            __private int4 yInterpolationIndices;
-            p = (coord.y >= 0) ? (((int)trunc(coord.y)) + 2) : (((int)trunc(coord.y)) + 1);
-            //loop iteration 0
-            q = (p < 0) ? (-1 - p) : p;
-            q = q<doubletargetheight?q:q%doubletargetheight;
-            yInterpolationIndices.x = (targetheight <= q) ? (((doubletargetheight) - 1 - q) * targetwidth) : (q * targetwidth); // this is the linear absolute index NOT the row
-            // loop iteration 1
-            p--;
-            q = (p < 0) ? (-1 - p) : p;
-            q = q<doubletargetheight?q:q%doubletargetheight;
-            yInterpolationIndices.y = (targetheight <= q) ? (((doubletargetheight) - 1 - q) * targetwidth) : (q * targetwidth); // this is the linear absolute index NOT the row
-            // loop iteration 2
-            p--;
-            q = (p < 0) ? (-1 - p) : p;
-            q = q<doubletargetheight?q:q%doubletargetheight;
-            yInterpolationIndices.z = (targetheight <= q) ? (((doubletargetheight) - 1 - q) * targetwidth) : (q * targetwidth); // this is the linear absolute index NOT the row
-            // loop iteration 3
-            p--;
-            q = (p < 0) ? (-1 - p) : p;
-            q = q<doubletargetheight?q:q%doubletargetheight;
-            yInterpolationIndices.w = (targetheight <= q) ? (((doubletargetheight) - 1 - q) * targetwidth) : (q * targetwidth); // this is the linear absolute index NOT the row
-
-            coord.x -= (coord.x >= dZero) ? (double)((int)trunc(coord.x)) : (double)(((int)trunc(coord.x)) - 1); // get the residual should also be possible with floor
-            coord.y -= (coord.y >= dZero) ? (double)((int)trunc(coord.y)) : (double)(((int)trunc(coord.y)) - 1); // get the residual should also be possible with floor
-
-            // Calculate the weights for interpolation
-            __private double4 xWeights;
-            __private double s = dOne - coord.x;
-            xWeights.w = pown(s,3) / dLambda;
-            s = coord.x * coord.x;
-            xWeights.z = dTwo / dThree - dh * s * (dTwo - coord.x);
-            xWeights.x = s * coord.x / dLambda;
-            xWeights.y = dOne - xWeights.x - xWeights.z - xWeights.w;
-            __private double4 yWeights;
-            s = dOne - coord.y;
-            yWeights.w = pown(s,3) / dLambda;
-            s = coord.y * coord.y;
-            yWeights.z = dTwo / dThree - dh * s * (dTwo - coord.y);
-            yWeights.x = s * coord.y / dLambda;
-            yWeights.y = dOne - yWeights.x - yWeights.z - yWeights.w;
-
-            // unwrapped interpolation loop (sorry 16 iterations) 4x4 interpolation coefficients
-            // y loop 0
-            s = yWeights.x * (xWeights.x * target[yInterpolationIndices.x + xInterpolationIndices.x]
-                + xWeights.y * target[yInterpolationIndices.x + xInterpolationIndices.y]
-                + xWeights.z * target[yInterpolationIndices.x + xInterpolationIndices.z]
-                + xWeights.w * target[yInterpolationIndices.x + xInterpolationIndices.w]);
-            // y loop 1
-            s += yWeights.y * (xWeights.x * target[yInterpolationIndices.y + xInterpolationIndices.x]
-                + xWeights.y * target[yInterpolationIndices.y + xInterpolationIndices.y]
-                + xWeights.z * target[yInterpolationIndices.y + xInterpolationIndices.z]
-                + xWeights.w * target[yInterpolationIndices.y + xInterpolationIndices.w]);
-            // y loop 2
-            s += yWeights.z * (xWeights.x * target[yInterpolationIndices.z + xInterpolationIndices.x]
-                + xWeights.y * target[yInterpolationIndices.z + xInterpolationIndices.y]
-                + xWeights.z * target[yInterpolationIndices.z + xInterpolationIndices.z]
-                + xWeights.w * target[yInterpolationIndices.z + xInterpolationIndices.w]);
-            // y loop 3
-            s += yWeights.w * (xWeights.x * target[yInterpolationIndices.w + xInterpolationIndices.x]
-                + xWeights.y * target[yInterpolationIndices.w + xInterpolationIndices.y]
-                + xWeights.z * target[yInterpolationIndices.w + xInterpolationIndices.z]
-                + xWeights.w * target[yInterpolationIndices.w + xInterpolationIndices.w]);
-            // now s is the value
+            xInterpolationIndices = dcalculatexInterpolationIndices(coord.x, doubletargetwidth, targetwidth);
+            yInterpolationIndices = dcalculateyInterpolationIndices(coord.y, doubletargetheight, targetheight, targetwidth);
+            __private double s = dinterpolate(coord, xInterpolationIndices, yInterpolationIndices, target);
             __private double diff = source[nIndex] - s;
-            diffout[nIndex] = pown(diff,2);
-            grad0[nIndex] = diff * xGradient[nIndex];
-            grad1[nIndex] = diff * yGradient[nIndex];
-            hessian00[nIndex] = pown(xGradient[nIndex],2);
-            hessian01[nIndex] = xGradient[nIndex] * yGradient[nIndex];
-            hessian11[nIndex] = pown(yGradient[nIndex],2);
+            //diffout[nIndex] = pown(diff,2);
+            //grad0[nIndex] = diff * xGradient[nIndex];
+            //grad1[nIndex] = diff * yGradient[nIndex];
+            __private double3 tmp = (double3)(diff, xGradient[nIndex], yGradient[nIndex]) * diff;
+            diffout[nIndex] = tmp.x;
+            grad0[nIndex] = tmp.y;
+            grad1[nIndex] = tmp.z;
+            //hessian00[nIndex] = pown(xGradient[nIndex],2);
+            //hessian01[nIndex] = xGradient[nIndex] * yGradient[nIndex];
+            //hessian11[nIndex] = pown(yGradient[nIndex],2);
+            tmp = ((double3)(xGradient[nIndex], xGradient[nIndex], yGradient[nIndex])) * ((double3)(xGradient[nIndex], yGradient[nIndex], yGradient[nIndex])); 
+            hessian00[nIndex] = tmp.x;
+            hessian01[nIndex] = tmp.y;
+            hessian11[nIndex] = tmp.z;
         }
         else
         {
@@ -1450,7 +1244,8 @@ const int targetwidth,
 const int targetheight,
 const double offsetx,
 const double offsety,
-const double angle,
+const double cosangle,
+const double negsinangle,
 const int doubleTargetWidth,
 const int doubleTargetHeight)
 {
@@ -1474,7 +1269,7 @@ const int doubleTargetHeight)
     lmask[nIndex] = dZero;
 
     //These vectors remain the same during the loops
-    __private double2 xvec = (double2)(cos(angle),-sin(angle));//Warning: this is not the x vector but it is the vector added in the x direction
+    __private double2 xvec = (double2)(cosangle,negsinangle);//Warning: this is not the x vector but it is the vector added in the x direction
     __private double2 yvec = (double2)(-xvec.y,xvec.x);//Warning: this is not the y vector but it is the vector added in the y direction
     while(i < sourcewidth * sourceheight)
     {
@@ -1487,8 +1282,6 @@ const int doubleTargetHeight)
         __private int4 combinedInterpolationIndices;
         __private double4 xWeights;
         __private double4 yWeights;
-        __private int p;
-        __private int q;
         __private double s;
         __private double diff;
         __private double Theta;
@@ -1497,110 +1290,35 @@ const int doubleTargetHeight)
         if ((Msk.x >= 0) && (Msk.x < targetwidth) && (Msk.y >= 0) && (Msk.y < targetheight))
         {
             lmask[nIndex] += dOne;
-            //Following is the calculation using mirrored boundaries of the x and y indices of the coefficients used for interpolation
-            //calculate the x coordinates for interpolation (loop unwrapped) for speed
-            p = (coord.x >= 0) ? (((int)trunc(coord.x)) + 2) : (((int)trunc(coord.x)) + 1);
-            //loop iteration 0
-            /*
-            q = (p < 0) ? (-1 - p) : p;
-            is a diverging statement, although it incurs more operations the following equivalent will likely be faster
-            */
-            q = abs(p) - rotate(p&(int)0x80000000,(int)1);
-            q = q<doubleTargetWidth?q:q%doubleTargetWidth;
-            xInterpolationIndices.x = q >= targetwidth ? (doubleTargetWidth - 1 - q) : q;
-            //loop iteration 1
-            p--;
-            q = abs(p) - rotate(p&(int)0x80000000,(int)1);
-            q = q<doubleTargetWidth?q:q%doubleTargetWidth;
-            xInterpolationIndices.y = q >= targetwidth ? (doubleTargetWidth - 1 - q) : q;
-            //loop iteration 2
-            p--;
-            q = abs(p) - rotate(p&(int)0x80000000,(int)1);
-            q = q<doubleTargetWidth?q:q%doubleTargetWidth;
-            xInterpolationIndices.z = q >= targetwidth ? (doubleTargetWidth - 1 - q) : q;
-            //loop iteration 3
-            p--;
-            q = abs(p) - rotate(p&(int)0x80000000,(int)1);
-            q = q<doubleTargetWidth?q:q%doubleTargetWidth;
-            xInterpolationIndices.w = q >= targetwidth ? (doubleTargetWidth - 1 - q) : q;
-
-            p = (coord.y >= 0) ? (((int)trunc(coord.y)) + 2) : (((int)trunc(coord.y)) + 1);
-            //loop iteration 0
-            q = abs(p) - rotate(p&(int)0x80000000,(int)1);
-            q = q<doubleTargetHeight?q:q%doubleTargetHeight;
-            yInterpolationIndices.x = (targetheight <= q) ? (((doubleTargetHeight) - 1 - q) * targetwidth) : (q * targetwidth);//this is the linear absolute index NOT the row
-            //loop iteration 1
-            p--;
-            q = abs(p) - rotate(p&(int)0x80000000,(int)1);
-            q = q<doubleTargetHeight?q:q%doubleTargetHeight;
-            yInterpolationIndices.y = (targetheight <= q) ? (((doubleTargetHeight) - 1 - q) * targetwidth) : (q * targetwidth);//this is the linear absolute index NOT the row
-            //loop iteration 2
-            p--;
-            q = abs(p) - rotate(p&(int)0x80000000,(int)1);
-            q = q<doubleTargetHeight?q:q%doubleTargetHeight;
-            yInterpolationIndices.z = (targetheight <= q) ? (((doubleTargetHeight) - 1 - q) * targetwidth) : (q * targetwidth);//this is the linear absolute index NOT the row
-            //loop iteration 3
-            p--;
-            q = abs(p) - rotate(p&(int)0x80000000,(int)1);
-            q = q<doubleTargetHeight?q:q%doubleTargetHeight;
-            yInterpolationIndices.w = (targetheight <= q) ? (((doubleTargetHeight) - 1 - q) * targetwidth) : (q * targetwidth);//this is the linear absolute index NOT the row
-
-            coord.x -= (coord.x >= dZero) ? (double)((int)trunc(coord.x)) : (double)(((int)trunc(coord.x)) - 1);//get the residual should also be possible with floor
-            coord.y -= (coord.y >= dZero) ? (double)((int)trunc(coord.y)) : (double)(((int)trunc(coord.y)) - 1);//get the residual should also be possible with floor
-
-            //Calculate the weights for interpolation
-            s = dOne - coord.x;
-            xWeights.w = pown(s,3) / dLambda;
-            s = coord.x * coord.x;
-            xWeights.z = dTwo / dThree - dh * s * (dTwo - coord.x);
-            xWeights.x = s * coord.x / dLambda;
-            xWeights.y = dOne - xWeights.x - xWeights.z - xWeights.w;
-            s = dOne - coord.y;
-            yWeights.w = pown(s,3) / dLambda;
-            s = coord.y * coord.y;
-            yWeights.z = dTwo / dThree - dh * s * (dTwo - coord.y);
-            yWeights.x = s * coord.y / dLambda;
-            yWeights.y = dOne - yWeights.x - yWeights.z - yWeights.w;
-
-            //unwrapped interpolation loop (sorry 16 iterations) 4x4 interpolation coefficients
-            //y loop 0
-            //broadcast then add
-            combinedInterpolationIndices = (int4)(yInterpolationIndices.x) + xInterpolationIndices;
-            s = yWeights.x * (xWeights.x * target[combinedInterpolationIndices.x]
-                + xWeights.y * target[combinedInterpolationIndices.y]
-                + xWeights.z * target[combinedInterpolationIndices.z]
-                + xWeights.w * target[combinedInterpolationIndices.w]);
-            //y loop 1
-            combinedInterpolationIndices = (int4)(yInterpolationIndices.y) + xInterpolationIndices;
-            s += yWeights.y * (xWeights.x * target[combinedInterpolationIndices.x]
-                + xWeights.y * target[combinedInterpolationIndices.y]
-                + xWeights.z * target[combinedInterpolationIndices.z]
-                + xWeights.w * target[combinedInterpolationIndices.w]);
-            //y loop 2
-            combinedInterpolationIndices = (int4)(yInterpolationIndices.z) + xInterpolationIndices;
-            s += yWeights.z * (xWeights.x * target[combinedInterpolationIndices.x]
-                + xWeights.y * target[combinedInterpolationIndices.y]
-                + xWeights.z * target[combinedInterpolationIndices.z]
-                + xWeights.w * target[combinedInterpolationIndices.w]);
-            //y loop 3
-            combinedInterpolationIndices = (int4)(yInterpolationIndices.w) + xInterpolationIndices;
-            s += yWeights.w * (xWeights.x * target[combinedInterpolationIndices.x]
-                + xWeights.y * target[combinedInterpolationIndices.y]
-                + xWeights.z * target[combinedInterpolationIndices.z]
-                + xWeights.w * target[combinedInterpolationIndices.w]);
-            //now s is the value
+            xInterpolationIndices = dcalculatexInterpolationIndices(coord.x, doubleTargetWidth, targetwidth);
+            yInterpolationIndices = dcalculateyInterpolationIndices(coord.y, doubleTargetHeight, targetheight, targetwidth);            
+            s = dinterpolate(coord, xInterpolationIndices, yInterpolationIndices, target);
             diff = source[i] - s;
-            ldiffout[nIndex] += pown(diff,2);
-            Theta = yGradient[i] * (double)column - xGradient[i] * (double)row;
-            lgrad0[nIndex] += diff * Theta;
-            lgrad1[nIndex] += diff * xGradient[i];
-            lgrad2[nIndex] += diff * yGradient[i];
-            lhessian00[nIndex] += pown(Theta,2);
-            lhessian01[nIndex] += Theta * xGradient[i];
-            lhessian02[nIndex] += Theta * yGradient[i];
-            lhessian11[nIndex] += pown(xGradient[i],2);
-            lhessian12[nIndex] += xGradient[i] * yGradient[i];
-            lhessian22[nIndex] += pown(yGradient[i],2);
+            //Theta = yGradient[i] * (double)column - xGradient[i] * (double)row;
+            Theta = dot((double2)(yGradient[i], -xGradient[i]), (double2)((double)column, (double)row));
+            //ldiffout[nIndex] += pown(diff,2);
+            //lgrad0[nIndex] += diff * Theta;
+            //lgrad1[nIndex] += diff * xGradient[i];
+            //lgrad2[nIndex] += diff * yGradient[i];
+            __private double4 tmp4 = fma((double4)(diff, Theta, xGradient[i], yGradient[i]), (double4)diff, (double4)(ldiffout[nIndex], lgrad0[nIndex], lgrad1[nIndex], lgrad2[nIndex]));
+            ldiffout[nIndex] = tmp4.x;
+            lgrad0[nIndex] = tmp4.y;
+            lgrad1[nIndex] = tmp4.z;
+            lgrad2[nIndex] = tmp4.w;
+            //lhessian00[nIndex] += pown(Theta,2);
+            //lhessian01[nIndex] += Theta * xGradient[i];
+            //lhessian02[nIndex] += Theta * yGradient[i];
+            __private double3 tmp = fma((double3)(Theta, xGradient[i], yGradient[i]), (double3)Theta, (double3)(lhessian00[nIndex], lhessian01[nIndex], lhessian02[nIndex])); //Slightly less accurate
+            lhessian00[nIndex] = tmp.x;
+            lhessian01[nIndex] = tmp.y;
+            lhessian02[nIndex] = tmp.z;
+            //lhessian11[nIndex] += pown(xGradient[i],2);
+            //lhessian12[nIndex] += xGradient[i] * yGradient[i];
+            //lhessian22[nIndex] += pown(yGradient[i],2);
+            tmp = fma((double3)(xGradient[i], xGradient[i], yGradient[i]), (double3)(xGradient[i], yGradient[i], yGradient[i]), (double3)(lhessian11[nIndex], lhessian12[nIndex], lhessian22[nIndex]));
+            lhessian11[nIndex] = tmp.x;
+            lhessian12[nIndex] = tmp.y;
+            lhessian22[nIndex] = tmp.z;
         }
         // ensure the read is not out of bounds
         if(i + blockSize < sourcewidth * sourceheight)
@@ -1613,134 +1331,35 @@ const int doubleTargetHeight)
             if ((Msk.x >= 0) && (Msk.x < targetwidth) && (Msk.y >= 0) && (Msk.y < targetheight))
             {
                 lmask[nIndex] += dOne;
-                //Following is the calculation using mirrored boundaries of the x and y indices of the coefficients used for interpolation
-                //calculate the x coordinates for interpolation (loop unwrapped) for speed
-                p = (coord.x >= 0) ? (((int)trunc(coord.x)) + 2) : (((int)trunc(coord.x)) + 1);
-                //loop iteration 0
-                /*
-                q = (p < 0) ? (-1 - p) : p;
-                is a diverging statement, although it incurs more operations the following equivalent will likely be faster
-                */
-                q = abs(p) - rotate(p&(int)0x80000000,(int)1);
-                if(q >= doubleTargetWidth)
-                {
-                    q -= (doubleTargetWidth) * (q / (doubleTargetWidth)); //Warning: this is an integer division, it doesn't yield q
-                }
-                xInterpolationIndices.x = q >= targetwidth ? (doubleTargetWidth - 1 - q) : q;
-                //loop iteration 1
-                p--;
-                q = abs(p) - rotate(p&(int)0x80000000,(int)1);
-                if(q >= doubleTargetWidth)
-                {
-                    q -= (doubleTargetWidth) * (q / (doubleTargetWidth)); //Warning: this is an integer division, it doesn't yield q
-                }
-                xInterpolationIndices.y = q >= targetwidth ? (doubleTargetWidth - 1 - q) : q;
-                //loop iteration 2
-                p--;
-                q = abs(p) - rotate(p&(int)0x80000000,(int)1);
-                if(q >= doubleTargetWidth)
-                {
-                    q -= (doubleTargetWidth) * (q / (doubleTargetWidth)); //Warning: this is an integer division, it doesn't yield q
-                }
-                xInterpolationIndices.z = q >= targetwidth ? (doubleTargetWidth - 1 - q) : q;
-                //loop iteration 3
-                p--;
-                q = abs(p) - rotate(p&(int)0x80000000,(int)1);
-                if(q >= doubleTargetWidth)
-                {
-                    q -= (doubleTargetWidth) * (q / (doubleTargetWidth)); //Warning: this is an integer division, it doesn't yield q
-                }
-                xInterpolationIndices.w = q >= targetwidth ? (doubleTargetWidth - 1 - q) : q;
-
-                p = (coord.y >= 0) ? (((int)trunc(coord.y)) + 2) : (((int)trunc(coord.y)) + 1);
-                //loop iteration 0
-                q = abs(p) - rotate(p&(int)0x80000000,(int)1);
-                if(q >= doubleTargetHeight)
-                {
-                    q -= (doubleTargetHeight) * (q / (doubleTargetHeight)); //WARNING: this is an integer division which may not yield q
-                }
-                yInterpolationIndices.x = (targetheight <= q) ? (((doubleTargetHeight) - 1 - q) * targetwidth) : (q * targetwidth);//this is the linear absolute index NOT the row
-                //loop iteration 1
-                p--;
-                q = abs(p) - rotate(p&(int)0x80000000,(int)1);
-                if(q >= doubleTargetHeight)
-                {
-                    q -= (doubleTargetHeight) * (q / (doubleTargetHeight));//WARNING: this is an integer division which may not yield q
-                }
-                yInterpolationIndices.y = (targetheight <= q) ? (((doubleTargetHeight) - 1 - q) * targetwidth) : (q * targetwidth);//this is the linear absolute index NOT the row
-                //loop iteration 2
-                p--;
-                q = abs(p) - rotate(p&(int)0x80000000,(int)1);
-                if(q >= doubleTargetHeight)
-                {
-                    q -= (doubleTargetHeight) * (q / (doubleTargetHeight));//WARNING: this is an integer division which may not yield q
-                }
-                yInterpolationIndices.z = (targetheight <= q) ? (((doubleTargetHeight) - 1 - q) * targetwidth) : (q * targetwidth);//this is the linear absolute index NOT the row
-                //loop iteration 3
-                p--;
-                q = abs(p) - rotate(p&(int)0x80000000,(int)1);
-                if(q >= doubleTargetHeight)
-                {
-                    q -= (doubleTargetHeight) * (q / (doubleTargetHeight));//WARNING: this is an integer division which may not yield q
-                }
-                yInterpolationIndices.w = (targetheight <= q) ? (((doubleTargetHeight) - 1 - q) * targetwidth) : (q * targetwidth);//this is the linear absolute index NOT the row
-
-                coord.x -= (coord.x >= dZero) ? (double)((int)trunc(coord.x)) : (double)(((int)trunc(coord.x)) - 1);//get the residual should also be possible with floor
-                coord.y -= (coord.y >= dZero) ? (double)((int)trunc(coord.y)) : (double)(((int)trunc(coord.y)) - 1);//get the residual should also be possible with floor
-
-                //Calculate the weights for interpolation
-                s = dOne - coord.x;
-                xWeights.w = pown(s,3) / dLambda;
-                s = coord.x * coord.x;
-                xWeights.z = dTwo / dThree - dh * s * (dTwo - coord.x);
-                xWeights.x = s * coord.x / dLambda;
-                xWeights.y = dOne - xWeights.x - xWeights.z - xWeights.w;
-                s = dOne - coord.y;
-                yWeights.w = pown(s,3) / dLambda;
-                s = coord.y * coord.y;
-                yWeights.z = dTwo / dThree - dh * s * (dTwo - coord.y);
-                yWeights.x = s * coord.y / dLambda;
-                yWeights.y = dOne - yWeights.x - yWeights.z - yWeights.w;
-
-                //unwrapped interpolation loop (sorry 16 iterations) 4x4 interpolation coefficients
-                //y loop 0
-                //broadcast then add
-                combinedInterpolationIndices = (int4)(yInterpolationIndices.x) + xInterpolationIndices;
-                s = yWeights.x * (xWeights.x * target[combinedInterpolationIndices.x]
-                    + xWeights.y * target[combinedInterpolationIndices.y]
-                    + xWeights.z * target[combinedInterpolationIndices.z]
-                    + xWeights.w * target[combinedInterpolationIndices.w]);
-                //y loop 1
-                combinedInterpolationIndices = (int4)(yInterpolationIndices.y) + xInterpolationIndices;
-                s += yWeights.y * (xWeights.x * target[combinedInterpolationIndices.x]
-                    + xWeights.y * target[combinedInterpolationIndices.y]
-                    + xWeights.z * target[combinedInterpolationIndices.z]
-                    + xWeights.w * target[combinedInterpolationIndices.w]);
-                //y loop 2
-                combinedInterpolationIndices = (int4)(yInterpolationIndices.z) + xInterpolationIndices;
-                s += yWeights.z * (xWeights.x * target[combinedInterpolationIndices.x]
-                    + xWeights.y * target[combinedInterpolationIndices.y]
-                    + xWeights.z * target[combinedInterpolationIndices.z]
-                    + xWeights.w * target[combinedInterpolationIndices.w]);
-                //y loop 3
-                combinedInterpolationIndices = (int4)(yInterpolationIndices.w) + xInterpolationIndices;
-                s += yWeights.w * (xWeights.x * target[combinedInterpolationIndices.x]
-                    + xWeights.y * target[combinedInterpolationIndices.y]
-                    + xWeights.z * target[combinedInterpolationIndices.z]
-                    + xWeights.w * target[combinedInterpolationIndices.w]);
-                //now s is the value
+                xInterpolationIndices = dcalculatexInterpolationIndices(coord.x, doubleTargetWidth, targetwidth);
+                yInterpolationIndices = dcalculateyInterpolationIndices(coord.y, doubleTargetHeight, targetheight, targetwidth); 
+                s = dinterpolate(coord, xInterpolationIndices, yInterpolationIndices, target);
                 diff = source[lIdx] - s;
-                ldiffout[nIndex] += pown(diff,2);
-                Theta = yGradient[lIdx] * (double)column - xGradient[lIdx] * (double)row;
-                lgrad0[nIndex] += diff * Theta;
-                lgrad1[nIndex] += diff * xGradient[lIdx];
-                lgrad2[nIndex] += diff * yGradient[lIdx];
-                lhessian00[nIndex] += pown(Theta,2);
-                lhessian01[nIndex] += Theta * xGradient[lIdx];
-                lhessian02[nIndex] += Theta * yGradient[lIdx];
-                lhessian11[nIndex] += pown(xGradient[lIdx],2);
-                lhessian12[nIndex] += xGradient[lIdx] * yGradient[lIdx];
-                lhessian22[nIndex] += pown(yGradient[lIdx],2);
+                //Theta = yGradient[lIdx] * (double)column - xGradient[lIdx] * (double)row;
+                Theta = dot((double2)(yGradient[lIdx], -xGradient[lIdx]), (double2)((double)column, (double)row));
+                //ldiffout[nIndex] += pown(diff,2);
+                //lgrad0[nIndex] += diff * Theta;
+                //lgrad1[nIndex] += diff * xGradient[lIdx];
+                //lgrad2[nIndex] += diff * yGradient[lIdx];
+                __private double4 tmp4 = fma((double4)(diff, Theta, xGradient[lIdx], yGradient[lIdx]), (double4)diff, (double4)(ldiffout[nIndex], lgrad0[nIndex], lgrad1[nIndex], lgrad2[nIndex]));
+                ldiffout[nIndex] = tmp4.x;
+                lgrad0[nIndex] = tmp4.y;
+                lgrad1[nIndex] = tmp4.z;
+                lgrad2[nIndex] = tmp4.w;
+                //lhessian00[nIndex] += pown(Theta,2);
+                //lhessian01[nIndex] += Theta * xGradient[lIdx];
+                //lhessian02[nIndex] += Theta * yGradient[lIdx];
+                __private double3 tmp = fma((double3)(Theta, xGradient[lIdx], yGradient[lIdx]), (double3)Theta, (double3)(lhessian00[nIndex], lhessian01[nIndex], lhessian02[nIndex])); //Slightly less accurate
+                lhessian00[nIndex] = tmp.x;
+                lhessian01[nIndex] = tmp.y;
+                lhessian02[nIndex] = tmp.z;
+                //lhessian11[nIndex] += pown(xGradient[lIdx],2);
+                //lhessian12[nIndex] += xGradient[lIdx] * yGradient[lIdx];
+                //lhessian22[nIndex] += pown(yGradient[lIdx],2);
+                tmp = fma((double3)(xGradient[lIdx], xGradient[lIdx], yGradient[lIdx]), (double3)(xGradient[lIdx], yGradient[lIdx], yGradient[lIdx]), (double3)(lhessian11[nIndex], lhessian12[nIndex], lhessian22[nIndex]));
+                lhessian11[nIndex] = tmp.x;
+                lhessian12[nIndex] = tmp.y;
+                lhessian22[nIndex] = tmp.z;
             }
         }
         i += gridSize;
@@ -1835,15 +1454,13 @@ const int doubleTargetHeight)
     {
         __private int column = i % sourcewidth;
         __private int row = (i - column)/sourcewidth;
-        __private double2 coord = (double2)(offsetx + ((double)column), offsety + ((double)row));
+        __private double2 coord = (double2)(offsetx, offsety) + (double2)(((double)column), ((double)row));
         
         __private int4 xInterpolationIndices;
         __private int4 yInterpolationIndices;
         __private int4 combinedInterpolationIndices;
         __private double4 xWeights;
         __private double4 yWeights;
-        __private int p;
-        __private int q;
         __private double s;
         __private double diff;
         
@@ -1851,105 +1468,24 @@ const int doubleTargetHeight)
         if ((Msk.x >= 0) && (Msk.x < targetwidth) && (Msk.y >= 0) && (Msk.y < targetheight))
         {
             lmask[nIndex] += dOne;
-            //Following is the calculation using mirrored boundaries of the x and y indices of the coefficients used for interpolation
-            //calculate the x coordinates for interpolation (loop unwrapped) for speed
-            p = (coord.x >= 0) ? (((int)trunc(coord.x)) + 2) : (((int)trunc(coord.x)) + 1);
-            //loop iteration 0
-            /*
-            q = (p < 0) ? (-1 - p) : p;
-            is a diverging statement, although it incurs more operations the following equivalent will likely be faster
-            */
-            q = abs(p) - rotate(p&(int)0x80000000,(int)1);
-            q = q<doubleTargetWidth?q:q%doubleTargetWidth;
-            xInterpolationIndices.x = q >= targetwidth ? (doubleTargetWidth - 1 - q) : q;
-            //loop iteration 1
-            p--;
-            q = abs(p) - rotate(p&(int)0x80000000,(int)1);
-            q = q<doubleTargetWidth?q:q%doubleTargetWidth;
-            xInterpolationIndices.y = q >= targetwidth ? (doubleTargetWidth - 1 - q) : q;
-            //loop iteration 2
-            p--;
-            q = abs(p) - rotate(p&(int)0x80000000,(int)1);
-            q = q<doubleTargetWidth?q:q%doubleTargetWidth;
-            xInterpolationIndices.z = q >= targetwidth ? (doubleTargetWidth - 1 - q) : q;
-            //loop iteration 3
-            p--;
-            q = abs(p) - rotate(p&(int)0x80000000,(int)1);
-            q = q<doubleTargetWidth?q:q%doubleTargetWidth;
-            xInterpolationIndices.w = q >= targetwidth ? (doubleTargetWidth - 1 - q) : q;
-
-            p = (coord.y >= 0) ? (((int)trunc(coord.y)) + 2) : (((int)trunc(coord.y)) + 1);
-            //loop iteration 0
-            q = abs(p) - rotate(p&(int)0x80000000,(int)1);
-            q = q<doubleTargetHeight?q:q%doubleTargetHeight;
-            yInterpolationIndices.x = (targetheight <= q) ? (((doubleTargetHeight) - 1 - q) * targetwidth) : (q * targetwidth);//this is the linear absolute index NOT the row
-            //loop iteration 1
-            p--;
-            q = abs(p) - rotate(p&(int)0x80000000,(int)1);
-            q = q<doubleTargetHeight?q:q%doubleTargetHeight;
-            yInterpolationIndices.y = (targetheight <= q) ? (((doubleTargetHeight) - 1 - q) * targetwidth) : (q * targetwidth);//this is the linear absolute index NOT the row
-            //loop iteration 2
-            p--;
-            q = abs(p) - rotate(p&(int)0x80000000,(int)1);
-            q = q<doubleTargetHeight?q:q%doubleTargetHeight;
-            yInterpolationIndices.z = (targetheight <= q) ? (((doubleTargetHeight) - 1 - q) * targetwidth) : (q * targetwidth);//this is the linear absolute index NOT the row
-            //loop iteration 3
-            p--;
-            q = abs(p) - rotate(p&(int)0x80000000,(int)1);
-            q = q<doubleTargetHeight?q:q%doubleTargetHeight;
-            yInterpolationIndices.w = (targetheight <= q) ? (((doubleTargetHeight) - 1 - q) * targetwidth) : (q * targetwidth);//this is the linear absolute index NOT the row
-
-            coord.x -= (coord.x >= dZero) ? (double)((int)trunc(coord.x)) : (double)(((int)trunc(coord.x)) - 1);//get the residual should also be possible with floor
-            coord.y -= (coord.y >= dZero) ? (double)((int)trunc(coord.y)) : (double)(((int)trunc(coord.y)) - 1);//get the residual should also be possible with floor
-
-            //Calculate the weights for interpolation
-            s = dOne - coord.x;
-            xWeights.w = pown(s,3) / dLambda;
-            s = coord.x * coord.x;
-            xWeights.z = dTwo / dThree - dh * s * (dTwo - coord.x);
-            xWeights.x = s * coord.x / dLambda;
-            xWeights.y = dOne - xWeights.x - xWeights.z - xWeights.w;
-            s = dOne - coord.y;
-            yWeights.w = pown(s,3) / dLambda;
-            s = coord.y * coord.y;
-            yWeights.z = dTwo / dThree - dh * s * (dTwo - coord.y);
-            yWeights.x = s * coord.y / dLambda;
-            yWeights.y = dOne - yWeights.x - yWeights.z - yWeights.w;
-
-            //unwrapped interpolation loop (sorry 16 iterations) 4x4 interpolation coefficients
-            //y loop 0
-            //broadcast then add
-            combinedInterpolationIndices = (int4)(yInterpolationIndices.x) + xInterpolationIndices;
-            s = yWeights.x * (xWeights.x * target[combinedInterpolationIndices.x]
-                + xWeights.y * target[combinedInterpolationIndices.y]
-                + xWeights.z * target[combinedInterpolationIndices.z]
-                + xWeights.w * target[combinedInterpolationIndices.w]);
-            //y loop 1
-            combinedInterpolationIndices = (int4)(yInterpolationIndices.y) + xInterpolationIndices;
-            s += yWeights.y * (xWeights.x * target[combinedInterpolationIndices.x]
-                + xWeights.y * target[combinedInterpolationIndices.y]
-                + xWeights.z * target[combinedInterpolationIndices.z]
-                + xWeights.w * target[combinedInterpolationIndices.w]);
-            //y loop 2
-            combinedInterpolationIndices = (int4)(yInterpolationIndices.z) + xInterpolationIndices;
-            s += yWeights.z * (xWeights.x * target[combinedInterpolationIndices.x]
-                + xWeights.y * target[combinedInterpolationIndices.y]
-                + xWeights.z * target[combinedInterpolationIndices.z]
-                + xWeights.w * target[combinedInterpolationIndices.w]);
-            //y loop 3
-            combinedInterpolationIndices = (int4)(yInterpolationIndices.w) + xInterpolationIndices;
-            s += yWeights.w * (xWeights.x * target[combinedInterpolationIndices.x]
-                + xWeights.y * target[combinedInterpolationIndices.y]
-                + xWeights.z * target[combinedInterpolationIndices.z]
-                + xWeights.w * target[combinedInterpolationIndices.w]);
-            //now s is the value
+            xInterpolationIndices = dcalculatexInterpolationIndices(coord.x, doubleTargetWidth, targetwidth);
+            yInterpolationIndices = dcalculateyInterpolationIndices(coord.y, doubleTargetHeight, targetheight, targetwidth);
+            s = dinterpolate(coord, xInterpolationIndices, yInterpolationIndices, target);
             diff = source[i] - s;
-            ldiffout[nIndex] += pown(diff,2);
-            lgrad0[nIndex] += diff * xGradient[i];
-            lgrad1[nIndex] += diff * yGradient[i];
-            lhessian00[nIndex] += pown(xGradient[i],2);
-            lhessian01[nIndex] += xGradient[i] * yGradient[i];
-            lhessian11[nIndex] += pown(yGradient[i],2);
+            //ldiffout[nIndex] += pown(diff,2);
+            //lgrad0[nIndex] += diff * xGradient[i];
+            //lgrad1[nIndex] += diff * yGradient[i];
+            __private double3 tmp3 = fma((double3)(diff, xGradient[i], yGradient[i]), (double3)diff, (double3)(ldiffout[nIndex], lgrad0[nIndex], lgrad1[nIndex]));
+            ldiffout[nIndex] = tmp3.x;
+            lgrad0[nIndex] = tmp3.y;
+            lgrad1[nIndex] = tmp3.z;
+            //lhessian00[nIndex] += pown(xGradient[i],2);
+            //lhessian01[nIndex] += xGradient[i] * yGradient[i];
+            //lhessian11[nIndex] += pown(yGradient[i],2);
+            tmp3 = fma((double3)(xGradient[i], xGradient[i], yGradient[i]), (double3)(xGradient[i], yGradient[i], yGradient[i]), (double3)(lhessian00[nIndex], lhessian01[nIndex], lhessian11[nIndex]));
+            lhessian00[nIndex] = tmp3.x;
+            lhessian01[nIndex] = tmp3.y;
+            lhessian11[nIndex] = tmp3.z;
         }
         // ensure the read is not out of bounds
         if(i + blockSize < sourcewidth * sourceheight)
@@ -1957,134 +1493,29 @@ const int doubleTargetHeight)
             __private int lIdx = i + blockSize;
             column = lIdx % sourcewidth;
             row = (lIdx - column)/sourcewidth;
-            coord = (double2)(offsetx + ((double)column), offsety + ((double)row));
+            coord = (double2)(offsetx, offsety) + (double2)(((double)column), ((double)row));
             Msk = (int2)((int)round(coord.x), (int)round(coord.y));
             if ((Msk.x >= 0) && (Msk.x < targetwidth) && (Msk.y >= 0) && (Msk.y < targetheight))
             {
                 lmask[nIndex] += dOne;
-                //Following is the calculation using mirrored boundaries of the x and y indices of the coefficients used for interpolation
-                //calculate the x coordinates for interpolation (loop unwrapped) for speed
-                p = (coord.x >= 0) ? (((int)trunc(coord.x)) + 2) : (((int)trunc(coord.x)) + 1);
-                //loop iteration 0
-                /*
-                q = (p < 0) ? (-1 - p) : p;
-                is a diverging statement, although it incurs more operations the following equivalent will likely be faster
-                */
-                q = abs(p) - rotate(p&(int)0x80000000,(int)1);
-                if(q >= doubleTargetWidth)
-                {
-                    q -= (doubleTargetWidth) * (q / (doubleTargetWidth)); //Warning: this is an integer division, it doesn't yield q
-                }
-                xInterpolationIndices.x = q >= targetwidth ? (doubleTargetWidth - 1 - q) : q;
-                //loop iteration 1
-                p--;
-                q = abs(p) - rotate(p&(int)0x80000000,(int)1);
-                if(q >= doubleTargetWidth)
-                {
-                    q -= (doubleTargetWidth) * (q / (doubleTargetWidth)); //Warning: this is an integer division, it doesn't yield q
-                }
-                xInterpolationIndices.y = q >= targetwidth ? (doubleTargetWidth - 1 - q) : q;
-                //loop iteration 2
-                p--;
-                q = abs(p) - rotate(p&(int)0x80000000,(int)1);
-                if(q >= doubleTargetWidth)
-                {
-                    q -= (doubleTargetWidth) * (q / (doubleTargetWidth)); //Warning: this is an integer division, it doesn't yield q
-                }
-                xInterpolationIndices.z = q >= targetwidth ? (doubleTargetWidth - 1 - q) : q;
-                //loop iteration 3
-                p--;
-                q = abs(p) - rotate(p&(int)0x80000000,(int)1);
-                if(q >= doubleTargetWidth)
-                {
-                    q -= (doubleTargetWidth) * (q / (doubleTargetWidth)); //Warning: this is an integer division, it doesn't yield q
-                }
-                xInterpolationIndices.w = q >= targetwidth ? (doubleTargetWidth - 1 - q) : q;
-
-                p = (coord.y >= 0) ? (((int)trunc(coord.y)) + 2) : (((int)trunc(coord.y)) + 1);
-                //loop iteration 0
-                q = abs(p) - rotate(p&(int)0x80000000,(int)1);
-                if(q >= doubleTargetHeight)
-                {
-                    q -= (doubleTargetHeight) * (q / (doubleTargetHeight));//WARNING: this is an integer division which may not yield q
-                }
-                yInterpolationIndices.x = (targetheight <= q) ? (((doubleTargetHeight) - 1 - q) * targetwidth) : (q * targetwidth);//this is the linear absolute index NOT the row
-                //loop iteration 1
-                p--;
-                q = abs(p) - rotate(p&(int)0x80000000,(int)1);
-                if(q >= doubleTargetHeight)
-                {
-                    q -= (doubleTargetHeight) * (q / (doubleTargetHeight));//WARNING: this is an integer division which may not yield q
-                }
-                yInterpolationIndices.y = (targetheight <= q) ? (((doubleTargetHeight) - 1 - q) * targetwidth) : (q * targetwidth);//this is the linear absolute index NOT the row
-                //loop iteration 2
-                p--;
-                q = abs(p) - rotate(p&(int)0x80000000,(int)1);
-                if(q >= doubleTargetHeight)
-                {
-                    q -= (doubleTargetHeight) * (q / (doubleTargetHeight));//WARNING: this is an integer division which may not yield q
-                }
-                yInterpolationIndices.z = (targetheight <= q) ? (((doubleTargetHeight) - 1 - q) * targetwidth) : (q * targetwidth);//this is the linear absolute index NOT the row
-                //loop iteration 3
-                p--;
-                q = abs(p) - rotate(p&(int)0x80000000,(int)1);
-                if(q >= doubleTargetHeight)
-                {
-                    q -= (doubleTargetHeight) * (q / (doubleTargetHeight));//WARNING: this is an integer division which may not yield q
-                }
-                yInterpolationIndices.w = (targetheight <= q) ? (((doubleTargetHeight) - 1 - q) * targetwidth) : (q * targetwidth);//this is the linear absolute index NOT the row
-
-                coord.x -= (coord.x >= dZero) ? (double)((int)trunc(coord.x)) : (double)(((int)trunc(coord.x)) - 1);//get the residual should also be possible with floor
-                coord.y -= (coord.y >= dZero) ? (double)((int)trunc(coord.y)) : (double)(((int)trunc(coord.y)) - 1);//get the residual should also be possible with floor
-
-                //Calculate the weights for interpolation
-                s = dOne - coord.x;
-                xWeights.w = pown(s,3) / dLambda;
-                s = coord.x * coord.x;
-                xWeights.z = dTwo / dThree - dh * s * (dTwo - coord.x);
-                xWeights.x = s * coord.x / dLambda;
-                xWeights.y = dOne - xWeights.x - xWeights.z - xWeights.w;
-                s = dOne - coord.y;
-                yWeights.w = pown(s,3) / dLambda;
-                s = coord.y * coord.y;
-                yWeights.z = dTwo / dThree - dh * s * (dTwo - coord.y);
-                yWeights.x = s * coord.y / dLambda;
-                yWeights.y = dOne - yWeights.x - yWeights.z - yWeights.w;
-
-                //unwrapped interpolation loop (sorry 16 iterations) 4x4 interpolation coefficients
-                //y loop 0
-                //broadcast then add
-                combinedInterpolationIndices = (int4)(yInterpolationIndices.x) + xInterpolationIndices;
-                s = yWeights.x * (xWeights.x * target[combinedInterpolationIndices.x]
-                    + xWeights.y * target[combinedInterpolationIndices.y]
-                    + xWeights.z * target[combinedInterpolationIndices.z]
-                    + xWeights.w * target[combinedInterpolationIndices.w]);
-                //y loop 1
-                combinedInterpolationIndices = (int4)(yInterpolationIndices.y) + xInterpolationIndices;
-                s += yWeights.y * (xWeights.x * target[combinedInterpolationIndices.x]
-                    + xWeights.y * target[combinedInterpolationIndices.y]
-                    + xWeights.z * target[combinedInterpolationIndices.z]
-                    + xWeights.w * target[combinedInterpolationIndices.w]);
-                //y loop 2
-                combinedInterpolationIndices = (int4)(yInterpolationIndices.z) + xInterpolationIndices;
-                s += yWeights.z * (xWeights.x * target[combinedInterpolationIndices.x]
-                    + xWeights.y * target[combinedInterpolationIndices.y]
-                    + xWeights.z * target[combinedInterpolationIndices.z]
-                    + xWeights.w * target[combinedInterpolationIndices.w]);
-                //y loop 3
-                combinedInterpolationIndices = (int4)(yInterpolationIndices.w) + xInterpolationIndices;
-                s += yWeights.w * (xWeights.x * target[combinedInterpolationIndices.x]
-                    + xWeights.y * target[combinedInterpolationIndices.y]
-                    + xWeights.z * target[combinedInterpolationIndices.z]
-                    + xWeights.w * target[combinedInterpolationIndices.w]);
-                //now s is the value
+                xInterpolationIndices = dcalculatexInterpolationIndices(coord.x, doubleTargetWidth, targetwidth);
+                yInterpolationIndices = dcalculateyInterpolationIndices(coord.y, doubleTargetHeight, targetheight, targetwidth);
+                s = dinterpolate(coord, xInterpolationIndices, yInterpolationIndices, target);
                 diff = source[lIdx] - s;
-                ldiffout[nIndex] += pown(diff,2);
-                lgrad0[nIndex] += diff * xGradient[lIdx];
-                lgrad1[nIndex] += diff * yGradient[lIdx];
-                lhessian00[nIndex] += pown(xGradient[lIdx],2);
-                lhessian01[nIndex] += xGradient[lIdx] * yGradient[lIdx];
-                lhessian11[nIndex] += pown(yGradient[lIdx],2);
+                //ldiffout[nIndex] += pown(diff,2);
+                //lgrad0[nIndex] += diff * xGradient[lIdx];
+                //lgrad1[nIndex] += diff * yGradient[lIdx];
+                __private double3 tmp3 = fma((double3)(diff, xGradient[lIdx], yGradient[lIdx]), (double3)diff, (double3)(ldiffout[nIndex], lgrad0[nIndex], lgrad1[nIndex]));
+                ldiffout[nIndex] = tmp3.x;
+                lgrad0[nIndex] = tmp3.y;
+                lgrad1[nIndex] = tmp3.z;
+                //lhessian00[nIndex] += pown(xGradient[lIdx],2);
+                //lhessian01[nIndex] += xGradient[lIdx] * yGradient[lIdx];
+                //lhessian11[nIndex] += pown(yGradient[lIdx],2);
+                tmp3 = fma((double3)(xGradient[lIdx], xGradient[lIdx], yGradient[lIdx]), (double3)(xGradient[lIdx], yGradient[lIdx], yGradient[lIdx]), (double3)(lhessian00[nIndex], lhessian01[nIndex], lhessian11[nIndex]));
+                lhessian00[nIndex] = tmp3.x;
+                lhessian01[nIndex] = tmp3.y;
+                lhessian11[nIndex] = tmp3.z;
             }
         }
         i += gridSize;
@@ -2124,7 +1555,7 @@ const int doubleTargetHeight)
     }
 }
 
-__kernel void dtransformImageWithBsplineInterpolation(const __global double *source ,__global double *target, const int sourcewidth, const int sourceheight, const double offsetx, const double offsety, const double angle)
+__kernel void dtransformImageWithBsplineInterpolation(const __global double *source ,__global double *target, const int sourcewidth, const int sourceheight, const int doubleSourceWidth, const int doubleSourceHeight, const double offsetx, const double offsety, const double cosangle, const double negsinangle)
 {
     __private int nIndex = get_global_id(0);//this directly corresponds to the linear address of the !SOURCE! pixel
     if(nIndex < sourcewidth * sourceheight)
@@ -2132,125 +1563,18 @@ __kernel void dtransformImageWithBsplineInterpolation(const __global double *sou
         __private int column = nIndex % sourcewidth;
         __private int row = (nIndex - column)/sourcewidth;
 
-        __private double2 xvec = (double2)(cos(angle),-sin(angle));//Warning: this is not the x vector but it is the vector added in the x direction
+        __private double2 xvec = (double2)(cosangle, negsinangle);//Warning: this is not the x vector but it is the vector added in the x direction
         __private double2 yvec = (double2)(-xvec.y,xvec.x);//Warning: this is not the y vector but it is the vector added in the y direction
         __private double2 coord = (double2)(offsetx, offsety) + ((double)column) * xvec + ((double)row) * yvec;
 
         __private int2 Msk = (int2)((int)round(coord.x), (int)round(coord.y));
+        __private int4 xInterpolationIndices;
+        __private int4 yInterpolationIndices;
         if ((Msk.x >= 0) && (Msk.x < sourcewidth) && (Msk.y >= 0) && (Msk.y < sourceheight))
         {
-            //Following is the calculation using mirrored boundaries of the x and y indices of the coefficients used for interpolation
-            //calculate the x coordinates for interpolation (loop unwrapped) for speed
-            __private int4 xInterpolationIndices;
-            __private int p = (coord.x >= 0) ? (((int)trunc(coord.x)) + 2) : (((int)trunc(coord.x)) + 1);
-            //loop iteration 0
-            __private int q = (p < 0) ? (-1 - p) : p;
-            if(q >= 2*sourcewidth)
-            {
-                q -= (2*sourcewidth) * (q / (2*sourcewidth)); //Warning: this is an integer division, it doesn't yield q
-            }
-            xInterpolationIndices.x = q >= sourcewidth ? (2*sourcewidth - 1 - q) : q;
-            //loop iteration 1
-            p--;
-            q = (p < 0) ? (-1 - p) : p;
-            if(q >= 2*sourcewidth)
-            {
-                q -= (2*sourcewidth) * (q / (2*sourcewidth)); //Warning: this is an integer division, it doesn't yield q
-            }
-            xInterpolationIndices.y = q >= sourcewidth ? (2*sourcewidth - 1 - q) : q;
-            //loop iteration 2
-            p--;
-            q = (p < 0) ? (-1 - p) : p;
-            if(q >= 2*sourcewidth)
-            {
-                q -= (2*sourcewidth) * (q / (2*sourcewidth)); //Warning: this is an integer division, it doesn't yield q
-            }
-            xInterpolationIndices.z = q >= sourcewidth ? (2*sourcewidth - 1 - q) : q;
-            //loop iteration 3
-            p--;
-            q = (p < 0) ? (-1 - p) : p;
-            if(q >= 2*sourcewidth)
-            {
-                q -= (2*sourcewidth) * (q / (2*sourcewidth)); //Warning: this is an integer division, it doesn't yield q
-            }
-            xInterpolationIndices.w = q >= sourcewidth ? (2*sourcewidth - 1 - q) : q;
-
-            __private int4 yInterpolationIndices;
-            p = (coord.y >= 0) ? (((int)trunc(coord.y)) + 2) : (((int)trunc(coord.y)) + 1);
-            //loop iteration 0
-            q = (p < 0) ? (-1 - p) : p;
-            if(q >= 2*sourceheight)
-            {
-                q -= (2*sourceheight) * (q / (2*sourceheight));//WARNING: this is an integer division which may not yield q
-            }
-            yInterpolationIndices.x = (sourceheight <= q) ? (((2*sourceheight) - 1 - q) * sourcewidth) : (q * sourcewidth);//this is the linear absolute index NOT the row
-            //loop iteration 1
-            p--;
-            q = (p < 0) ? (-1 - p) : p;
-            if(q >= 2*sourceheight)
-            {
-                q -= (2*sourceheight) * (q / (2*sourceheight));//WARNING: this is an integer division which may not yield q
-            }
-            yInterpolationIndices.y = (sourceheight <= q) ? (((2*sourceheight) - 1 - q) * sourcewidth) : (q * sourcewidth);//this is the linear absolute index NOT the row
-            //loop iteration 2
-            p--;
-            q = (p < 0) ? (-1 - p) : p;
-            if(q >= 2*sourceheight)
-            {
-                q -= (2*sourceheight) * (q / (2*sourceheight));//WARNING: this is an integer division which may not yield q
-            }
-            yInterpolationIndices.z = (sourceheight <= q) ? (((2*sourceheight) - 1 - q) * sourcewidth) : (q * sourcewidth);//this is the linear absolute index NOT the row
-            //loop iteration 3
-            p--;
-            q = (p < 0) ? (-1 - p) : p;
-            if(q >= 2*sourceheight)
-            {
-                q -= (2*sourceheight) * (q / (2*sourceheight));//WARNING: this is an integer division which may not yield q
-            }
-            yInterpolationIndices.w = (sourceheight <= q) ? (((2*sourceheight) - 1 - q) * sourcewidth) : (q * sourcewidth);//this is the linear absolute index NOT the row
-
-            coord.x -= (coord.x >= dZero) ? (double)((int)trunc(coord.x)) : (double)(((int)trunc(coord.x)) - 1);//get the residual should also be possible with floor
-            coord.y -= (coord.y >= dZero) ? (double)((int)trunc(coord.y)) : (double)(((int)trunc(coord.y)) - 1);//get the residual should also be possible with floor
-
-            //Calculate the weights for interpolation
-            __private double4 xWeights;
-            __private double s = dOne - coord.x;
-            xWeights.w = pown(s,3) / dLambda;
-            s = coord.x * coord.x;
-            xWeights.z = dTwo / dThree - dh * s * (dTwo - coord.x);
-            xWeights.x = s * coord.x / dLambda;
-            xWeights.y = dOne - xWeights.x - xWeights.z - xWeights.w;
-            __private double4 yWeights;
-            s = dOne - coord.y;
-            yWeights.w = pown(s,3) / dLambda;
-            s = coord.y * coord.y;
-            yWeights.z = dTwo / dThree - dh * s * (dTwo - coord.y);
-            yWeights.x = s * coord.y / dLambda;
-            yWeights.y = dOne - yWeights.x - yWeights.z - yWeights.w;
-
-            //unwrapped interpolation loop (sorry 16 iterations) 4x4 interpolation coefficients
-            //y loop 0
-            s = yWeights.x * (xWeights.x * source[yInterpolationIndices.x + xInterpolationIndices.x]
-                + xWeights.y * source[yInterpolationIndices.x + xInterpolationIndices.y]
-                + xWeights.z * source[yInterpolationIndices.x + xInterpolationIndices.z]
-                + xWeights.w * source[yInterpolationIndices.x + xInterpolationIndices.w]);
-            //y loop 1
-            s += yWeights.y * (xWeights.x * source[yInterpolationIndices.y + xInterpolationIndices.x]
-                + xWeights.y * source[yInterpolationIndices.y + xInterpolationIndices.y]
-                + xWeights.z * source[yInterpolationIndices.y + xInterpolationIndices.z]
-                + xWeights.w * source[yInterpolationIndices.y + xInterpolationIndices.w]);
-            //y loop 2
-            s += yWeights.z * (xWeights.x * source[yInterpolationIndices.z + xInterpolationIndices.x]
-                + xWeights.y * source[yInterpolationIndices.z + xInterpolationIndices.y]
-                + xWeights.z * source[yInterpolationIndices.z + xInterpolationIndices.z]
-                + xWeights.w * source[yInterpolationIndices.z + xInterpolationIndices.w]);
-            //y loop 3
-            s += yWeights.w * (xWeights.x * source[yInterpolationIndices.w + xInterpolationIndices.x]
-                + xWeights.y * source[yInterpolationIndices.w + xInterpolationIndices.y]
-                + xWeights.z * source[yInterpolationIndices.w + xInterpolationIndices.z]
-                + xWeights.w * source[yInterpolationIndices.w + xInterpolationIndices.w]);
-            //now s is the value
-            target[nIndex] = s;
+            xInterpolationIndices = dcalculatexInterpolationIndices(coord.x, doubleSourceWidth, sourcewidth);
+            yInterpolationIndices = dcalculateyInterpolationIndices(coord.y, doubleSourceHeight, sourceheight, sourcewidth);
+            target[nIndex] = dinterpolate(coord, xInterpolationIndices, yInterpolationIndices, source);
         }
         else
         {
@@ -2259,7 +1583,7 @@ __kernel void dtransformImageWithBsplineInterpolation(const __global double *sou
     }   
 }
 
-__kernel void dtranslationtransformImageWithBsplineInterpolation(const __global double *source ,__global double *target, const int sourcewidth, const int sourceheight, const double offsetx, const double offsety)
+__kernel void dtranslationtransformImageWithBsplineInterpolation(const __global double *source ,__global double *target, const int sourcewidth, const int sourceheight, const int doubleSourceWidth, const int doubleSourceHeight, const double offsetx, const double offsety)
 {
     __private int nIndex = get_global_id(0);//this directly corresponds to the linear address of the !SOURCE! pixel
     if(nIndex < sourcewidth * sourceheight)
@@ -2270,120 +1594,13 @@ __kernel void dtranslationtransformImageWithBsplineInterpolation(const __global 
         __private double2 coord = (double2)(offsetx + ((double)column), offsety + ((double)row));
 
         __private int2 Msk = (int2)((int)round(coord.x), (int)round(coord.y));
+        __private int4 xInterpolationIndices;
+        __private int4 yInterpolationIndices;
         if ((Msk.x >= 0) && (Msk.x < sourcewidth) && (Msk.y >= 0) && (Msk.y < sourceheight))
         {
-            //Following is the calculation using mirrored boundaries of the x and y indices of the coefficients used for interpolation
-            //calculate the x coordinates for interpolation (loop unwrapped) for speed
-            __private int4 xInterpolationIndices;
-            __private int p = (coord.x >= 0) ? (((int)trunc(coord.x)) + 2) : (((int)trunc(coord.x)) + 1);
-            //loop iteration 0
-            __private int q = (p < 0) ? (-1 - p) : p;
-            if(q >= 2*sourcewidth)
-            {
-                q -= (2*sourcewidth) * (q / (2*sourcewidth)); //Warning: this is an integer division, it doesn't yield q
-            }
-            xInterpolationIndices.x = q >= sourcewidth ? (2*sourcewidth - 1 - q) : q;
-            //loop iteration 1
-            p--;
-            q = (p < 0) ? (-1 - p) : p;
-            if(q >= 2*sourcewidth)
-            {
-                q -= (2*sourcewidth) * (q / (2*sourcewidth)); //Warning: this is an integer division, it doesn't yield q
-            }
-            xInterpolationIndices.y = q >= sourcewidth ? (2*sourcewidth - 1 - q) : q;
-            //loop iteration 2
-            p--;
-            q = (p < 0) ? (-1 - p) : p;
-            if(q >= 2*sourcewidth)
-            {
-                q -= (2*sourcewidth) * (q / (2*sourcewidth)); //Warning: this is an integer division, it doesn't yield q
-            }
-            xInterpolationIndices.z = q >= sourcewidth ? (2*sourcewidth - 1 - q) : q;
-            //loop iteration 3
-            p--;
-            q = (p < 0) ? (-1 - p) : p;
-            if(q >= 2*sourcewidth)
-            {
-                q -= (2*sourcewidth) * (q / (2*sourcewidth)); //Warning: this is an integer division, it doesn't yield q
-            }
-            xInterpolationIndices.w = q >= sourcewidth ? (2*sourcewidth - 1 - q) : q;
-
-            __private int4 yInterpolationIndices;
-            p = (coord.y >= 0) ? (((int)trunc(coord.y)) + 2) : (((int)trunc(coord.y)) + 1);
-            //loop iteration 0
-            q = (p < 0) ? (-1 - p) : p;
-            if(q >= 2*sourceheight)
-            {
-                q -= (2*sourceheight) * (q / (2*sourceheight));//WARNING: this is an integer division which may not yield q
-            }
-            yInterpolationIndices.x = (sourceheight <= q) ? (((2*sourceheight) - 1 - q) * sourcewidth) : (q * sourcewidth);//this is the linear absolute index NOT the row
-            //loop iteration 1
-            p--;
-            q = (p < 0) ? (-1 - p) : p;
-            if(q >= 2*sourceheight)
-            {
-                q -= (2*sourceheight) * (q / (2*sourceheight));//WARNING: this is an integer division which may not yield q
-            }
-            yInterpolationIndices.y = (sourceheight <= q) ? (((2*sourceheight) - 1 - q) * sourcewidth) : (q * sourcewidth);//this is the linear absolute index NOT the row
-            //loop iteration 2
-            p--;
-            q = (p < 0) ? (-1 - p) : p;
-            if(q >= 2*sourceheight)
-            {
-                q -= (2*sourceheight) * (q / (2*sourceheight));//WARNING: this is an integer division which may not yield q
-            }
-            yInterpolationIndices.z = (sourceheight <= q) ? (((2*sourceheight) - 1 - q) * sourcewidth) : (q * sourcewidth);//this is the linear absolute index NOT the row
-            //loop iteration 3
-            p--;
-            q = (p < 0) ? (-1 - p) : p;
-            if(q >= 2*sourceheight)
-            {
-                q -= (2*sourceheight) * (q / (2*sourceheight));//WARNING: this is an integer division which may not yield q
-            }
-            yInterpolationIndices.w = (sourceheight <= q) ? (((2*sourceheight) - 1 - q) * sourcewidth) : (q * sourcewidth);//this is the linear absolute index NOT the row
-
-            coord.x -= (coord.x >= dZero) ? (double)((int)trunc(coord.x)) : (double)(((int)trunc(coord.x)) - 1);//get the residual should also be possible with floor
-            coord.y -= (coord.y >= dZero) ? (double)((int)trunc(coord.y)) : (double)(((int)trunc(coord.y)) - 1);//get the residual should also be possible with floor
-
-            //Calculate the weights for interpolation
-            __private double4 xWeights;
-            __private double s = dOne - coord.x;
-            xWeights.w = pown(s,3) / dLambda;
-            s = coord.x * coord.x;
-            xWeights.z = dTwo / dThree - dh * s * (dTwo - coord.x);
-            xWeights.x = s * coord.x / dLambda;
-            xWeights.y = dOne - xWeights.x - xWeights.z - xWeights.w;
-            __private double4 yWeights;
-            s = dOne - coord.y;
-            yWeights.w = pown(s,3) / dLambda;
-            s = coord.y * coord.y;
-            yWeights.z = dTwo / dThree - dh * s * (dTwo - coord.y);
-            yWeights.x = s * coord.y / dLambda;
-            yWeights.y = dOne - yWeights.x - yWeights.z - yWeights.w;
-
-            //unwrapped interpolation loop (sorry 16 iterations) 4x4 interpolation coefficients
-            //y loop 0
-            s = yWeights.x * (xWeights.x * source[yInterpolationIndices.x + xInterpolationIndices.x]
-                + xWeights.y * source[yInterpolationIndices.x + xInterpolationIndices.y]
-                + xWeights.z * source[yInterpolationIndices.x + xInterpolationIndices.z]
-                + xWeights.w * source[yInterpolationIndices.x + xInterpolationIndices.w]);
-            //y loop 1
-            s += yWeights.y * (xWeights.x * source[yInterpolationIndices.y + xInterpolationIndices.x]
-                + xWeights.y * source[yInterpolationIndices.y + xInterpolationIndices.y]
-                + xWeights.z * source[yInterpolationIndices.y + xInterpolationIndices.z]
-                + xWeights.w * source[yInterpolationIndices.y + xInterpolationIndices.w]);
-            //y loop 2
-            s += yWeights.z * (xWeights.x * source[yInterpolationIndices.z + xInterpolationIndices.x]
-                + xWeights.y * source[yInterpolationIndices.z + xInterpolationIndices.y]
-                + xWeights.z * source[yInterpolationIndices.z + xInterpolationIndices.z]
-                + xWeights.w * source[yInterpolationIndices.z + xInterpolationIndices.w]);
-            //y loop 3
-            s += yWeights.w * (xWeights.x * source[yInterpolationIndices.w + xInterpolationIndices.x]
-                + xWeights.y * source[yInterpolationIndices.w + xInterpolationIndices.y]
-                + xWeights.z * source[yInterpolationIndices.w + xInterpolationIndices.z]
-                + xWeights.w * source[yInterpolationIndices.w + xInterpolationIndices.w]);
-            //now s is the value
-            target[nIndex] = s;
+            xInterpolationIndices = dcalculatexInterpolationIndices(coord.x, doubleSourceWidth, sourcewidth);
+            yInterpolationIndices = dcalculateyInterpolationIndices(coord.y, doubleSourceHeight, sourceheight, sourcewidth);
+            target[nIndex] = dinterpolate(coord, xInterpolationIndices, yInterpolationIndices, source);
         }
         else
         {
@@ -2413,14 +1630,135 @@ __constant const float fh0D7 = 0.47936507936507936507936507936507936507936507936
 __constant const float fh1D7 = 0.23630952380952380952380952380952380952380952380952380952380952380952f;
 __constant const float fh2D7 = 0.023809523809523809523809523809523809523809523809523809523809523810f;
 __constant const float fh3D7 = 0.00019841269841269841269841269841269841269841269841269841269841269841f;
+__constant const float4 fhD7vec = (float4)(0.4793650793650793650793650793650793650793650793650793650793650793651f, 0.23630952380952380952380952380952380952380952380952380952380952380952f, 0.023809523809523809523809523809523809523809523809523809523809523810f, 0.00019841269841269841269841269841269841269841269841269841269841269841f);
 
 __constant const float frh0 = 0.375f;
 __constant const float frh1 = 0.25f;
 __constant const float frh2 = 0.0625f;
+__constant const float3 frhvec = (float3)(0.375f, 0.25f, 0.0625f);
 
 __constant const float fh = 0.5f;
 __constant const float fZero = 0.0f;
 __constant const float fThree = 3.0;
+
+static inline int4 fcalculatexInterpolationIndices(const float coordx, const int doubleTargetWidth, const int targetwidth)
+{
+    //Following is the calculation using mirrored boundaries of the x indices of the coefficients used for interpolation
+    __private int4 xInterpolationIndices;
+    __private int p = (coordx >= 0) ? (((int)trunc(coordx)) + 2) : (((int)trunc(coordx)) + 1);
+    /*
+    q = (p < 0) ? (-1 - p) : p;
+    is a diverging statement, although it incurs more operations the following equivalent will likely be faster
+    */
+    __private int q = abs(p) - rotate(p&(int)0x80000000,(int)1);
+    //loop iteration 0
+    q = q<doubleTargetWidth?q:q%doubleTargetWidth;
+    xInterpolationIndices.x = q >= targetwidth ? (doubleTargetWidth - 1 - q) : q;
+    //loop iteration 1
+    p--;
+    q = abs(p) - rotate(p&(int)0x80000000,(int)1);
+    q = q<doubleTargetWidth?q:q%doubleTargetWidth;
+    xInterpolationIndices.y = q >= targetwidth ? (doubleTargetWidth - 1 - q) : q;
+    //loop iteration 2
+    p--;
+    q = abs(p) - rotate(p&(int)0x80000000,(int)1);
+    q = q<doubleTargetWidth?q:q%doubleTargetWidth;
+    xInterpolationIndices.z = q >= targetwidth ? (doubleTargetWidth - 1 - q) : q;
+    //loop iteration 3
+    p--;
+    q = abs(p) - rotate(p&(int)0x80000000,(int)1);
+    q = q<doubleTargetWidth?q:q%doubleTargetWidth;
+    xInterpolationIndices.w = q >= targetwidth ? (doubleTargetWidth - 1 - q) : q;
+    return xInterpolationIndices;
+}
+
+static inline int4 fcalculateyInterpolationIndices(const float coordy, const int doubleTargetHeight, const int targetheight, const int targetwidth)
+{
+    //Following is the calculation using mirrored boundaries of the y indices of the coefficients used for interpolation
+    __private int4 yInterpolationIndices;
+    __private int p = (coordy >= 0) ? (((int)trunc(coordy)) + 2) : (((int)trunc(coordy)) + 1);
+    //loop iteration 0
+    __private int q = abs(p) - rotate(p&(int)0x80000000,(int)1);
+    q = q<doubleTargetHeight?q:q%doubleTargetHeight;
+    yInterpolationIndices.x = (targetheight <= q) ? (((doubleTargetHeight) - 1 - q) * targetwidth) : (q * targetwidth);//this is the linear absolute index NOT the row
+    //loop iteration 1
+    p--;
+    q = abs(p) - rotate(p&(int)0x80000000,(int)1);
+    q = q<doubleTargetHeight?q:q%doubleTargetHeight;
+    yInterpolationIndices.y = (targetheight <= q) ? (((doubleTargetHeight) - 1 - q) * targetwidth) : (q * targetwidth);//this is the linear absolute index NOT the row
+    //loop iteration 2
+    p--;
+    q = abs(p) - rotate(p&(int)0x80000000,(int)1);
+    q = q<doubleTargetHeight?q:q%doubleTargetHeight;
+    yInterpolationIndices.z = (targetheight <= q) ? (((doubleTargetHeight) - 1 - q) * targetwidth) : (q * targetwidth);//this is the linear absolute index NOT the row
+    //loop iteration 3
+    p--;
+    q = abs(p) - rotate(p&(int)0x80000000,(int)1);
+    q = q<doubleTargetHeight?q:q%doubleTargetHeight;
+    yInterpolationIndices.w = (targetheight <= q) ? (((doubleTargetHeight) - 1 - q) * targetwidth) : (q * targetwidth);//this is the linear absolute index NOT the row
+    return yInterpolationIndices;
+}
+
+
+static inline float finterpolate(const float2 coordinates, const int4 xInterpolationIndices, const int4 yInterpolationIndices, const __global float* target)
+{
+    __private float2 coord;
+    __private float2 unusedCoordFloor;
+    //coord.x -= (coord.x >= Zero) ? (float)((int)trunc(coord.x)) : (float)(((int)trunc(coord.x)) - 1);//get the residual should also be possible with floor
+    //coord.y -= (coord.y >= Zero) ? (float)((int)trunc(coord.y)) : (float)(((int)trunc(coord.y)) - 1);//get the residual should also be possible with floor
+    coord = fract(coordinates, &unusedCoordFloor);
+
+    //Calculate the weights for interpolation
+    __private float4 xWeights;
+    __private float4 yWeights;
+    __private float s = fOne - coord.x;
+    
+    xWeights.w = pown(s,3) / fLambda;
+    s = coord.x * coord.x;
+    xWeights.z = fTwo / fThree - fh * s * (fTwo - coord.x);
+    xWeights.x = s * coord.x / fLambda;
+    xWeights.y = fOne - xWeights.x - xWeights.z - xWeights.w;
+    
+    s = fOne - coord.y;
+    yWeights.w = pown(s,3) / fLambda;
+    s = coord.y * coord.y;
+    yWeights.z = fTwo / fThree - fh * s * (fTwo - coord.y);
+    yWeights.x = s * coord.y / fLambda;
+    yWeights.y = fOne - yWeights.x - yWeights.z - yWeights.w;
+
+    __private int4 interpolationIndices = (int4)yInterpolationIndices.x;
+    interpolationIndices += xInterpolationIndices;
+    __private float4 intermediate;
+    __private float4 values = (float4)(target[interpolationIndices.x],
+                                         target[interpolationIndices.y],
+                                         target[interpolationIndices.z],
+                                         target[interpolationIndices.w]);
+    intermediate.x = dot(xWeights, values);
+    interpolationIndices = (int4)yInterpolationIndices.y;
+    interpolationIndices += xInterpolationIndices;
+    values = (float4)(target[interpolationIndices.x],
+                       target[interpolationIndices.y],
+                       target[interpolationIndices.z],
+                       target[interpolationIndices.w]);
+    intermediate.y = dot(xWeights, values);
+    interpolationIndices = (int4)yInterpolationIndices.z;
+    interpolationIndices += xInterpolationIndices;
+    values = (float4)(target[interpolationIndices.x],
+                       target[interpolationIndices.y],
+                       target[interpolationIndices.z],
+                       target[interpolationIndices.w]);
+    intermediate.z = dot(xWeights, values);
+    interpolationIndices = (int4)yInterpolationIndices.w;
+    interpolationIndices += xInterpolationIndices;
+    values = (float4)(target[interpolationIndices.x],
+                       target[interpolationIndices.y],
+                       target[interpolationIndices.z],
+                       target[interpolationIndices.w]);
+    intermediate.w = dot(xWeights, values);
+    s = dot(yWeights, intermediate);
+    //now s is the value
+    return s;
+}
 
 __kernel void fTargetedCubicBSplinePrefilter2Dpremulhp(__global float *image, __global float *target, const int size)
 {
@@ -2443,14 +1781,16 @@ __kernel void fCubicBSplinePrefilter2DXlp(__global float *image, const int width
         __private float Sum = prow[0];
         for(int k = 0; k < Horizon; k++)
         {
-            Sum += zk * prow[k];
+            //Sum += zk * prow[k];
+            Sum = fma(zk, prow[k], Sum);
             zk *= fPole;
         }
         prow[0] = Sum;
         //Causal recursion
         for(int k = 1; k < width; k++)
         {
-            prow[k] += fPole *  prow[k-1];
+            //prow[k] += fPole *  prow[k-1];
+            prow[k] = fma(fPole,  prow[k-1], prow[k]);
         }
         //anticausal initialization
         prow[width - 1] = (fPole * prow[width - 1] / (fPole - fOne));
@@ -2475,7 +1815,8 @@ __kernel void fCubicBSplinePrefilter2DYlp(__global float *image, const int width
         __private float Sum = pcol[0];
         for(int k = 0; k < Horizon; k++)
         {
-            Sum += zk * pcol[k * width];
+            //Sum += zk * pcol[k * width];
+            Sum = fma(zk, pcol[k * width], Sum);
             zk *= fPole;
         }
         pcol[0] = Sum;
@@ -2483,7 +1824,8 @@ __kernel void fCubicBSplinePrefilter2DYlp(__global float *image, const int width
         //Causal recursion
         for(int k = 1; k < height; k++)
         {
-            pcol[k * width] += fPole *  pcol[(k-1)*width];
+            //pcol[k * width] += fPole *  pcol[(k-1)*width];
+            pcol[k * width] = fma(fPole,  pcol[(k-1)*width], pcol[k * width]);
         }
 
         //anticausal initialization
@@ -2510,23 +1852,31 @@ __kernel void fBasicToCardinal2DXhp(__global float *image,__global float *target
         //calculate the current column
         __private int col = nIndex % width;
         __private int row = (nIndex - col)/width;
+        __private float2 params = (float2)(fh0D3, fh1D3);
+        __private float2 imgData;
         //symmetricFirMirrorOffBounds1D
         if(col > 0 && col < (width-1))
         {
             //most common case
-            target[nIndex] = fh0D3 * image[nIndex] + fh1D3 * (image[nIndex - 1] + image[nIndex + 1]);
+            //target[nIndex] = fh0D3 * image[nIndex] + fh1D3 * (image[nIndex - 1] + image[nIndex + 1]);
+            //This could be considered a dot product
+            imgData = (float2)(image[nIndex], (image[nIndex - 1] + image[nIndex + 1]));
         }
         else if(col == (width-1))
         {
             /* nIndex is already row*width+width-1 so we need not waste calculation power to get this number again */
-            target[nIndex] = fh0D3 * image[nIndex] + fh1D3 * (image[nIndex-1] + image[nIndex]);
+            //target[nIndex] = fh0D3 * image[nIndex] + fh1D3 * (image[nIndex-1] + image[nIndex]);
+            //This could be considered a dot product
+            imgData = (float2)(image[nIndex], (image[nIndex-1] + image[nIndex]));
         }
         else
         {
             //col == 0
             /* nIndex is already row*width+0 so we need not waste calculation power to get this number again */
-            target[nIndex] = fh0D3 * image[nIndex] + fh1D3 * (image[nIndex] + image[nIndex+1]);
+            //target[nIndex] = fh0D3 * image[nIndex] + fh1D3 * (image[nIndex] + image[nIndex+1]);
+            imgData = (float2)(image[nIndex], (image[nIndex] + image[nIndex+1]));
         }
+        target[nIndex] = dot(params, imgData);
     }
 }
 __kernel void fBasicToCardinal2DYhp(__global float *image ,__global float *target, const int width, const int height)
@@ -2542,23 +1892,29 @@ __kernel void fBasicToCardinal2DYhp(__global float *image ,__global float *targe
         //calculate the current column
         __private int col = nIndex % width;
         __private int row = (nIndex - col)/width;
+        __private float2 params = (float2)(fh0D3, fh1D3);
+        __private float2 imgData;
         //symmetricFirMirrorOffBounds1D
         if(row > 0 && row < (height-1))
         {
             //most common case
-            target[nIndex] = fh0D3 * image[nIndex] + fh1D3 * (image[(row-1)*width+col] + image[(row+1)*width+col]);
+            //target[nIndex] = fh0D3 * image[nIndex] + fh1D3 * (image[(row-1)*width+col] + image[(row+1)*width+col]);
+            imgData = (float2)(image[nIndex], (image[(row-1)*width+col] + image[(row+1)*width+col]));
         }
         else if(row == (height-1))
         {
             /* nIndex is already (height-1)*width+col so we need not waste calculation power to get this number again */
-            target[nIndex] = fh0D3 * image[nIndex] + fh1D3 * (image[(row-1)*width+col] + image[nIndex]);
+            //target[nIndex] = fh0D3 * image[nIndex] + fh1D3 * (image[(row-1)*width+col] + image[nIndex]);
+            imgData = (float2)(image[nIndex], (image[(row-1)*width+col] + image[nIndex]));
         }
         else
         {
             //row == 0
             /* nIndex is already col so we need not waste calculation power to get this number again */
-            target[nIndex] = fh0D3 * image[nIndex] + fh1D3 * (image[nIndex] + image[width+col]);
+            //target[nIndex] = fh0D3 * image[nIndex] + fh1D3 * (image[nIndex] + image[width+col]);
+            imgData = (float2)(image[nIndex], (image[nIndex] + image[width+col]));
         }
+        target[nIndex] = dot(params, imgData);
     }
 }
 
@@ -2586,7 +1942,8 @@ __kernel void fCubicBSplinePrefilter2DXDeg7lp(__global float *image, const int w
         __private float Sum = prow[0];
         for(int k = 0; k < Horizon; k++)
         {
-            Sum += zk * prow[k];
+            //Sum += zk * prow[k];
+            Sum = fma(zk, prow[k], Sum);
             zk *= fZ0;
         }
         prow[0] = Sum;
@@ -2595,7 +1952,8 @@ __kernel void fCubicBSplinePrefilter2DXDeg7lp(__global float *image, const int w
         //Causal recursion
         for(int k = 1; k < width; k++)
         {
-            prow[k] += fZ0 *  prow[k-1];
+            //prow[k] += fZ0 *  prow[k-1];
+            prow[k] = fma(fZ0, prow[k-1], prow[k]);
         }
         //anticausal initialization
         prow[width - 1] = fZ0 * prow[width - 1] / (fZ0 - fOne);
@@ -2611,7 +1969,8 @@ __kernel void fCubicBSplinePrefilter2DXDeg7lp(__global float *image, const int w
         Sum = prow[0];
         for(int k = 0; k < Horizon; k++)
         {
-            Sum += zk * prow[k];
+            //Sum += zk * prow[k];
+            Sum = fma(zk, prow[k], Sum);
             zk *= fZ1;
         }
         prow[0] = Sum;
@@ -2619,7 +1978,8 @@ __kernel void fCubicBSplinePrefilter2DXDeg7lp(__global float *image, const int w
         //Causal recursion
         for(int k = 1; k < width; k++)
         {
-            prow[k] += fZ1 *  prow[k-1];
+            //prow[k] += fZ1 *  prow[k-1];
+            prow[k] = fma(fZ1,  prow[k-1], prow[k]);
         }
         //anticausal initialization
         prow[width - 1] = (fZ1 * prow[width - 1] / (fZ1 - fOne));
@@ -2635,7 +1995,8 @@ __kernel void fCubicBSplinePrefilter2DXDeg7lp(__global float *image, const int w
         Sum = prow[0];
         for(int k = 0; k < Horizon; k++)
         {
-            Sum += zk * prow[k];
+            //Sum += zk * prow[k];
+            Sum = fma(zk, prow[k], Sum);
             zk *= fZ2;
         }
         prow[0] = Sum;
@@ -2643,7 +2004,8 @@ __kernel void fCubicBSplinePrefilter2DXDeg7lp(__global float *image, const int w
         //Causal recursion
         for(int k = 1; k < width; k++)
         {
-            prow[k] += fZ2 * prow[k-1];
+            //prow[k] += fZ2 * prow[k-1];
+            prow[k] = fma(fZ2, prow[k-1], prow[k]);
         }
         //anticausal initialization
         prow[width - 1] = (fZ2 *  prow[width - 1] / (fZ2 - fOne));
@@ -2670,7 +2032,8 @@ __kernel void fCubicBSplinePrefilter2DYDeg7lp(__global float *image, const int w
         __private float Sum = prow[0];
         for(int k = 0; k < Horizon; k++)
         {
-            Sum += zk * prow[k * width];
+            //Sum += zk * prow[k * width];
+            Sum = fma(zk, prow[k * width], Sum);
             zk *= fZ0;
         }
         prow[0] = Sum;
@@ -2678,7 +2041,8 @@ __kernel void fCubicBSplinePrefilter2DYDeg7lp(__global float *image, const int w
         //Causal recursion
         for(int k = 1; k < height; k++)
         {
-            prow[k*width] += fZ0 *  prow[(k-1)*width];
+            //prow[k*width] += fZ0 *  prow[(k-1)*width];
+            prow[k*width] = fma(fZ0,  prow[(k-1)*width], prow[k*width]);
         }
         //anticausal initialization
         prow[(height - 1)*width] = fZ0 *  prow[(height - 1)*width] / (fZ0 - fOne);
@@ -2694,7 +2058,8 @@ __kernel void fCubicBSplinePrefilter2DYDeg7lp(__global float *image, const int w
         Sum = prow[0];
         for(int k = 0; k < Horizon; k++)
         {
-            Sum += zk * prow[k * width];
+            //Sum += zk * prow[k * width];
+            Sum = fma(zk, prow[k * width], Sum);
             zk *= fZ1;
         }
         prow[0] = Sum;
@@ -2702,7 +2067,8 @@ __kernel void fCubicBSplinePrefilter2DYDeg7lp(__global float *image, const int w
         //Causal recursion
         for(int k = 1; k < height; k++)
         {
-            prow[k*width] += fZ1 *  prow[(k-1)*width];
+            //prow[k*width] += fZ1 *  prow[(k-1)*width];
+            prow[k*width] = fma(fZ1,  prow[(k-1)*width], prow[k*width]);
         }
         //anticausal initialization
         prow[(height - 1)*width] = fZ1 *  prow[(height - 1)*width] / (fZ1 - fOne);
@@ -2718,7 +2084,8 @@ __kernel void fCubicBSplinePrefilter2DYDeg7lp(__global float *image, const int w
         Sum = prow[0];
         for(int k = 0; k < Horizon; k++)
         {
-            Sum += zk * prow[k * width];
+            //Sum += zk * prow[k * width];
+            Sum = fma(zk, prow[k * width], Sum);
             zk *= fZ2;
         }
         prow[0] = Sum;
@@ -2726,7 +2093,8 @@ __kernel void fCubicBSplinePrefilter2DYDeg7lp(__global float *image, const int w
         //Causal recursion
         for(int k = 1; k < height; k++)
         {
-            prow[k*width] += fZ2 *  prow[(k-1)*width];
+            //prow[k*width] += fZ2 *  prow[(k-1)*width];
+            prow[k*width] = fma(fZ2,  prow[(k-1)*width], prow[k*width]);
         }
         //anticausal initialization
         prow[(height - 1)*width] = (fZ2 *  prow[(height - 1)*width] / (fZ2 - fOne));
@@ -2754,40 +2122,71 @@ __kernel void fBasicToCardinal2DXhpDeg7(__global float *image,__global float *ta
         __private int row = (nIndex - col)/width;
         //symmetricFirMirrorOffBounds1D
         //width >= 6 is guaranteed
+        __private float4 imgData;
+        __private float4 imgData2;
         if(col > 2 && col < (width-3))
         {
             //most common case
-            target[nIndex] = fh0D7 * image[nIndex] + fh1D7 * (image[nIndex-1] + image[nIndex+1]) + fh2D7 * (image[nIndex-2] + image[nIndex+2]) + fh3D7 * (image[nIndex-3] + image[nIndex+3]);
+            //target[nIndex] = fh0D7 * image[nIndex] + fh1D7 * (image[nIndex-1] + image[nIndex+1]) + fh2D7 * (image[nIndex-2] + image[nIndex+2]) + fh3D7 * (image[nIndex-3] + image[nIndex+3]);
+            //This could be considered a dot product
+            imgData = (float4)(image[nIndex], image[nIndex-1], image[nIndex-2], image[nIndex-3]);
+            imgData2 = (float4)(fZero, image[nIndex+1], image[nIndex+2], image[nIndex+3]);
+            imgData += imgData2;
         }
         else if(col == 1)
         {
-            target[nIndex] = fh0D7 * image[nIndex] + fh1D7 * (image[nIndex-1] + image[nIndex+1]) + fh2D7 * (image[nIndex-1] + image[nIndex+2]) + fh3D7 * (image[nIndex] + image[nIndex+3]);
+            //target[nIndex] = fh0D7 * image[nIndex] + fh1D7 * (image[nIndex-1] + image[nIndex+1]) + fh2D7 * (image[nIndex-1] + image[nIndex+2]) + fh3D7 * (image[nIndex] + image[nIndex+3]);
+            //This could be considered a dot product
+            imgData = (float4)(image[nIndex], image[nIndex-1], image[nIndex-1], image[nIndex]);
+            imgData2 = (float4)(fZero, image[nIndex+1], image[nIndex+2], image[nIndex+3]);
+            imgData += imgData2;
         }
         else if(col == 2)
         {
-            target[nIndex] = fh0D7 * image[nIndex] + fh1D7 * (image[nIndex-1] + image[nIndex+1]) + fh2D7 * (image[nIndex-2] + image[nIndex+2]) + fh3D7 * (image[nIndex-2] + image[nIndex+3]);
+            //target[nIndex] = fh0D7 * image[nIndex] + fh1D7 * (image[nIndex-1] + image[nIndex+1]) + fh2D7 * (image[nIndex-2] + image[nIndex+2]) + fh3D7 * (image[nIndex-2] + image[nIndex+3]);
+            //This could be considered a dot product
+            imgData = (float4)(image[nIndex], image[nIndex-1], image[nIndex-2], image[nIndex-2]);
+            imgData2 = (float4)(fZero, image[nIndex+1], image[nIndex+2], image[nIndex+3]);
+            imgData += imgData2;
         }
         else if(col == (width-3))
         {
             /* nIndex is already row*width+width-3 so we need not waste calculation power to get this number again */
-            target[nIndex] = fh0D7 * image[nIndex] + fh1D7 * (image[nIndex-1] + image[nIndex+1]) + fh2D7 * (image[nIndex-2] + image[nIndex+2]) + fh3D7 * (image[nIndex-3] + image[nIndex+2]);
+            //target[nIndex] = fh0D7 * image[nIndex] + fh1D7 * (image[nIndex-1] + image[nIndex+1]) + fh2D7 * (image[nIndex-2] + image[nIndex+2]) + fh3D7 * (image[nIndex-3] + image[nIndex+2]);
+            //This could be considered a dot product
+            imgData = (float4)(image[nIndex], image[nIndex-1], image[nIndex-2], image[nIndex-3]);
+            imgData2 = (float4)(fZero, image[nIndex+1], image[nIndex+2], image[nIndex+2]);
+            imgData += imgData2;
         }
         else if(col == (width-2))
         {
             /* nIndex is already row*width+width-2 so we need not waste calculation power to get this number again */
-            target[nIndex] = fh0D7 * image[nIndex] + fh1D7 * (image[nIndex-1] + image[nIndex+1]) + fh2D7 * (image[nIndex-2] + image[nIndex+1]) + fh3D7 * (image[nIndex-3] + image[nIndex]);
+            //target[nIndex] = fh0D7 * image[nIndex] + fh1D7 * (image[nIndex-1] + image[nIndex+1]) + fh2D7 * (image[nIndex-2] + image[nIndex+1]) + fh3D7 * (image[nIndex-3] + image[nIndex]);
+            //This could be considered a dot product
+            imgData = (float4)(image[nIndex], image[nIndex-1], image[nIndex-2], image[nIndex-3]);
+            imgData2 = (float4)(fZero, image[nIndex+1], image[nIndex+1], image[nIndex]);
+            imgData += imgData2;
         }
         else if(col == (width-1))
         {
             /* nIndex is already row*width+width-1 so we need not waste calculation power to get this number again */
-            target[nIndex] = fh0D7 * image[nIndex] + fh1D7 * (image[nIndex-1] + image[nIndex]) + fh2D7 * (image[nIndex-2] + image[nIndex-1]) + fh3D7 * (image[nIndex-3] + image[nIndex-2]);
+            //target[nIndex] = fh0D7 * image[nIndex] + fh1D7 * (image[nIndex-1] + image[nIndex]) + fh2D7 * (image[nIndex-2] + image[nIndex-1]) + fh3D7 * (image[nIndex-3] + image[nIndex-2]);
+            //This could be considered a dot product
+            imgData = (float4)(image[nIndex], image[nIndex-1], image[nIndex-2], image[nIndex-3]);
+            imgData2 = (float4)(fZero, image[nIndex], image[nIndex-1], image[nIndex-2]);
+            imgData += imgData2;
         }
         else
         {
             //col == 0
             /* nIndex is already row*width+0 so we need not waste calculation power to get this number again */
-            target[nIndex] = fh0D7 * image[nIndex] + fh1D7 * (image[nIndex] + image[nIndex+1]) + fh2D7 * (image[nIndex+1] + image[nIndex+2])+ fh3D7 * (image[nIndex+2] + image[nIndex+3]);
+            //target[nIndex] = fh0D7 * image[nIndex] + fh1D7 * (image[nIndex] + image[nIndex+1]) + fh2D7 * (image[nIndex+1] + image[nIndex+2])+ fh3D7 * (image[nIndex+2] + image[nIndex+3]);
+            //This could be considered a dot product
+            imgData = (float4)(image[nIndex], image[nIndex], image[nIndex+1], image[nIndex+2]);
+            imgData2 = (float4)(fZero, image[nIndex+1], image[nIndex+2], image[nIndex+3]);
+            imgData += imgData2;
         }
+        target[nIndex] = dot(fhD7vec, imgData);
     }
 }
 
@@ -2806,40 +2205,71 @@ __kernel void fBasicToCardinal2DYhpDeg7(__global float *image,__global float *ta
         __private int row = (nIndex - col)/width;
         //symmetricFirMirrorOffBounds1D
         //height >= 6 is guaranteed
+        __private float4 imgData;
+        __private float4 imgData2;
         if(row > 2 && row < (height-3))
         {
             //most common case
-            target[nIndex] = fh0D7 * image[nIndex] + fh1D7 * (image[nIndex-width] + image[nIndex+width]) + fh2D7 * (image[nIndex-2*width] + image[nIndex+2*width]) + fh3D7 * (image[nIndex-3*width] + image[nIndex+3*width]);
+            //target[nIndex] = fh0D7 * image[nIndex] + fh1D7 * (image[nIndex-width] + image[nIndex+width]) + fh2D7 * (image[nIndex-2*width] + image[nIndex+2*width]) + fh3D7 * (image[nIndex-3*width] + image[nIndex+3*width]);
+            //This could be considered a dot product
+            imgData = (float4)(image[nIndex], image[nIndex-width], image[nIndex-2*width], image[nIndex-3*width]);
+            imgData2 = (float4)(fZero, image[nIndex+width], image[nIndex+2*width], image[nIndex+3*width]);
+            imgData += imgData2;
         }
         else if(row == 1)
         {
-            target[nIndex] = fh0D7 * image[nIndex] + fh1D7 * (image[col] + image[2*width+col]) + fh2D7 * (image[col] + image[3*width+col]) + fh3D7 * (image[nIndex] + image[4*width+col]);
+            //target[nIndex] = fh0D7 * image[nIndex] + fh1D7 * (image[col] + image[2*width+col]) + fh2D7 * (image[col] + image[3*width+col]) + fh3D7 * (image[nIndex] + image[4*width+col]);
+            //This could be considered a dot product
+            imgData = (float4)(image[nIndex], image[col], image[col], image[nIndex]);
+            imgData2 = (float4)(fZero, image[2*width+col], image[3*width+col], image[4*width+col]);
+            imgData += imgData2;
         }
         else if(row == 2)
         {
-            target[nIndex] = fh0D7 * image[nIndex] + fh1D7 * (image[width+col] + image[3*width+col]) + fh2D7 * (image[col] + image[4*width+col]) + fh3D7 * (image[col] + image[5*width+col]);
+            //target[nIndex] = fh0D7 * image[nIndex] + fh1D7 * (image[width+col] + image[3*width+col]) + fh2D7 * (image[col] + image[4*width+col]) + fh3D7 * (image[col] + image[5*width+col]);
+            //This could be considered a dot product
+            imgData = (float4)(image[nIndex], image[width+col], image[col], image[col]);
+            imgData2 = (float4)(fZero, image[3*width+col], image[4*width+col], image[5*width+col]);
+            imgData += imgData2;
         }
         else if(row == (height-3))
         {
             /* nIndex is already row*width+width-3 so we need not waste calculation power to get this number again */
-            target[nIndex] = fh0D7 * image[nIndex] + fh1D7 * (image[nIndex-width] + image[nIndex+width]) + fh2D7 * (image[nIndex-2*width] + image[nIndex+2*width]) + fh3D7 * (image[nIndex-3*width] + image[nIndex+2*width]);
+            //target[nIndex] = fh0D7 * image[nIndex] + fh1D7 * (image[nIndex-width] + image[nIndex+width]) + fh2D7 * (image[nIndex-2*width] + image[nIndex+2*width]) + fh3D7 * (image[nIndex-3*width] + image[nIndex+2*width]);
+            //This could be considered a dot product
+            imgData = (float4)(image[nIndex], image[nIndex-width], image[nIndex-2*width], image[nIndex-3*width]);
+            imgData2 = (float4)(fZero, image[nIndex+width], image[nIndex+2*width], image[nIndex+2*width]);
+            imgData += imgData2;
         }
         else if(row == (height-2))
         {
             /* nIndex is already row*width+width-2 so we need not waste calculation power to get this number again */
-            target[nIndex] = fh0D7 * image[nIndex] + fh1D7 * (image[nIndex-width] + image[nIndex+width]) + fh2D7 * (image[nIndex-2*width] + image[nIndex+2*width]) + fh3D7 * (image[nIndex-3*width] + image[nIndex]);
+            //target[nIndex] = fh0D7 * image[nIndex] + fh1D7 * (image[nIndex-width] + image[nIndex+width]) + fh2D7 * (image[nIndex-2*width] + image[nIndex+2*width]) + fh3D7 * (image[nIndex-3*width] + image[nIndex]);
+            //This could be considered a dot product
+            imgData = (float4)(image[nIndex], image[nIndex-width], image[nIndex-2*width], image[nIndex-3*width]);
+            imgData2 = (float4)(fZero, image[nIndex+width], image[nIndex+2*width], image[nIndex]);
+            imgData += imgData2;
         }
         else if(row == (height-1))
         {
             /* nIndex is already row*width+width-1 so we need not waste calculation power to get this number again */
-            target[nIndex] = fh0D7 * image[nIndex] + fh1D7 * (image[nIndex-width] + image[nIndex]) + fh2D7 * (image[nIndex-2*width] + image[nIndex-width]) + fh3D7 * (image[nIndex-3*width] + image[nIndex-3*width]);
+            //target[nIndex] = fh0D7 * image[nIndex] + fh1D7 * (image[nIndex-width] + image[nIndex]) + fh2D7 * (image[nIndex-2*width] + image[nIndex-width]) + fh3D7 * (image[nIndex-3*width] + image[nIndex-3*width]);
+            //This could be considered a dot product
+            imgData = (float4)(image[nIndex], image[nIndex-width], image[nIndex-2*width], image[nIndex-3*width]);
+            imgData2 = (float4)(fZero, image[nIndex], image[nIndex-width], image[nIndex-3*width]);
+            imgData += imgData2;
         }
         else
         {
             //row == 0
             /* nIndex is already row*width+0 so we need not waste calculation power to get this number again */
-            target[nIndex] = fh0D7 * image[nIndex] + fh1D7 * (image[nIndex] + image[width+col]) + fh2D7 * (image[width+col] + image[2*width+col])+ fh3D7 * (image[2*width+col] + image[3*width+col]);
+            //target[nIndex] = fh0D7 * image[nIndex] + fh1D7 * (image[nIndex] + image[width+col]) + fh2D7 * (image[width+col] + image[2*width+col])+ fh3D7 * (image[2*width+col] + image[3*width+col]);
+            //This could be considered a dot product
+            imgData = (float4)(image[nIndex], image[nIndex], image[width+col], image[2*width+col]);
+            imgData2 = (float4)(fZero, image[width+col], image[2*width+col], image[3*width+col]);
+            imgData += imgData2;
         }
+        target[nIndex] = dot(fhD7vec, imgData);
     }
 }
 
@@ -2857,27 +2287,42 @@ __kernel void freduceDual1DX(__global float *image,__global float *target, const
         *   is the same though so calculate everything from the corresponding row offset not nIndex
         */
         //halfwidth >= 2 is guaranteed
+        __private float3 imgData;
+        __private float3 imgData2;
         if(col > 0 && col < (halfwidth - 1))
         {
             //most common case
-            target[nIndex] = frh0 * image[row*width + col*2] + frh1 * (image[row*width + col*2 - 1] + image[row*width + col*2 + 1]) + frh2 * (image[row*width + col*2 - 2] + image[row*width + col*2 + 2]);
+            //target[nIndex] = frh0 * image[row*width + col*2] + frh1 * (image[row*width + col*2 - 1] + image[row*width + col*2 + 1]) + frh2 * (image[row*width + col*2 - 2] + image[row*width + col*2 + 2]);
+            imgData = (float3)(image[row*width + col*2], image[row*width + col*2 - 1], image[row*width + col*2 - 2]);
+            imgData2 = (float3)(fZero, image[row*width + col*2 + 1], image[row*width + col*2 + 2]);
+            imgData += imgData2;
         }
         else if(col == halfwidth - 1)
         {
             if(width == (2 * halfwidth))//Yes this can be different if width % 2 != 0
             {
-                target[nIndex] = frh0 * image[row*width+width-2] + frh1 * (image[row*width+width-3] + image[row*width+width-1]) + frh2 * (image[row*width+width-4] + image[row*width+width-1]);
+                //target[nIndex] = frh0 * image[row*width+width-2] + frh1 * (image[row*width+width-3] + image[row*width+width-1]) + frh2 * (image[row*width+width-4] + image[row*width+width-1]);
+                imgData = (float3)(image[row*width+width-2], image[row*width+width-3], image[row*width+width-4]);
+                imgData2 = (float3)(fZero, image[row*width+width-1], image[row*width+width-1]);
+                imgData += imgData2;
             }
             else
             {
-                target[nIndex] = frh0 * image[row*width+width-3] + frh1 * (image[row*width+width-4] + image[row*width+width-2]) + frh2 * (image[row*width+width-5] + image[row*width+width-1]);
+                //target[nIndex] = frh0 * image[row*width+width-3] + frh1 * (image[row*width+width-4] + image[row*width+width-2]) + frh2 * (image[row*width+width-5] + image[row*width+width-1]);
+                imgData = (float3)(image[row*width+width-3], image[row*width+width-4], image[row*width+width-5]);
+                imgData2 = (float3)(fZero, image[row*width+width-2], image[row*width+width-1]);
+                imgData += imgData2;
             }
         }
         else
         {
             //col == 0
-            target[nIndex] =  frh0 * image[row*width] + frh1 * (image[row*width] + image[row*width+1]) + frh2 * (image[row*width+1] + image[row*width+2]);
+            //target[nIndex] =  frh0 * image[row*width] + frh1 * (image[row*width] + image[row*width+1]) + frh2 * (image[row*width+1] + image[row*width+2]);
+            imgData = (float3)(image[row*width], image[row*width], image[row*width+1]);
+            imgData2 = (float3)(fZero, image[row*width+1], image[row*width+2]);
+            imgData += imgData2;
         }
+        target[nIndex] = dot(frhvec, imgData);
     }
 }
 
@@ -2895,27 +2340,42 @@ __kernel void freduceDual1DY(__global float *image,__global float *target, const
         *   is the same for the Y version
         */
         //halfheight >= 2 is guaranteed
+        __private float3 imgData;
+        __private float3 imgData2;
         if(row > 0 && row < (halfheight - 1))
         {
             //most common case
-            target[nIndex] = frh0 * image[2*row*halfwidth+col] + frh1 * (image[(2*row - 1)*halfwidth+col] + image[(2*row + 1)*halfwidth+col]) + frh2 * (image[(2*row - 2)*halfwidth+col] + image[(2*row + 2)*halfwidth+col]);                
+            //target[nIndex] = frh0 * image[2*row*halfwidth+col] + frh1 * (image[(2*row - 1)*halfwidth+col] + image[(2*row + 1)*halfwidth+col]) + frh2 * (image[(2*row - 2)*halfwidth+col] + image[(2*row + 2)*halfwidth+col]);
+            imgData = (float3)(image[2*row*halfwidth+col], image[(2*row - 1)*halfwidth+col], image[(2*row - 2)*halfwidth+col]);
+            imgData2 = (float3)(fZero, image[(2*row + 1)*halfwidth+col], image[(2*row + 2)*halfwidth+col]);
+            imgData += imgData2;                 
         }
         else if(row == halfheight - 1)
         {
             if(height == (2 * halfheight))//Yes this can be different if height % 2 != 0
             {
-                target[nIndex] = frh0 * image[(height - 2)*halfwidth+col] + frh1 * (image[(height - 3)*halfwidth+col] + image[(height - 1)*halfwidth+col]) + frh2 * (image[(height - 4)*halfwidth+col] + image[(height - 1)*halfwidth+col]);
+                //target[nIndex] = frh0 * image[(height - 2)*halfwidth+col] + frh1 * (image[(height - 3)*halfwidth+col] + image[(height - 1)*halfwidth+col]) + frh2 * (image[(height - 4)*halfwidth+col] + image[(height - 1)*halfwidth+col]);
+                imgData = (float3)(image[(height - 2)*halfwidth+col], image[(height - 3)*halfwidth+col], image[(height - 4)*halfwidth+col]);
+                imgData2 = (float3)(fZero, image[(height - 1)*halfwidth+col], image[(height - 1)*halfwidth+col]);
+                imgData += imgData2;
             }
             else
             {
-                target[nIndex] = frh0 * image[(height - 3)*halfwidth+col] + frh1 * (image[(height - 4)*halfwidth+col] + image[(height - 2)*halfwidth+col]) + frh2 * (image[(height - 5)*halfwidth+col] + image[(height - 1)*halfwidth+col]);
+                //target[nIndex] = frh0 * image[(height - 3)*halfwidth+col] + frh1 * (image[(height - 4)*halfwidth+col] + image[(height - 2)*halfwidth+col]) + frh2 * (image[(height - 5)*halfwidth+col] + image[(height - 1)*halfwidth+col]);
+                imgData = (float3)(image[(height - 3)*halfwidth+col], image[(height - 4)*halfwidth+col], image[(height - 5)*halfwidth+col]);
+                imgData2 = (float3)(fZero, image[(height - 2)*halfwidth+col], image[(height - 1)*halfwidth+col]);
+                imgData += imgData2;
             }
         }
         else
         {
             //row == 0
-            target[nIndex] =  frh0 * image[col] + frh1 * (image[col] + image[halfwidth+col]) + frh2 * (image[halfwidth+col] + image[2*halfwidth+col]);
+            //target[nIndex] =  frh0 * image[col] + frh1 * (image[col] + image[halfwidth+col]) + frh2 * (image[halfwidth+col] + image[2*halfwidth+col]);
+            imgData = (float3)(image[col], image[col], image[halfwidth+col]);
+            imgData2 = (float3)(fZero, image[halfwidth+col], image[2*halfwidth+col]);
+            imgData += imgData2;
         }
+        target[nIndex] = dot(frhvec, imgData);
     }
 }
 
@@ -2967,7 +2427,7 @@ __kernel void fantiSymmetricFirMirrorOffBounds1DY(__global float *image ,__globa
     }
 }
 
-__kernel void frigidBodyError(const __global float *source ,const __global float *target, __global float *diffout, __global float *mask, const int sourcewidth, const int sourceheight, const int targetwidth, const int targetheight, const float offsetx, const float offsety, const float angle)
+__kernel void frigidBodyError(const __global float *source ,const __global float *target, __global float *diffout, __global float *mask, const int sourcewidth, const int sourceheight, const int targetwidth, const int targetheight, const int doubletargetwidth, const int doubletargetheight, const float offsetx, const float offsety, const float cosangle, const float negsinangle)
 {
     __private int nIndex = get_global_id(0);//this directly corresponds to the linear address of the !SOURCE! pixel
     if(nIndex < sourcewidth * sourceheight)
@@ -2975,112 +2435,19 @@ __kernel void frigidBodyError(const __global float *source ,const __global float
         __private int column = nIndex % sourcewidth;
         __private int row = (nIndex - column)/sourcewidth;
 
-        __private float2 xvec = (float2)(cos(angle),-sin(angle));//Warning: this is not the x vector but it is the vector added in the x direction
+        __private float2 xvec = (float2)(cosangle,negsinangle);//Warning: this is not the x vector but it is the vector added in the x direction
         __private float2 yvec = (float2)(-xvec.y,xvec.x);//Warning: this is not the y vector but it is the vector added in the y direction
         __private float2 coord = (float2)(offsetx, offsety) + ((float)column) * xvec + ((float)row) * yvec;
 
         __private int2 Msk = (int2)((int)round(coord.x), (int)round(coord.y));
-        __private int doubletargetwidth = 2*targetwidth;
-        __private int doubletargetheight = 2*targetheight;
+        __private int4 xInterpolationIndices;
+        __private int4 yInterpolationIndices;
         if ((Msk.x >= 0) && (Msk.x < targetwidth) && (Msk.y >= 0) && (Msk.y < targetheight))
         {
             mask[nIndex] = fOne;
-            //Following is the calculation using mirrored boundaries of the x and y indices of the coefficients used for interpolation
-            //calculate the x coordinates for interpolation (loop unwrapped) for speed
-            __private int4 xInterpolationIndices;
-            __private int p = (coord.x >= 0) ? (((int)trunc(coord.x)) + 2) : (((int)trunc(coord.x)) + 1);
-            //loop iteration 0
-            __private int q = (p < 0) ? (-1 - p) : p;
-            //kick out divergence (but calculating the modulo may actually be slower than divergence so maybe use a slightly diverging statement)
-            q = q<doubletargetwidth?q:q%doubletargetwidth;
-            //q %= doubletargetwidth; //will allways give the right answer
-            /*
-            if(q >= doubletargetwidth)
-            {
-                //q -= (2*targetwidth) * (q / (2*targetwidth)); //Warning: this is an integer division, it doesn't yield q (in fact it is a simple modulo operation)
-                
-            }
-            */
-            xInterpolationIndices.x = q >= targetwidth ? (doubletargetwidth - 1 - q) : q;
-            //loop iteration 1
-            p--;
-            q = (p < 0) ? (-1 - p) : p;
-            q = q<doubletargetwidth?q:q%doubletargetwidth;
-            xInterpolationIndices.y = q >= targetwidth ? (doubletargetwidth - 1 - q) : q;
-            //loop iteration 2
-            p--;
-            q = (p < 0) ? (-1 - p) : p;
-            q = q<doubletargetwidth?q:q%doubletargetwidth;
-            xInterpolationIndices.z = q >= targetwidth ? (doubletargetwidth - 1 - q) : q;
-            //loop iteration 3
-            p--;
-            q = (p < 0) ? (-1 - p) : p;
-            q = q<doubletargetwidth?q:q%doubletargetwidth;
-            xInterpolationIndices.w = q >= targetwidth ? (doubletargetwidth - 1 - q) : q;
-
-            __private int4 yInterpolationIndices;
-            p = (coord.y >= 0) ? (((int)trunc(coord.y)) + 2) : (((int)trunc(coord.y)) + 1);
-            //loop iteration 0
-            q = (p < 0) ? (-1 - p) : p;
-            q = q<doubletargetheight?q:q%doubletargetheight;
-            yInterpolationIndices.x = (targetheight <= q) ? (((doubletargetheight) - 1 - q) * targetwidth) : (q * targetwidth);//this is the linear absolute index NOT the row
-            //loop iteration 1
-            p--;
-            q = (p < 0) ? (-1 - p) : p;
-            q = q<doubletargetheight?q:q%doubletargetheight;
-            yInterpolationIndices.y = (targetheight <= q) ? (((doubletargetheight) - 1 - q) * targetwidth) : (q * targetwidth);//this is the linear absolute index NOT the row
-            //loop iteration 2
-            p--;
-            q = (p < 0) ? (-1 - p) : p;
-            q = q<doubletargetheight?q:q%doubletargetheight;
-            yInterpolationIndices.z = (targetheight <= q) ? (((doubletargetheight) - 1 - q) * targetwidth) : (q * targetwidth);//this is the linear absolute index NOT the row
-            //loop iteration 3
-            p--;
-            q = (p < 0) ? (-1 - p) : p;
-            q = q<doubletargetheight?q:q%doubletargetheight;
-            yInterpolationIndices.w = (targetheight <= q) ? (((doubletargetheight) - 1 - q) * targetwidth) : (q * targetwidth);//this is the linear absolute index NOT the row
-
-            coord.x -= (coord.x >= fZero) ? (float)((int)trunc(coord.x)) : (float)(((int)trunc(coord.x)) - 1);//get the residual should also be possible with trunc
-            coord.y -= (coord.y >= fZero) ? (float)((int)trunc(coord.y)) : (float)(((int)trunc(coord.y)) - 1);//get the residual should also be possible with trunc
-
-            //Calculate the weights for interpolation
-            __private float4 xWeights;
-            __private float s = fOne - coord.x;
-            xWeights.w = pown(s,3) / fLambda;
-            s = coord.x * coord.x;
-            xWeights.z = fTwo / fThree - fh * s * (fTwo - coord.x);
-            xWeights.x = s * coord.x / fLambda;
-            xWeights.y = fOne - xWeights.x - xWeights.z - xWeights.w;
-            __private float4 yWeights;
-            s = fOne - coord.y;
-            yWeights.w = pown(s,3) / fLambda;
-            s = coord.y * coord.y;
-            yWeights.z = fTwo / fThree - fh * s * (fTwo - coord.y);
-            yWeights.x = s * coord.y / fLambda;
-            yWeights.y = fOne - yWeights.x - yWeights.z - yWeights.w;
-
-            //unwrapped interpolation loop (sorry 16 iterations) 4x4 interpolation coefficients
-            //y loop 0
-            s = yWeights.x * (xWeights.x * target[yInterpolationIndices.x + xInterpolationIndices.x]
-                + xWeights.y * target[yInterpolationIndices.x + xInterpolationIndices.y]
-                + xWeights.z * target[yInterpolationIndices.x + xInterpolationIndices.z]
-                + xWeights.w * target[yInterpolationIndices.x + xInterpolationIndices.w]);
-            //y loop 1
-            s += yWeights.y * (xWeights.x * target[yInterpolationIndices.y + xInterpolationIndices.x]
-                + xWeights.y * target[yInterpolationIndices.y + xInterpolationIndices.y]
-                + xWeights.z * target[yInterpolationIndices.y + xInterpolationIndices.z]
-                + xWeights.w * target[yInterpolationIndices.y + xInterpolationIndices.w]);
-            //y loop 2
-            s += yWeights.z * (xWeights.x * target[yInterpolationIndices.z + xInterpolationIndices.x]
-                + xWeights.y * target[yInterpolationIndices.z + xInterpolationIndices.y]
-                + xWeights.z * target[yInterpolationIndices.z + xInterpolationIndices.z]
-                + xWeights.w * target[yInterpolationIndices.z + xInterpolationIndices.w]);
-            //y loop 3
-            s += yWeights.w * (xWeights.x * target[yInterpolationIndices.w + xInterpolationIndices.x]
-                + xWeights.y * target[yInterpolationIndices.w + xInterpolationIndices.y]
-                + xWeights.z * target[yInterpolationIndices.w + xInterpolationIndices.z]
-                + xWeights.w * target[yInterpolationIndices.w + xInterpolationIndices.w]);
-            //now s is the value
+            xInterpolationIndices = fcalculatexInterpolationIndices(coord.x, doubletargetwidth, targetwidth);
+            yInterpolationIndices = fcalculateyInterpolationIndices(coord.y, doubletargetheight, targetheight, targetwidth);
+            __private float s = finterpolate(coord, xInterpolationIndices, yInterpolationIndices, target);
             diffout[nIndex] = pown(source[nIndex] - s,2);
         }
         else
@@ -3091,7 +2458,7 @@ __kernel void frigidBodyError(const __global float *source ,const __global float
     }   
 }
 
-__kernel void ftranslationError(const __global float *source ,const __global float *target, __global float *diffout, __global float *mask, const int sourcewidth, const int sourceheight, const int targetwidth, const int targetheight, const float offsetx, const float offsety)
+__kernel void ftranslationError(const __global float *source ,const __global float *target, __global float *diffout, __global float *mask, const int sourcewidth, const int sourceheight, const int targetwidth, const int targetheight, const int doubletargetwidth, const int doubletargetheight, const float offsetx, const float offsety)
 {
     __private int nIndex = get_global_id(0);//this directly corresponds to the linear address of the !SOURCE! pixel
     if(nIndex < sourcewidth * sourceheight)
@@ -3102,107 +2469,14 @@ __kernel void ftranslationError(const __global float *source ,const __global flo
         __private float2 coord = (float2)(offsetx + ((float)column), offsety + ((float)row));
 
         __private int2 Msk = (int2)((int)round(coord.x), (int)round(coord.y));
-        __private int doubletargetwidth = 2*targetwidth;
-        __private int doubletargetheight = 2*targetheight;
+        __private int4 xInterpolationIndices;
+        __private int4 yInterpolationIndices;
         if ((Msk.x >= 0) && (Msk.x < targetwidth) && (Msk.y >= 0) && (Msk.y < targetheight))
         {
             mask[nIndex] = fOne;
-            //Following is the calculation using mirrored boundaries of the x and y indices of the coefficients used for interpolation
-            //calculate the x coordinates for interpolation (loop unwrapped) for speed
-            __private int4 xInterpolationIndices;
-            __private int p = (coord.x >= 0) ? (((int)trunc(coord.x)) + 2) : (((int)trunc(coord.x)) + 1);
-            //loop iteration 0
-            __private int q = (p < 0) ? (-1 - p) : p;
-            //kick out divergence (but calculating the modulo may actually be slower than divergence so maybe use a slightly diverging statement)
-            q = q<doubletargetwidth?q:q%doubletargetwidth;
-            //q %= doubletargetwidth; //will allways give the right answer
-            /*
-            if(q >= doubletargetwidth)
-            {
-                //q -= (2*targetwidth) * (q / (2*targetwidth)); //Warning: this is an integer division, it doesn't yield q (in fact it is a simple modulo operation)
-                
-            }
-            */
-            xInterpolationIndices.x = q >= targetwidth ? (doubletargetwidth - 1 - q) : q;
-            //loop iteration 1
-            p--;
-            q = (p < 0) ? (-1 - p) : p;
-            q = q<doubletargetwidth?q:q%doubletargetwidth;
-            xInterpolationIndices.y = q >= targetwidth ? (doubletargetwidth - 1 - q) : q;
-            //loop iteration 2
-            p--;
-            q = (p < 0) ? (-1 - p) : p;
-            q = q<doubletargetwidth?q:q%doubletargetwidth;
-            xInterpolationIndices.z = q >= targetwidth ? (doubletargetwidth - 1 - q) : q;
-            //loop iteration 3
-            p--;
-            q = (p < 0) ? (-1 - p) : p;
-            q = q<doubletargetwidth?q:q%doubletargetwidth;
-            xInterpolationIndices.w = q >= targetwidth ? (doubletargetwidth - 1 - q) : q;
-
-            __private int4 yInterpolationIndices;
-            p = (coord.y >= 0) ? (((int)trunc(coord.y)) + 2) : (((int)trunc(coord.y)) + 1);
-            //loop iteration 0
-            q = (p < 0) ? (-1 - p) : p;
-            q = q<doubletargetheight?q:q%doubletargetheight;
-            yInterpolationIndices.x = (targetheight <= q) ? (((doubletargetheight) - 1 - q) * targetwidth) : (q * targetwidth);//this is the linear absolute index NOT the row
-            //loop iteration 1
-            p--;
-            q = (p < 0) ? (-1 - p) : p;
-            q = q<doubletargetheight?q:q%doubletargetheight;
-            yInterpolationIndices.y = (targetheight <= q) ? (((doubletargetheight) - 1 - q) * targetwidth) : (q * targetwidth);//this is the linear absolute index NOT the row
-            //loop iteration 2
-            p--;
-            q = (p < 0) ? (-1 - p) : p;
-            q = q<doubletargetheight?q:q%doubletargetheight;
-            yInterpolationIndices.z = (targetheight <= q) ? (((doubletargetheight) - 1 - q) * targetwidth) : (q * targetwidth);//this is the linear absolute index NOT the row
-            //loop iteration 3
-            p--;
-            q = (p < 0) ? (-1 - p) : p;
-            q = q<doubletargetheight?q:q%doubletargetheight;
-            yInterpolationIndices.w = (targetheight <= q) ? (((doubletargetheight) - 1 - q) * targetwidth) : (q * targetwidth);//this is the linear absolute index NOT the row
-
-            coord.x -= (coord.x >= fZero) ? (float)((int)trunc(coord.x)) : (float)(((int)trunc(coord.x)) - 1);//get the residual should also be possible with trunc
-            coord.y -= (coord.y >= fZero) ? (float)((int)trunc(coord.y)) : (float)(((int)trunc(coord.y)) - 1);//get the residual should also be possible with trunc
-
-            //Calculate the weights for interpolation
-            __private float4 xWeights;
-            __private float s = fOne - coord.x;
-            xWeights.w = pown(s,3) / fLambda;
-            s = coord.x * coord.x;
-            xWeights.z = fTwo / fThree - fh * s * (fTwo - coord.x);
-            xWeights.x = s * coord.x / fLambda;
-            xWeights.y = fOne - xWeights.x - xWeights.z - xWeights.w;
-            __private float4 yWeights;
-            s = fOne - coord.y;
-            yWeights.w = pown(s,3) / fLambda;
-            s = coord.y * coord.y;
-            yWeights.z = fTwo / fThree - fh * s * (fTwo - coord.y);
-            yWeights.x = s * coord.y / fLambda;
-            yWeights.y = fOne - yWeights.x - yWeights.z - yWeights.w;
-
-            //unwrapped interpolation loop (sorry 16 iterations) 4x4 interpolation coefficients
-            //y loop 0
-            s = yWeights.x * (xWeights.x * target[yInterpolationIndices.x + xInterpolationIndices.x]
-                + xWeights.y * target[yInterpolationIndices.x + xInterpolationIndices.y]
-                + xWeights.z * target[yInterpolationIndices.x + xInterpolationIndices.z]
-                + xWeights.w * target[yInterpolationIndices.x + xInterpolationIndices.w]);
-            //y loop 1
-            s += yWeights.y * (xWeights.x * target[yInterpolationIndices.y + xInterpolationIndices.x]
-                + xWeights.y * target[yInterpolationIndices.y + xInterpolationIndices.y]
-                + xWeights.z * target[yInterpolationIndices.y + xInterpolationIndices.z]
-                + xWeights.w * target[yInterpolationIndices.y + xInterpolationIndices.w]);
-            //y loop 2
-            s += yWeights.z * (xWeights.x * target[yInterpolationIndices.z + xInterpolationIndices.x]
-                + xWeights.y * target[yInterpolationIndices.z + xInterpolationIndices.y]
-                + xWeights.z * target[yInterpolationIndices.z + xInterpolationIndices.z]
-                + xWeights.w * target[yInterpolationIndices.z + xInterpolationIndices.w]);
-            //y loop 3
-            s += yWeights.w * (xWeights.x * target[yInterpolationIndices.w + xInterpolationIndices.x]
-                + xWeights.y * target[yInterpolationIndices.w + xInterpolationIndices.y]
-                + xWeights.z * target[yInterpolationIndices.w + xInterpolationIndices.z]
-                + xWeights.w * target[yInterpolationIndices.w + xInterpolationIndices.w]);
-            //now s is the value
+            xInterpolationIndices = fcalculatexInterpolationIndices(coord.x, doubletargetwidth, targetwidth);
+            yInterpolationIndices = fcalculateyInterpolationIndices(coord.y, doubletargetheight, targetheight, targetwidth);
+            __private float s = finterpolate(coord, xInterpolationIndices, yInterpolationIndices, target);
             diffout[nIndex] = pown(source[nIndex] - s,2);
         }
         else
@@ -3213,7 +2487,7 @@ __kernel void ftranslationError(const __global float *source ,const __global flo
     }   
 }
 
-__kernel void frigidBodyErrorWithGradAndHess(const __global float *source ,const __global float *target,const __global float *xGradient,const __global float *yGradient,__global float *grad0,__global float *grad1,__global float *grad2,__global float *hessian00,__global float *hessian01,__global float *hessian02,__global float *hessian11,__global float *hessian12,__global float *hessian22, __global float *diffout, __global float *mask, const int sourcewidth, const int sourceheight, const int targetwidth, const int targetheight, const float offsetx, const float offsety, const float angle)
+__kernel void frigidBodyErrorWithGradAndHess(const __global float *source ,const __global float *target,const __global float *xGradient,const __global float *yGradient,__global float *grad0,__global float *grad1,__global float *grad2,__global float *hessian00,__global float *hessian01,__global float *hessian02,__global float *hessian11,__global float *hessian12,__global float *hessian22, __global float *diffout, __global float *mask, const int sourcewidth, const int sourceheight, const int targetwidth, const int targetheight, const int doubletargetwidth, const int doubletargetheight, const float offsetx, const float offsety, const float cosangle, const float negsinangle)
 {
     __private int nIndex = get_global_id(0);//this directly corresponds to the linear address of the !SOURCE! pixel
     if(nIndex < sourcewidth * sourceheight)
@@ -3221,115 +2495,45 @@ __kernel void frigidBodyErrorWithGradAndHess(const __global float *source ,const
         __private int column = nIndex % sourcewidth;
         __private int row = (nIndex - column)/sourcewidth;
 
-        __private float2 xvec = (float2)(cos(angle),-sin(angle));//Warning: this is not the x vector but it is the vector added in the x direction
+        __private float2 xvec = (float2)(cosangle,negsinangle);//Warning: this is not the x vector but it is the vector added in the x direction
         __private float2 yvec = (float2)(-xvec.y,xvec.x);//Warning: this is not the y vector but it is the vector added in the y direction
         __private float2 coord = (float2)(offsetx, offsety) + ((float)column) * xvec + ((float)row) * yvec;
 
         __private int2 Msk = (int2)((int)round(coord.x), (int)round(coord.y));
-        __private int doubletargetwidth = 2*targetwidth;
-        __private int doubletargetheight = 2*targetheight;
+        __private int4 xInterpolationIndices;
+        __private int4 yInterpolationIndices;
         if ((Msk.x >= 0) && (Msk.x < targetwidth) && (Msk.y >= 0) && (Msk.y < targetheight))
         {
             mask[nIndex] = fOne;
-            //Following is the calculation using mirrored boundaries of the x and y indices of the coefficients used for interpolation
-            //calculate the x coordinates for interpolation (loop unwrapped) for speed
-            __private int4 xInterpolationIndices;
-            __private int p = (coord.x >= 0) ? (((int)trunc(coord.x)) + 2) : (((int)trunc(coord.x)) + 1);
-            //loop iteration 0
-            __private int q = (p < 0) ? (-1 - p) : p;
-            q = q<targetwidth?q:q%targetwidth;
-            xInterpolationIndices.x = q >= targetwidth ? (targetwidth - 1 - q) : q;
-            //loop iteration 1
-            p--;
-            q = (p < 0) ? (-1 - p) : p;
-            q = q<targetwidth?q:q%targetwidth;
-            xInterpolationIndices.y = q >= targetwidth ? (targetwidth - 1 - q) : q;
-            //loop iteration 2
-            p--;
-            q = (p < 0) ? (-1 - p) : p;
-            q = q<targetwidth?q:q%targetwidth;
-            xInterpolationIndices.z = q >= targetwidth ? (targetwidth - 1 - q) : q;
-            //loop iteration 3
-            p--;
-            q = (p < 0) ? (-1 - p) : p;
-            q = q<targetwidth?q:q%targetwidth;
-            xInterpolationIndices.w = q >= targetwidth ? (targetwidth - 1 - q) : q;
-
-            __private int4 yInterpolationIndices;
-            p = (coord.y >= 0) ? (((int)trunc(coord.y)) + 2) : (((int)trunc(coord.y)) + 1);
-            //loop iteration 0
-            q = (p < 0) ? (-1 - p) : p;
-            q = q<doubletargetheight?q:q%doubletargetheight;
-            yInterpolationIndices.x = (targetheight <= q) ? (((doubletargetheight) - 1 - q) * targetwidth) : (q * targetwidth);//this is the linear absolute index NOT the row
-            //loop iteration 1
-            p--;
-            q = (p < 0) ? (-1 - p) : p;
-            q = q<doubletargetheight?q:q%doubletargetheight;
-            yInterpolationIndices.y = (targetheight <= q) ? (((doubletargetheight) - 1 - q) * targetwidth) : (q * targetwidth);//this is the linear absolute index NOT the row
-            //loop iteration 2
-            p--;
-            q = (p < 0) ? (-1 - p) : p;
-            q = q<doubletargetheight?q:q%doubletargetheight;
-            yInterpolationIndices.z = (targetheight <= q) ? (((doubletargetheight) - 1 - q) * targetwidth) : (q * targetwidth);//this is the linear absolute index NOT the row
-            //loop iteration 3
-            p--;
-            q = (p < 0) ? (-1 - p) : p;
-            q = q<doubletargetheight?q:q%doubletargetheight;
-            yInterpolationIndices.w = (targetheight <= q) ? (((doubletargetheight) - 1 - q) * targetwidth) : (q * targetwidth);//this is the linear absolute index NOT the row
-
-            coord.x -= (coord.x >= fZero) ? (float)((int)trunc(coord.x)) : (float)(((int)trunc(coord.x)) - 1);//get the residual should also be possible with floor
-            coord.y -= (coord.y >= fZero) ? (float)((int)trunc(coord.y)) : (float)(((int)trunc(coord.y)) - 1);//get the residual should also be possible with floor
-
-            //Calculate the weights for interpolation
-            __private float4 xWeights;
-            __private float s = fOne - coord.x;
-            xWeights.w = pown(s,3) / fLambda;
-            s = coord.x * coord.x;
-            xWeights.z = fTwo / fThree - fh * s * (fTwo - coord.x);
-            xWeights.x = s * coord.x / fLambda;
-            xWeights.y = fOne - xWeights.x - xWeights.z - xWeights.w;
-            __private float4 yWeights;
-            s = fOne - coord.y;
-            yWeights.w = pown(s,3) / fLambda;
-            s = coord.y * coord.y;
-            yWeights.z = fTwo / fThree - fh * s * (fTwo - coord.y);
-            yWeights.x = s * coord.y / fLambda;
-            yWeights.y = fOne - yWeights.x - yWeights.z - yWeights.w;
-
-            //unwrapped interpolation loop (sorry 16 iterations) 4x4 interpolation coefficients
-            //y loop 0
-            s = yWeights.x * (xWeights.x * target[yInterpolationIndices.x + xInterpolationIndices.x]
-                + xWeights.y * target[yInterpolationIndices.x + xInterpolationIndices.y]
-                + xWeights.z * target[yInterpolationIndices.x + xInterpolationIndices.z]
-                + xWeights.w * target[yInterpolationIndices.x + xInterpolationIndices.w]);
-            //y loop 1
-            s += yWeights.y * (xWeights.x * target[yInterpolationIndices.y + xInterpolationIndices.x]
-                + xWeights.y * target[yInterpolationIndices.y + xInterpolationIndices.y]
-                + xWeights.z * target[yInterpolationIndices.y + xInterpolationIndices.z]
-                + xWeights.w * target[yInterpolationIndices.y + xInterpolationIndices.w]);
-            //y loop 2
-            s += yWeights.z * (xWeights.x * target[yInterpolationIndices.z + xInterpolationIndices.x]
-                + xWeights.y * target[yInterpolationIndices.z + xInterpolationIndices.y]
-                + xWeights.z * target[yInterpolationIndices.z + xInterpolationIndices.z]
-                + xWeights.w * target[yInterpolationIndices.z + xInterpolationIndices.w]);
-            //y loop 3
-            s += yWeights.w * (xWeights.x * target[yInterpolationIndices.w + xInterpolationIndices.x]
-                + xWeights.y * target[yInterpolationIndices.w + xInterpolationIndices.y]
-                + xWeights.z * target[yInterpolationIndices.w + xInterpolationIndices.z]
-                + xWeights.w * target[yInterpolationIndices.w + xInterpolationIndices.w]);
-            //now s is the value
+            xInterpolationIndices = fcalculatexInterpolationIndices(coord.x, doubletargetwidth, targetwidth);
+            yInterpolationIndices = fcalculateyInterpolationIndices(coord.y, doubletargetheight, targetheight, targetwidth);
+            __private float s = finterpolate(coord, xInterpolationIndices, yInterpolationIndices, target);
             __private float diff = source[nIndex] - s;
-            diffout[nIndex] = pown(diff,2);
-            __private float Theta = yGradient[nIndex] * (float)column - xGradient[nIndex] * (float)row;
-            grad0[nIndex] = diff * Theta;
-            grad1[nIndex] = diff * xGradient[nIndex];
-            grad2[nIndex] = diff * yGradient[nIndex];
-            hessian00[nIndex] = pown(Theta,2);
-            hessian01[nIndex] = Theta * xGradient[nIndex];
-            hessian02[nIndex] = Theta * yGradient[nIndex];
-            hessian11[nIndex] = pown(xGradient[nIndex],2);
-            hessian12[nIndex] = xGradient[nIndex] * yGradient[nIndex];
-            hessian22[nIndex] = pown(yGradient[nIndex],2);
+            //__private float Theta = yGradient[nIndex] * (float)column - xGradient[nIndex] * (float)row;
+            __private float Theta = dot((float2)(yGradient[nIndex], -xGradient[nIndex]), (float2)((float)column, (float)row));
+            //diffout[nIndex] = pown(diff,2);
+            //grad0[nIndex] = diff * Theta;
+            //grad1[nIndex] = diff * xGradient[nIndex];
+            //grad2[nIndex] = diff * yGradient[nIndex];
+            __private float4 tmp4 = (float4)(diff, Theta, xGradient[nIndex], yGradient[nIndex]) * diff; //Slightly less accurate
+            diffout[nIndex] = tmp4.x;
+            grad0[nIndex] = tmp4.y;
+            grad1[nIndex] = tmp4.z;
+            grad2[nIndex] = tmp4.w;
+            //hessian00[nIndex] = pown(Theta,2);
+            //hessian01[nIndex] = Theta * xGradient[nIndex];
+            //hessian02[nIndex] = Theta * yGradient[nIndex];
+            __private float3 tmp = (float3)(Theta, xGradient[nIndex], yGradient[nIndex]) * Theta; //Slightly less accurate
+            hessian00[nIndex] = tmp.x;
+            hessian01[nIndex] = tmp.y;
+            hessian02[nIndex] = tmp.z;
+            //hessian11[nIndex] = pown(xGradient[nIndex],2);
+            //hessian12[nIndex] = xGradient[nIndex] * yGradient[nIndex];
+            //hessian22[nIndex] = pown(yGradient[nIndex],2);
+            tmp = ((float3)(xGradient[nIndex], xGradient[nIndex], yGradient[nIndex])) * ((float3)(xGradient[nIndex], yGradient[nIndex], yGradient[nIndex])); //Slightly less accurate
+            hessian11[nIndex] = tmp.x;
+            hessian12[nIndex] = tmp.y;
+            hessian22[nIndex] = tmp.z;
         }
         else
         {
@@ -3349,7 +2553,7 @@ __kernel void frigidBodyErrorWithGradAndHess(const __global float *source ,const
 }
 
 
-__kernel void ftranslationErrorWithGradAndHess(const __global float *source ,const __global float *target,const __global float *xGradient,const __global float *yGradient,__global float *grad0,__global float *grad1,__global float *hessian00,__global float *hessian01,__global float *hessian11, __global float *diffout, __global float *mask, const int sourcewidth, const int sourceheight, const int targetwidth, const int targetheight, const float offsetx, const float offsety)
+__kernel void ftranslationErrorWithGradAndHess(const __global float *source ,const __global float *target,const __global float *xGradient,const __global float *yGradient,__global float *grad0,__global float *grad1,__global float *hessian00,__global float *hessian01,__global float *hessian11, __global float *diffout, __global float *mask, const int sourcewidth, const int sourceheight, const int targetwidth, const int targetheight, const int doubletargetwidth, const int doubletargetheight, const float offsetx, const float offsety)
 {
     __private int nIndex = get_global_id(0);//this directly corresponds to the linear address of the !SOURCE! pixel
     if(nIndex < sourcewidth * sourceheight)
@@ -3360,105 +2564,29 @@ __kernel void ftranslationErrorWithGradAndHess(const __global float *source ,con
         __private float2 coord = (float2)(offsetx + ((float)column), offsety + ((float)row));
 
         __private int2 Msk = (int2)((int)round(coord.x), (int)round(coord.y));
-        __private int doubletargetwidth = 2*targetwidth;
-        __private int doubletargetheight = 2*targetheight;
+        __private int4 xInterpolationIndices;
+        __private int4 yInterpolationIndices;
         if ((Msk.x >= 0) && (Msk.x < targetwidth) && (Msk.y >= 0) && (Msk.y < targetheight))
         {
             mask[nIndex] = fOne;
-            //Following is the calculation using mirrored boundaries of the x and y indices of the coefficients used for interpolation
-            //calculate the x coordinates for interpolation (loop unwrapped) for speed
-            __private int4 xInterpolationIndices;
-            __private int p = (coord.x >= 0) ? (((int)trunc(coord.x)) + 2) : (((int)trunc(coord.x)) + 1);
-            //loop iteration 0
-            __private int q = (p < 0) ? (-1 - p) : p;
-            q = q<targetwidth?q:q%targetwidth;
-            xInterpolationIndices.x = q >= targetwidth ? (targetwidth - 1 - q) : q;
-            //loop iteration 1
-            p--;
-            q = (p < 0) ? (-1 - p) : p;
-            q = q<targetwidth?q:q%targetwidth;
-            xInterpolationIndices.y = q >= targetwidth ? (targetwidth - 1 - q) : q;
-            //loop iteration 2
-            p--;
-            q = (p < 0) ? (-1 - p) : p;
-            q = q<targetwidth?q:q%targetwidth;
-            xInterpolationIndices.z = q >= targetwidth ? (targetwidth - 1 - q) : q;
-            //loop iteration 3
-            p--;
-            q = (p < 0) ? (-1 - p) : p;
-            q = q<targetwidth?q:q%targetwidth;
-            xInterpolationIndices.w = q >= targetwidth ? (targetwidth - 1 - q) : q;
-
-            __private int4 yInterpolationIndices;
-            p = (coord.y >= 0) ? (((int)trunc(coord.y)) + 2) : (((int)trunc(coord.y)) + 1);
-            //loop iteration 0
-            q = (p < 0) ? (-1 - p) : p;
-            q = q<doubletargetheight?q:q%doubletargetheight;
-            yInterpolationIndices.x = (targetheight <= q) ? (((doubletargetheight) - 1 - q) * targetwidth) : (q * targetwidth);//this is the linear absolute index NOT the row
-            //loop iteration 1
-            p--;
-            q = (p < 0) ? (-1 - p) : p;
-            q = q<doubletargetheight?q:q%doubletargetheight;
-            yInterpolationIndices.y = (targetheight <= q) ? (((doubletargetheight) - 1 - q) * targetwidth) : (q * targetwidth);//this is the linear absolute index NOT the row
-            //loop iteration 2
-            p--;
-            q = (p < 0) ? (-1 - p) : p;
-            q = q<doubletargetheight?q:q%doubletargetheight;
-            yInterpolationIndices.z = (targetheight <= q) ? (((doubletargetheight) - 1 - q) * targetwidth) : (q * targetwidth);//this is the linear absolute index NOT the row
-            //loop iteration 3
-            p--;
-            q = (p < 0) ? (-1 - p) : p;
-            q = q<doubletargetheight?q:q%doubletargetheight;
-            yInterpolationIndices.w = (targetheight <= q) ? (((doubletargetheight) - 1 - q) * targetwidth) : (q * targetwidth);//this is the linear absolute index NOT the row
-
-            coord.x -= (coord.x >= fZero) ? (float)((int)trunc(coord.x)) : (float)(((int)trunc(coord.x)) - 1);//get the residual should also be possible with floor
-            coord.y -= (coord.y >= fZero) ? (float)((int)trunc(coord.y)) : (float)(((int)trunc(coord.y)) - 1);//get the residual should also be possible with floor
-
-            //Calculate the weights for interpolation
-            __private float4 xWeights;
-            __private float s = fOne - coord.x;
-            xWeights.w = pown(s,3) / fLambda;
-            s = coord.x * coord.x;
-            xWeights.z = fTwo / fThree - fh * s * (fTwo - coord.x);
-            xWeights.x = s * coord.x / fLambda;
-            xWeights.y = fOne - xWeights.x - xWeights.z - xWeights.w;
-            __private float4 yWeights;
-            s = fOne - coord.y;
-            yWeights.w = pown(s,3) / fLambda;
-            s = coord.y * coord.y;
-            yWeights.z = fTwo / fThree - fh * s * (fTwo - coord.y);
-            yWeights.x = s * coord.y / fLambda;
-            yWeights.y = fOne - yWeights.x - yWeights.z - yWeights.w;
-
-            //unwrapped interpolation loop (sorry 16 iterations) 4x4 interpolation coefficients
-            //y loop 0
-            s = yWeights.x * (xWeights.x * target[yInterpolationIndices.x + xInterpolationIndices.x]
-                + xWeights.y * target[yInterpolationIndices.x + xInterpolationIndices.y]
-                + xWeights.z * target[yInterpolationIndices.x + xInterpolationIndices.z]
-                + xWeights.w * target[yInterpolationIndices.x + xInterpolationIndices.w]);
-            //y loop 1
-            s += yWeights.y * (xWeights.x * target[yInterpolationIndices.y + xInterpolationIndices.x]
-                + xWeights.y * target[yInterpolationIndices.y + xInterpolationIndices.y]
-                + xWeights.z * target[yInterpolationIndices.y + xInterpolationIndices.z]
-                + xWeights.w * target[yInterpolationIndices.y + xInterpolationIndices.w]);
-            //y loop 2
-            s += yWeights.z * (xWeights.x * target[yInterpolationIndices.z + xInterpolationIndices.x]
-                + xWeights.y * target[yInterpolationIndices.z + xInterpolationIndices.y]
-                + xWeights.z * target[yInterpolationIndices.z + xInterpolationIndices.z]
-                + xWeights.w * target[yInterpolationIndices.z + xInterpolationIndices.w]);
-            //y loop 3
-            s += yWeights.w * (xWeights.x * target[yInterpolationIndices.w + xInterpolationIndices.x]
-                + xWeights.y * target[yInterpolationIndices.w + xInterpolationIndices.y]
-                + xWeights.z * target[yInterpolationIndices.w + xInterpolationIndices.z]
-                + xWeights.w * target[yInterpolationIndices.w + xInterpolationIndices.w]);
-            //now s is the value
+            xInterpolationIndices = fcalculatexInterpolationIndices(coord.x, doubletargetwidth, targetwidth);
+            yInterpolationIndices = fcalculateyInterpolationIndices(coord.y, doubletargetheight, targetheight, targetwidth);
+            __private float s = finterpolate(coord, xInterpolationIndices, yInterpolationIndices, target);
             __private float diff = source[nIndex] - s;
-            diffout[nIndex] = pown(diff,2);
-            grad0[nIndex] = diff * xGradient[nIndex];
-            grad1[nIndex] = diff * yGradient[nIndex];
-            hessian00[nIndex] = pown(xGradient[nIndex],2);
-            hessian01[nIndex] = xGradient[nIndex] * yGradient[nIndex];
-            hessian11[nIndex] = pown(yGradient[nIndex],2);
+            //diffout[nIndex] = pown(diff,2);
+            //grad0[nIndex] = diff * xGradient[nIndex];
+            //grad1[nIndex] = diff * yGradient[nIndex];
+            __private float3 tmp = (float3)(diff, xGradient[nIndex], yGradient[nIndex]) * diff;
+            diffout[nIndex] = tmp.x;
+            grad0[nIndex] = tmp.y;
+            grad1[nIndex] = tmp.z;
+            //hessian00[nIndex] = pown(xGradient[nIndex],2);
+            //hessian01[nIndex] = xGradient[nIndex] * yGradient[nIndex];
+            //hessian11[nIndex] = pown(yGradient[nIndex],2);
+            tmp = ((float3)(xGradient[nIndex], xGradient[nIndex], yGradient[nIndex])) * ((float3)(xGradient[nIndex], yGradient[nIndex], yGradient[nIndex])); 
+            hessian00[nIndex] = tmp.x;
+            hessian01[nIndex] = tmp.y;
+            hessian11[nIndex] = tmp.z;
         }
         else
         {
@@ -4236,7 +3364,8 @@ const int targetwidth,
 const int targetheight,
 const float offsetx,
 const float offsety,
-const float angle,
+const float cosangle,
+const float negsinangle,
 const int doubleTargetWidth,
 const int doubleTargetHeight)
 {
@@ -4260,7 +3389,7 @@ const int doubleTargetHeight)
     lmask[nIndex] = fZero;
 
     //These vectors remain the same during the loops
-    __private float2 xvec = (float2)(cos(angle),-sin(angle));//Warning: this is not the x vector but it is the vector added in the x direction
+    __private float2 xvec = (float2)(cosangle,negsinangle);//Warning: this is not the x vector but it is the vector added in the x direction
     __private float2 yvec = (float2)(-xvec.y,xvec.x);//Warning: this is not the y vector but it is the vector added in the y direction
     while(i < sourcewidth * sourceheight)
     {
@@ -4273,8 +3402,6 @@ const int doubleTargetHeight)
         __private int4 combinedInterpolationIndices;
         __private float4 xWeights;
         __private float4 yWeights;
-        __private int p;
-        __private int q;
         __private float s;
         __private float diff;
         __private float Theta;
@@ -4283,110 +3410,35 @@ const int doubleTargetHeight)
         if ((Msk.x >= 0) && (Msk.x < targetwidth) && (Msk.y >= 0) && (Msk.y < targetheight))
         {
             lmask[nIndex] += fOne;
-            //Following is the calculation using mirrored boundaries of the x and y indices of the coefficients used for interpolation
-            //calculate the x coordinates for interpolation (loop unwrapped) for speed
-            p = (coord.x >= 0) ? (((int)trunc(coord.x)) + 2) : (((int)trunc(coord.x)) + 1);
-            //loop iteration 0
-            /*
-            q = (p < 0) ? (-1 - p) : p;
-            is a diverging statement, although it incurs more operations the following equivalent will likely be faster
-            */
-            q = abs(p) - rotate(p&(int)0x80000000,(int)1);
-            q = q<doubleTargetWidth?q:q%doubleTargetWidth;
-            xInterpolationIndices.x = q >= targetwidth ? (doubleTargetWidth - 1 - q) : q;
-            //loop iteration 1
-            p--;
-            q = abs(p) - rotate(p&(int)0x80000000,(int)1);
-            q = q<doubleTargetWidth?q:q%doubleTargetWidth;
-            xInterpolationIndices.y = q >= targetwidth ? (doubleTargetWidth - 1 - q) : q;
-            //loop iteration 2
-            p--;
-            q = abs(p) - rotate(p&(int)0x80000000,(int)1);
-            q = q<doubleTargetWidth?q:q%doubleTargetWidth;
-            xInterpolationIndices.z = q >= targetwidth ? (doubleTargetWidth - 1 - q) : q;
-            //loop iteration 3
-            p--;
-            q = abs(p) - rotate(p&(int)0x80000000,(int)1);
-            q = q<doubleTargetWidth?q:q%doubleTargetWidth;
-            xInterpolationIndices.w = q >= targetwidth ? (doubleTargetWidth - 1 - q) : q;
-
-            p = (coord.y >= 0) ? (((int)trunc(coord.y)) + 2) : (((int)trunc(coord.y)) + 1);
-            //loop iteration 0
-            q = abs(p) - rotate(p&(int)0x80000000,(int)1);
-            q = q<doubleTargetHeight?q:q%doubleTargetHeight;
-            yInterpolationIndices.x = (targetheight <= q) ? (((doubleTargetHeight) - 1 - q) * targetwidth) : (q * targetwidth);//this is the linear absolute index NOT the row
-            //loop iteration 1
-            p--;
-            q = abs(p) - rotate(p&(int)0x80000000,(int)1);
-            q = q<doubleTargetHeight?q:q%doubleTargetHeight;
-            yInterpolationIndices.y = (targetheight <= q) ? (((doubleTargetHeight) - 1 - q) * targetwidth) : (q * targetwidth);//this is the linear absolute index NOT the row
-            //loop iteration 2
-            p--;
-            q = abs(p) - rotate(p&(int)0x80000000,(int)1);
-            q = q<doubleTargetHeight?q:q%doubleTargetHeight;
-            yInterpolationIndices.z = (targetheight <= q) ? (((doubleTargetHeight) - 1 - q) * targetwidth) : (q * targetwidth);//this is the linear absolute index NOT the row
-            //loop iteration 3
-            p--;
-            q = abs(p) - rotate(p&(int)0x80000000,(int)1);
-            q = q<doubleTargetHeight?q:q%doubleTargetHeight;
-            yInterpolationIndices.w = (targetheight <= q) ? (((doubleTargetHeight) - 1 - q) * targetwidth) : (q * targetwidth);//this is the linear absolute index NOT the row
-
-            coord.x -= (coord.x >= fZero) ? (float)((int)trunc(coord.x)) : (float)(((int)trunc(coord.x)) - 1);//get the residual should also be possible with floor
-            coord.y -= (coord.y >= fZero) ? (float)((int)trunc(coord.y)) : (float)(((int)trunc(coord.y)) - 1);//get the residual should also be possible with floor
-
-            //Calculate the weights for interpolation
-            s = fOne - coord.x;
-            xWeights.w = pown(s,3) / fLambda;
-            s = coord.x * coord.x;
-            xWeights.z = fTwo / fThree - fh * s * (fTwo - coord.x);
-            xWeights.x = s * coord.x / fLambda;
-            xWeights.y = fOne - xWeights.x - xWeights.z - xWeights.w;
-            s = fOne - coord.y;
-            yWeights.w = pown(s,3) / fLambda;
-            s = coord.y * coord.y;
-            yWeights.z = fTwo / fThree - fh * s * (fTwo - coord.y);
-            yWeights.x = s * coord.y / fLambda;
-            yWeights.y = fOne - yWeights.x - yWeights.z - yWeights.w;
-
-            //unwrapped interpolation loop (sorry 16 iterations) 4x4 interpolation coefficients
-            //y loop 0
-            //broadcast then add
-            combinedInterpolationIndices = (int4)(yInterpolationIndices.x) + xInterpolationIndices;
-            s = yWeights.x * (xWeights.x * target[combinedInterpolationIndices.x]
-                + xWeights.y * target[combinedInterpolationIndices.y]
-                + xWeights.z * target[combinedInterpolationIndices.z]
-                + xWeights.w * target[combinedInterpolationIndices.w]);
-            //y loop 1
-            combinedInterpolationIndices = (int4)(yInterpolationIndices.y) + xInterpolationIndices;
-            s += yWeights.y * (xWeights.x * target[combinedInterpolationIndices.x]
-                + xWeights.y * target[combinedInterpolationIndices.y]
-                + xWeights.z * target[combinedInterpolationIndices.z]
-                + xWeights.w * target[combinedInterpolationIndices.w]);
-            //y loop 2
-            combinedInterpolationIndices = (int4)(yInterpolationIndices.z) + xInterpolationIndices;
-            s += yWeights.z * (xWeights.x * target[combinedInterpolationIndices.x]
-                + xWeights.y * target[combinedInterpolationIndices.y]
-                + xWeights.z * target[combinedInterpolationIndices.z]
-                + xWeights.w * target[combinedInterpolationIndices.w]);
-            //y loop 3
-            combinedInterpolationIndices = (int4)(yInterpolationIndices.w) + xInterpolationIndices;
-            s += yWeights.w * (xWeights.x * target[combinedInterpolationIndices.x]
-                + xWeights.y * target[combinedInterpolationIndices.y]
-                + xWeights.z * target[combinedInterpolationIndices.z]
-                + xWeights.w * target[combinedInterpolationIndices.w]);
-            //now s is the value
+            xInterpolationIndices = fcalculatexInterpolationIndices(coord.x, doubleTargetWidth, targetwidth);
+            yInterpolationIndices = fcalculateyInterpolationIndices(coord.y, doubleTargetHeight, targetheight, targetwidth);            
+            s = finterpolate(coord, xInterpolationIndices, yInterpolationIndices, target);
             diff = source[i] - s;
-            ldiffout[nIndex] += pown(diff,2);
-            Theta = yGradient[i] * (float)column - xGradient[i] * (float)row;
-            lgrad0[nIndex] += diff * Theta;
-            lgrad1[nIndex] += diff * xGradient[i];
-            lgrad2[nIndex] += diff * yGradient[i];
-            lhessian00[nIndex] += pown(Theta,2);
-            lhessian01[nIndex] += Theta * xGradient[i];
-            lhessian02[nIndex] += Theta * yGradient[i];
-            lhessian11[nIndex] += pown(xGradient[i],2);
-            lhessian12[nIndex] += xGradient[i] * yGradient[i];
-            lhessian22[nIndex] += pown(yGradient[i],2);
+            //Theta = yGradient[i] * (float)column - xGradient[i] * (float)row;
+            Theta = dot((float2)(yGradient[i], -xGradient[i]), (float2)((float)column, (float)row));
+            //ldiffout[nIndex] += pown(diff,2);
+            //lgrad0[nIndex] += diff * Theta;
+            //lgrad1[nIndex] += diff * xGradient[i];
+            //lgrad2[nIndex] += diff * yGradient[i];
+            __private float4 tmp4 = fma((float4)(diff, Theta, xGradient[i], yGradient[i]), (float4)diff, (float4)(ldiffout[nIndex], lgrad0[nIndex], lgrad1[nIndex], lgrad2[nIndex]));
+            ldiffout[nIndex] = tmp4.x;
+            lgrad0[nIndex] = tmp4.y;
+            lgrad1[nIndex] = tmp4.z;
+            lgrad2[nIndex] = tmp4.w;
+            //lhessian00[nIndex] += pown(Theta,2);
+            //lhessian01[nIndex] += Theta * xGradient[i];
+            //lhessian02[nIndex] += Theta * yGradient[i];
+            __private float3 tmp = fma((float3)(Theta, xGradient[i], yGradient[i]), (float3)Theta, (float3)(lhessian00[nIndex], lhessian01[nIndex], lhessian02[nIndex])); //Slightly less accurate
+            lhessian00[nIndex] = tmp.x;
+            lhessian01[nIndex] = tmp.y;
+            lhessian02[nIndex] = tmp.z;
+            //lhessian11[nIndex] += pown(xGradient[i],2);
+            //lhessian12[nIndex] += xGradient[i] * yGradient[i];
+            //lhessian22[nIndex] += pown(yGradient[i],2);
+            tmp = fma((float3)(xGradient[i], xGradient[i], yGradient[i]), (float3)(xGradient[i], yGradient[i], yGradient[i]), (float3)(lhessian11[nIndex], lhessian12[nIndex], lhessian22[nIndex]));
+            lhessian11[nIndex] = tmp.x;
+            lhessian12[nIndex] = tmp.y;
+            lhessian22[nIndex] = tmp.z;
         }
         // ensure the read is not out of bounds
         if(i + blockSize < sourcewidth * sourceheight)
@@ -4399,134 +3451,35 @@ const int doubleTargetHeight)
             if ((Msk.x >= 0) && (Msk.x < targetwidth) && (Msk.y >= 0) && (Msk.y < targetheight))
             {
                 lmask[nIndex] += fOne;
-                //Following is the calculation using mirrored boundaries of the x and y indices of the coefficients used for interpolation
-                //calculate the x coordinates for interpolation (loop unwrapped) for speed
-                p = (coord.x >= 0) ? (((int)trunc(coord.x)) + 2) : (((int)trunc(coord.x)) + 1);
-                //loop iteration 0
-                /*
-                q = (p < 0) ? (-1 - p) : p;
-                is a diverging statement, although it incurs more operations the following equivalent will likely be faster
-                */
-                q = abs(p) - rotate(p&(int)0x80000000,(int)1);
-                if(q >= doubleTargetWidth)
-                {
-                    q -= (doubleTargetWidth) * (q / (doubleTargetWidth)); //Warning: this is an integer division, it doesn't yield q
-                }
-                xInterpolationIndices.x = q >= targetwidth ? (doubleTargetWidth - 1 - q) : q;
-                //loop iteration 1
-                p--;
-                q = abs(p) - rotate(p&(int)0x80000000,(int)1);
-                if(q >= doubleTargetWidth)
-                {
-                    q -= (doubleTargetWidth) * (q / (doubleTargetWidth)); //Warning: this is an integer division, it doesn't yield q
-                }
-                xInterpolationIndices.y = q >= targetwidth ? (doubleTargetWidth - 1 - q) : q;
-                //loop iteration 2
-                p--;
-                q = abs(p) - rotate(p&(int)0x80000000,(int)1);
-                if(q >= doubleTargetWidth)
-                {
-                    q -= (doubleTargetWidth) * (q / (doubleTargetWidth)); //Warning: this is an integer division, it doesn't yield q
-                }
-                xInterpolationIndices.z = q >= targetwidth ? (doubleTargetWidth - 1 - q) : q;
-                //loop iteration 3
-                p--;
-                q = abs(p) - rotate(p&(int)0x80000000,(int)1);
-                if(q >= doubleTargetWidth)
-                {
-                    q -= (doubleTargetWidth) * (q / (doubleTargetWidth)); //Warning: this is an integer division, it doesn't yield q
-                }
-                xInterpolationIndices.w = q >= targetwidth ? (doubleTargetWidth - 1 - q) : q;
-
-                p = (coord.y >= 0) ? (((int)trunc(coord.y)) + 2) : (((int)trunc(coord.y)) + 1);
-                //loop iteration 0
-                q = abs(p) - rotate(p&(int)0x80000000,(int)1);
-                if(q >= doubleTargetHeight)
-                {
-                    q -= (doubleTargetHeight) * (q / (doubleTargetHeight));//WARNING: this is an integer division which may not yield q
-                }
-                yInterpolationIndices.x = (targetheight <= q) ? (((doubleTargetHeight) - 1 - q) * targetwidth) : (q * targetwidth);//this is the linear absolute index NOT the row
-                //loop iteration 1
-                p--;
-                q = abs(p) - rotate(p&(int)0x80000000,(int)1);
-                if(q >= doubleTargetHeight)
-                {
-                    q -= (doubleTargetHeight) * (q / (doubleTargetHeight));//WARNING: this is an integer division which may not yield q
-                }
-                yInterpolationIndices.y = (targetheight <= q) ? (((doubleTargetHeight) - 1 - q) * targetwidth) : (q * targetwidth);//this is the linear absolute index NOT the row
-                //loop iteration 2
-                p--;
-                q = abs(p) - rotate(p&(int)0x80000000,(int)1);
-                if(q >= doubleTargetHeight)
-                {
-                    q -= (doubleTargetHeight) * (q / (doubleTargetHeight));//WARNING: this is an integer division which may not yield q
-                }
-                yInterpolationIndices.z = (targetheight <= q) ? (((doubleTargetHeight) - 1 - q) * targetwidth) : (q * targetwidth);//this is the linear absolute index NOT the row
-                //loop iteration 3
-                p--;
-                q = abs(p) - rotate(p&(int)0x80000000,(int)1);
-                if(q >= doubleTargetHeight)
-                {
-                    q -= (doubleTargetHeight) * (q / (doubleTargetHeight));//WARNING: this is an integer division which may not yield q
-                }
-                yInterpolationIndices.w = (targetheight <= q) ? (((doubleTargetHeight) - 1 - q) * targetwidth) : (q * targetwidth);//this is the linear absolute index NOT the row
-
-                coord.x -= (coord.x >= fZero) ? (float)((int)trunc(coord.x)) : (float)(((int)trunc(coord.x)) - 1);//get the residual should also be possible with floor
-                coord.y -= (coord.y >= fZero) ? (float)((int)trunc(coord.y)) : (float)(((int)trunc(coord.y)) - 1);//get the residual should also be possible with floor
-
-                //Calculate the weights for interpolation
-                s = fOne - coord.x;
-                xWeights.w = pown(s,3) / fLambda;
-                s = coord.x * coord.x;
-                xWeights.z = fTwo / fThree - fh * s * (fTwo - coord.x);
-                xWeights.x = s * coord.x / fLambda;
-                xWeights.y = fOne - xWeights.x - xWeights.z - xWeights.w;
-                s = fOne - coord.y;
-                yWeights.w = pown(s,3) / fLambda;
-                s = coord.y * coord.y;
-                yWeights.z = fTwo / fThree - fh * s * (fTwo - coord.y);
-                yWeights.x = s * coord.y / fLambda;
-                yWeights.y = fOne - yWeights.x - yWeights.z - yWeights.w;
-
-                //unwrapped interpolation loop (sorry 16 iterations) 4x4 interpolation coefficients
-                //y loop 0
-                //broadcast then add
-                combinedInterpolationIndices = (int4)(yInterpolationIndices.x) + xInterpolationIndices;
-                s = yWeights.x * (xWeights.x * target[combinedInterpolationIndices.x]
-                    + xWeights.y * target[combinedInterpolationIndices.y]
-                    + xWeights.z * target[combinedInterpolationIndices.z]
-                    + xWeights.w * target[combinedInterpolationIndices.w]);
-                //y loop 1
-                combinedInterpolationIndices = (int4)(yInterpolationIndices.y) + xInterpolationIndices;
-                s += yWeights.y * (xWeights.x * target[combinedInterpolationIndices.x]
-                    + xWeights.y * target[combinedInterpolationIndices.y]
-                    + xWeights.z * target[combinedInterpolationIndices.z]
-                    + xWeights.w * target[combinedInterpolationIndices.w]);
-                //y loop 2
-                combinedInterpolationIndices = (int4)(yInterpolationIndices.z) + xInterpolationIndices;
-                s += yWeights.z * (xWeights.x * target[combinedInterpolationIndices.x]
-                    + xWeights.y * target[combinedInterpolationIndices.y]
-                    + xWeights.z * target[combinedInterpolationIndices.z]
-                    + xWeights.w * target[combinedInterpolationIndices.w]);
-                //y loop 3
-                combinedInterpolationIndices = (int4)(yInterpolationIndices.w) + xInterpolationIndices;
-                s += yWeights.w * (xWeights.x * target[combinedInterpolationIndices.x]
-                    + xWeights.y * target[combinedInterpolationIndices.y]
-                    + xWeights.z * target[combinedInterpolationIndices.z]
-                    + xWeights.w * target[combinedInterpolationIndices.w]);
-                //now s is the value
+                xInterpolationIndices = fcalculatexInterpolationIndices(coord.x, doubleTargetWidth, targetwidth);
+                yInterpolationIndices = fcalculateyInterpolationIndices(coord.y, doubleTargetHeight, targetheight, targetwidth); 
+                s = finterpolate(coord, xInterpolationIndices, yInterpolationIndices, target);
                 diff = source[lIdx] - s;
-                ldiffout[nIndex] += pown(diff,2);
-                Theta = yGradient[lIdx] * (float)column - xGradient[lIdx] * (float)row;
-                lgrad0[nIndex] += diff * Theta;
-                lgrad1[nIndex] += diff * xGradient[lIdx];
-                lgrad2[nIndex] += diff * yGradient[lIdx];
-                lhessian00[nIndex] += pown(Theta,2);
-                lhessian01[nIndex] += Theta * xGradient[lIdx];
-                lhessian02[nIndex] += Theta * yGradient[lIdx];
-                lhessian11[nIndex] += pown(xGradient[lIdx],2);
-                lhessian12[nIndex] += xGradient[lIdx] * yGradient[lIdx];
-                lhessian22[nIndex] += pown(yGradient[lIdx],2);
+                //Theta = yGradient[lIdx] * (float)column - xGradient[lIdx] * (float)row;
+                Theta = dot((float2)(yGradient[lIdx], -xGradient[lIdx]), (float2)((float)column, (float)row));
+                //ldiffout[nIndex] += pown(diff,2);
+                //lgrad0[nIndex] += diff * Theta;
+                //lgrad1[nIndex] += diff * xGradient[lIdx];
+                //lgrad2[nIndex] += diff * yGradient[lIdx];
+                __private float4 tmp4 = fma((float4)(diff, Theta, xGradient[lIdx], yGradient[lIdx]), (float4)diff, (float4)(ldiffout[nIndex], lgrad0[nIndex], lgrad1[nIndex], lgrad2[nIndex]));
+                ldiffout[nIndex] = tmp4.x;
+                lgrad0[nIndex] = tmp4.y;
+                lgrad1[nIndex] = tmp4.z;
+                lgrad2[nIndex] = tmp4.w;
+                //lhessian00[nIndex] += pown(Theta,2);
+                //lhessian01[nIndex] += Theta * xGradient[lIdx];
+                //lhessian02[nIndex] += Theta * yGradient[lIdx];
+                __private float3 tmp = fma((float3)(Theta, xGradient[lIdx], yGradient[lIdx]), (float3)Theta, (float3)(lhessian00[nIndex], lhessian01[nIndex], lhessian02[nIndex])); //Slightly less accurate
+                lhessian00[nIndex] = tmp.x;
+                lhessian01[nIndex] = tmp.y;
+                lhessian02[nIndex] = tmp.z;
+                //lhessian11[nIndex] += pown(xGradient[lIdx],2);
+                //lhessian12[nIndex] += xGradient[lIdx] * yGradient[lIdx];
+                //lhessian22[nIndex] += pown(yGradient[lIdx],2);
+                tmp = fma((float3)(xGradient[lIdx], xGradient[lIdx], yGradient[lIdx]), (float3)(xGradient[lIdx], yGradient[lIdx], yGradient[lIdx]), (float3)(lhessian11[nIndex], lhessian12[nIndex], lhessian22[nIndex]));
+                lhessian11[nIndex] = tmp.x;
+                lhessian12[nIndex] = tmp.y;
+                lhessian22[nIndex] = tmp.z;
             }
         }
         i += gridSize;
@@ -4628,8 +3581,6 @@ const int doubleTargetHeight)
         __private int4 combinedInterpolationIndices;
         __private float4 xWeights;
         __private float4 yWeights;
-        __private int p;
-        __private int q;
         __private float s;
         __private float diff;
         
@@ -4637,105 +3588,24 @@ const int doubleTargetHeight)
         if ((Msk.x >= 0) && (Msk.x < targetwidth) && (Msk.y >= 0) && (Msk.y < targetheight))
         {
             lmask[nIndex] += fOne;
-            //Following is the calculation using mirrored boundaries of the x and y indices of the coefficients used for interpolation
-            //calculate the x coordinates for interpolation (loop unwrapped) for speed
-            p = (coord.x >= 0) ? (((int)trunc(coord.x)) + 2) : (((int)trunc(coord.x)) + 1);
-            //loop iteration 0
-            /*
-            q = (p < 0) ? (-1 - p) : p;
-            is a diverging statement, although it incurs more operations the following equivalent will likely be faster
-            */
-            q = abs(p) - rotate(p&(int)0x80000000,(int)1);
-            q = q<doubleTargetWidth?q:q%doubleTargetWidth;
-            xInterpolationIndices.x = q >= targetwidth ? (doubleTargetWidth - 1 - q) : q;
-            //loop iteration 1
-            p--;
-            q = abs(p) - rotate(p&(int)0x80000000,(int)1);
-            q = q<doubleTargetWidth?q:q%doubleTargetWidth;
-            xInterpolationIndices.y = q >= targetwidth ? (doubleTargetWidth - 1 - q) : q;
-            //loop iteration 2
-            p--;
-            q = abs(p) - rotate(p&(int)0x80000000,(int)1);
-            q = q<doubleTargetWidth?q:q%doubleTargetWidth;
-            xInterpolationIndices.z = q >= targetwidth ? (doubleTargetWidth - 1 - q) : q;
-            //loop iteration 3
-            p--;
-            q = abs(p) - rotate(p&(int)0x80000000,(int)1);
-            q = q<doubleTargetWidth?q:q%doubleTargetWidth;
-            xInterpolationIndices.w = q >= targetwidth ? (doubleTargetWidth - 1 - q) : q;
-
-            p = (coord.y >= 0) ? (((int)trunc(coord.y)) + 2) : (((int)trunc(coord.y)) + 1);
-            //loop iteration 0
-            q = abs(p) - rotate(p&(int)0x80000000,(int)1);
-            q = q<doubleTargetHeight?q:q%doubleTargetHeight;
-            yInterpolationIndices.x = (targetheight <= q) ? (((doubleTargetHeight) - 1 - q) * targetwidth) : (q * targetwidth);//this is the linear absolute index NOT the row
-            //loop iteration 1
-            p--;
-            q = abs(p) - rotate(p&(int)0x80000000,(int)1);
-            q = q<doubleTargetHeight?q:q%doubleTargetHeight;
-            yInterpolationIndices.y = (targetheight <= q) ? (((doubleTargetHeight) - 1 - q) * targetwidth) : (q * targetwidth);//this is the linear absolute index NOT the row
-            //loop iteration 2
-            p--;
-            q = abs(p) - rotate(p&(int)0x80000000,(int)1);
-            q = q<doubleTargetHeight?q:q%doubleTargetHeight;
-            yInterpolationIndices.z = (targetheight <= q) ? (((doubleTargetHeight) - 1 - q) * targetwidth) : (q * targetwidth);//this is the linear absolute index NOT the row
-            //loop iteration 3
-            p--;
-            q = abs(p) - rotate(p&(int)0x80000000,(int)1);
-            q = q<doubleTargetHeight?q:q%doubleTargetHeight;
-            yInterpolationIndices.w = (targetheight <= q) ? (((doubleTargetHeight) - 1 - q) * targetwidth) : (q * targetwidth);//this is the linear absolute index NOT the row
-
-            coord.x -= (coord.x >= fZero) ? (float)((int)trunc(coord.x)) : (float)(((int)trunc(coord.x)) - 1);//get the residual should also be possible with floor
-            coord.y -= (coord.y >= fZero) ? (float)((int)trunc(coord.y)) : (float)(((int)trunc(coord.y)) - 1);//get the residual should also be possible with floor
-
-            //Calculate the weights for interpolation
-            s = fOne - coord.x;
-            xWeights.w = pown(s,3) / fLambda;
-            s = coord.x * coord.x;
-            xWeights.z = fTwo / fThree - fh * s * (fTwo - coord.x);
-            xWeights.x = s * coord.x / fLambda;
-            xWeights.y = fOne - xWeights.x - xWeights.z - xWeights.w;
-            s = fOne - coord.y;
-            yWeights.w = pown(s,3) / fLambda;
-            s = coord.y * coord.y;
-            yWeights.z = fTwo / fThree - fh * s * (fTwo - coord.y);
-            yWeights.x = s * coord.y / fLambda;
-            yWeights.y = fOne - yWeights.x - yWeights.z - yWeights.w;
-
-            //unwrapped interpolation loop (sorry 16 iterations) 4x4 interpolation coefficients
-            //y loop 0
-            //broadcast then add
-            combinedInterpolationIndices = (int4)(yInterpolationIndices.x) + xInterpolationIndices;
-            s = yWeights.x * (xWeights.x * target[combinedInterpolationIndices.x]
-                + xWeights.y * target[combinedInterpolationIndices.y]
-                + xWeights.z * target[combinedInterpolationIndices.z]
-                + xWeights.w * target[combinedInterpolationIndices.w]);
-            //y loop 1
-            combinedInterpolationIndices = (int4)(yInterpolationIndices.y) + xInterpolationIndices;
-            s += yWeights.y * (xWeights.x * target[combinedInterpolationIndices.x]
-                + xWeights.y * target[combinedInterpolationIndices.y]
-                + xWeights.z * target[combinedInterpolationIndices.z]
-                + xWeights.w * target[combinedInterpolationIndices.w]);
-            //y loop 2
-            combinedInterpolationIndices = (int4)(yInterpolationIndices.z) + xInterpolationIndices;
-            s += yWeights.z * (xWeights.x * target[combinedInterpolationIndices.x]
-                + xWeights.y * target[combinedInterpolationIndices.y]
-                + xWeights.z * target[combinedInterpolationIndices.z]
-                + xWeights.w * target[combinedInterpolationIndices.w]);
-            //y loop 3
-            combinedInterpolationIndices = (int4)(yInterpolationIndices.w) + xInterpolationIndices;
-            s += yWeights.w * (xWeights.x * target[combinedInterpolationIndices.x]
-                + xWeights.y * target[combinedInterpolationIndices.y]
-                + xWeights.z * target[combinedInterpolationIndices.z]
-                + xWeights.w * target[combinedInterpolationIndices.w]);
-            //now s is the value
+            xInterpolationIndices = fcalculatexInterpolationIndices(coord.x, doubleTargetWidth, targetwidth);
+            yInterpolationIndices = fcalculateyInterpolationIndices(coord.y, doubleTargetHeight, targetheight, targetwidth);
+            s = finterpolate(coord, xInterpolationIndices, yInterpolationIndices, target);
             diff = source[i] - s;
-            ldiffout[nIndex] += pown(diff,2);
-            lgrad0[nIndex] += diff * xGradient[i];
-            lgrad1[nIndex] += diff * yGradient[i];
-            lhessian00[nIndex] += pown(xGradient[i],2);
-            lhessian01[nIndex] += xGradient[i] * yGradient[i];
-            lhessian11[nIndex] += pown(yGradient[i],2);
+            //ldiffout[nIndex] += pown(diff,2);
+            //lgrad0[nIndex] += diff * xGradient[i];
+            //lgrad1[nIndex] += diff * yGradient[i];
+            __private float3 tmp3 = fma((float3)(diff, xGradient[i], yGradient[i]), (float3)diff, (float3)(ldiffout[nIndex], lgrad0[nIndex], lgrad1[nIndex]));
+            ldiffout[nIndex] = tmp3.x;
+            lgrad0[nIndex] = tmp3.y;
+            lgrad1[nIndex] = tmp3.z;
+            //lhessian00[nIndex] += pown(xGradient[i],2);
+            //lhessian01[nIndex] += xGradient[i] * yGradient[i];
+            //lhessian11[nIndex] += pown(yGradient[i],2);
+            tmp3 = fma((float3)(xGradient[i], xGradient[i], yGradient[i]), (float3)(xGradient[i], yGradient[i], yGradient[i]), (float3)(lhessian00[nIndex], lhessian01[nIndex], lhessian11[nIndex]));
+            lhessian00[nIndex] = tmp3.x;
+            lhessian01[nIndex] = tmp3.y;
+            lhessian11[nIndex] = tmp3.z;
         }
         // ensure the read is not out of bounds
         if(i + blockSize < sourcewidth * sourceheight)
@@ -4748,129 +3618,24 @@ const int doubleTargetHeight)
             if ((Msk.x >= 0) && (Msk.x < targetwidth) && (Msk.y >= 0) && (Msk.y < targetheight))
             {
                 lmask[nIndex] += fOne;
-                //Following is the calculation using mirrored boundaries of the x and y indices of the coefficients used for interpolation
-                //calculate the x coordinates for interpolation (loop unwrapped) for speed
-                p = (coord.x >= 0) ? (((int)trunc(coord.x)) + 2) : (((int)trunc(coord.x)) + 1);
-                //loop iteration 0
-                /*
-                q = (p < 0) ? (-1 - p) : p;
-                is a diverging statement, although it incurs more operations the following equivalent will likely be faster
-                */
-                q = abs(p) - rotate(p&(int)0x80000000,(int)1);
-                if(q >= doubleTargetWidth)
-                {
-                    q -= (doubleTargetWidth) * (q / (doubleTargetWidth)); //Warning: this is an integer division, it doesn't yield q
-                }
-                xInterpolationIndices.x = q >= targetwidth ? (doubleTargetWidth - 1 - q) : q;
-                //loop iteration 1
-                p--;
-                q = abs(p) - rotate(p&(int)0x80000000,(int)1);
-                if(q >= doubleTargetWidth)
-                {
-                    q -= (doubleTargetWidth) * (q / (doubleTargetWidth)); //Warning: this is an integer division, it doesn't yield q
-                }
-                xInterpolationIndices.y = q >= targetwidth ? (doubleTargetWidth - 1 - q) : q;
-                //loop iteration 2
-                p--;
-                q = abs(p) - rotate(p&(int)0x80000000,(int)1);
-                if(q >= doubleTargetWidth)
-                {
-                    q -= (doubleTargetWidth) * (q / (doubleTargetWidth)); //Warning: this is an integer division, it doesn't yield q
-                }
-                xInterpolationIndices.z = q >= targetwidth ? (doubleTargetWidth - 1 - q) : q;
-                //loop iteration 3
-                p--;
-                q = abs(p) - rotate(p&(int)0x80000000,(int)1);
-                if(q >= doubleTargetWidth)
-                {
-                    q -= (doubleTargetWidth) * (q / (doubleTargetWidth)); //Warning: this is an integer division, it doesn't yield q
-                }
-                xInterpolationIndices.w = q >= targetwidth ? (doubleTargetWidth - 1 - q) : q;
-
-                p = (coord.y >= 0) ? (((int)trunc(coord.y)) + 2) : (((int)trunc(coord.y)) + 1);
-                //loop iteration 0
-                q = abs(p) - rotate(p&(int)0x80000000,(int)1);
-                if(q >= doubleTargetHeight)
-                {
-                    q -= (doubleTargetHeight) * (q / (doubleTargetHeight));//WARNING: this is an integer division which may not yield q
-                }
-                yInterpolationIndices.x = (targetheight <= q) ? (((doubleTargetHeight) - 1 - q) * targetwidth) : (q * targetwidth);//this is the linear absolute index NOT the row
-                //loop iteration 1
-                p--;
-                q = abs(p) - rotate(p&(int)0x80000000,(int)1);
-                if(q >= doubleTargetHeight)
-                {
-                    q -= (doubleTargetHeight) * (q / (doubleTargetHeight));//WARNING: this is an integer division which may not yield q
-                }
-                yInterpolationIndices.y = (targetheight <= q) ? (((doubleTargetHeight) - 1 - q) * targetwidth) : (q * targetwidth);//this is the linear absolute index NOT the row
-                //loop iteration 2
-                p--;
-                q = abs(p) - rotate(p&(int)0x80000000,(int)1);
-                if(q >= doubleTargetHeight)
-                {
-                    q -= (doubleTargetHeight) * (q / (doubleTargetHeight));//WARNING: this is an integer division which may not yield q
-                }
-                yInterpolationIndices.z = (targetheight <= q) ? (((doubleTargetHeight) - 1 - q) * targetwidth) : (q * targetwidth);//this is the linear absolute index NOT the row
-                //loop iteration 3
-                p--;
-                q = abs(p) - rotate(p&(int)0x80000000,(int)1);
-                if(q >= doubleTargetHeight)
-                {
-                    q -= (doubleTargetHeight) * (q / (doubleTargetHeight));//WARNING: this is an integer division which may not yield q
-                }
-                yInterpolationIndices.w = (targetheight <= q) ? (((doubleTargetHeight) - 1 - q) * targetwidth) : (q * targetwidth);//this is the linear absolute index NOT the row
-
-                coord.x -= (coord.x >= fZero) ? (float)((int)trunc(coord.x)) : (float)(((int)trunc(coord.x)) - 1);//get the residual should also be possible with floor
-                coord.y -= (coord.y >= fZero) ? (float)((int)trunc(coord.y)) : (float)(((int)trunc(coord.y)) - 1);//get the residual should also be possible with floor
-
-                //Calculate the weights for interpolation
-                s = fOne - coord.x;
-                xWeights.w = pown(s,3) / fLambda;
-                s = coord.x * coord.x;
-                xWeights.z = fTwo / fThree - fh * s * (fTwo - coord.x);
-                xWeights.x = s * coord.x / fLambda;
-                xWeights.y = fOne - xWeights.x - xWeights.z - xWeights.w;
-                s = fOne - coord.y;
-                yWeights.w = pown(s,3) / fLambda;
-                s = coord.y * coord.y;
-                yWeights.z = fTwo / fThree - fh * s * (fTwo - coord.y);
-                yWeights.x = s * coord.y / fLambda;
-                yWeights.y = fOne - yWeights.x - yWeights.z - yWeights.w;
-
-                //unwrapped interpolation loop (sorry 16 iterations) 4x4 interpolation coefficients
-                //y loop 0
-                //broadcast then add
-                combinedInterpolationIndices = (int4)(yInterpolationIndices.x) + xInterpolationIndices;
-                s = yWeights.x * (xWeights.x * target[combinedInterpolationIndices.x]
-                    + xWeights.y * target[combinedInterpolationIndices.y]
-                    + xWeights.z * target[combinedInterpolationIndices.z]
-                    + xWeights.w * target[combinedInterpolationIndices.w]);
-                //y loop 1
-                combinedInterpolationIndices = (int4)(yInterpolationIndices.y) + xInterpolationIndices;
-                s += yWeights.y * (xWeights.x * target[combinedInterpolationIndices.x]
-                    + xWeights.y * target[combinedInterpolationIndices.y]
-                    + xWeights.z * target[combinedInterpolationIndices.z]
-                    + xWeights.w * target[combinedInterpolationIndices.w]);
-                //y loop 2
-                combinedInterpolationIndices = (int4)(yInterpolationIndices.z) + xInterpolationIndices;
-                s += yWeights.z * (xWeights.x * target[combinedInterpolationIndices.x]
-                    + xWeights.y * target[combinedInterpolationIndices.y]
-                    + xWeights.z * target[combinedInterpolationIndices.z]
-                    + xWeights.w * target[combinedInterpolationIndices.w]);
-                //y loop 3
-                combinedInterpolationIndices = (int4)(yInterpolationIndices.w) + xInterpolationIndices;
-                s += yWeights.w * (xWeights.x * target[combinedInterpolationIndices.x]
-                    + xWeights.y * target[combinedInterpolationIndices.y]
-                    + xWeights.z * target[combinedInterpolationIndices.z]
-                    + xWeights.w * target[combinedInterpolationIndices.w]);
-                //now s is the value
+                xInterpolationIndices = fcalculatexInterpolationIndices(coord.x, doubleTargetWidth, targetwidth);
+                yInterpolationIndices = fcalculateyInterpolationIndices(coord.y, doubleTargetHeight, targetheight, targetwidth);
+                s = finterpolate(coord, xInterpolationIndices, yInterpolationIndices, target);
                 diff = source[lIdx] - s;
-                ldiffout[nIndex] += pown(diff,2);
-                lgrad0[nIndex] += diff * xGradient[lIdx];
-                lgrad1[nIndex] += diff * yGradient[lIdx];
-                lhessian00[nIndex] += pown(xGradient[lIdx],2);
-                lhessian01[nIndex] += xGradient[lIdx] * yGradient[lIdx];
-                lhessian11[nIndex] += pown(yGradient[lIdx],2);
+                //ldiffout[nIndex] += pown(diff,2);
+                //lgrad0[nIndex] += diff * xGradient[lIdx];
+                //lgrad1[nIndex] += diff * yGradient[lIdx];
+                __private float3 tmp3 = fma((float3)(diff, xGradient[lIdx], yGradient[lIdx]), (float3)diff, (float3)(ldiffout[nIndex], lgrad0[nIndex], lgrad1[nIndex]));
+                ldiffout[nIndex] = tmp3.x;
+                lgrad0[nIndex] = tmp3.y;
+                lgrad1[nIndex] = tmp3.z;
+                //lhessian00[nIndex] += pown(xGradient[lIdx],2);
+                //lhessian01[nIndex] += xGradient[lIdx] * yGradient[lIdx];
+                //lhessian11[nIndex] += pown(yGradient[lIdx],2);
+                tmp3 = fma((float3)(xGradient[lIdx], xGradient[lIdx], yGradient[lIdx]), (float3)(xGradient[lIdx], yGradient[lIdx], yGradient[lIdx]), (float3)(lhessian00[nIndex], lhessian01[nIndex], lhessian11[nIndex]));
+                lhessian00[nIndex] = tmp3.x;
+                lhessian01[nIndex] = tmp3.y;
+                lhessian11[nIndex] = tmp3.z;
             }
         }
         i += gridSize;

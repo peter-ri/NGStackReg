@@ -68,9 +68,10 @@ import org.apache.commons.lang3.SystemUtils;
  *
  */
 
-@Plugin(type = Command.class, headless = true, menuPath="Plugins>Registration>NGStackReg")
+@Plugin(type = Command.class, headless = true, menuPath="Plugins>Registration>NGStackReg>NGStackReg")
 public class NGStackReg implements Command
 {
+	final static boolean debug = true;
     public static final int MIN_SIZE = 24;
     public enum TransformationType
     {
@@ -222,7 +223,10 @@ public class NGStackReg implements Command
                 logService.error("The alignment mode is not supported");
                 return;
         }
-        
+        long startTime;
+        if(debug) {
+        	startTime = System.nanoTime();
+        }
         //Now populate the information structures to start the job
         img = dataset.getImgPlus();
         if((!(img.getImg() instanceof PlanarImg)) && (!(img.getImg() instanceof CellImg)))
@@ -578,6 +582,10 @@ public class NGStackReg implements Command
             }
             
         }
+        if(debug) {
+        	long duration = System.nanoTime() - startTime;
+        	logService.error("Time: " + duration);
+        }
         statusService.clearStatus();
         dataset.update();
         //Now save the transformations if necessary
@@ -629,10 +637,19 @@ public class NGStackReg implements Command
                 {
                     if(d.getType() == CLDevice.Type.GPU)
                     {
+                    	if(debug) 
+                    	{
+                    		logService.info(d);
+                    		logService.info(d.getPreferredFloatVectorWidth());
+                    	}
                         if(useFloatGPUOnly == false || forceDoublePrecisionRepr == true)
                         {
                             if(d.isDoubleFPAvailable() == true)
                             {
+                            	if(debug)
+                            	{
+                            		logService.info(d.getPreferredDoubleVectorWidth());
+                            	}
                                 return true;
                             }
                         }

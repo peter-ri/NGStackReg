@@ -17,7 +17,7 @@
     <version>0.1.0</version>
 
     <name>NGStackReg</name>
-    <description>NGStackReg provides a parallized and OpenCL accelerated complete rewrite of the StackReg/TurboReg plugins.</description>
+    <description>NGStackReg provides a parallelized and OpenCL accelerated complete rewrite of the StackReg/TurboReg plugins.</description>
     <url>https://www.biozentrum.unibas.ch/research/research-groups/research-groups-a-z/overview/unit/research-group-marek-basler</url>
     <inceptionYear>2016</inceptionYear>
     <organization>

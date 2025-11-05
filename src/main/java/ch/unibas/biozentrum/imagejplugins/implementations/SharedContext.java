@@ -1072,7 +1072,7 @@ public class SharedContext extends AbstractSharedContext {
             }
             break;
         }
-        root.put("Tranformations", transformationArray);
+        root.put("Transformations", transformationArray);
         out.write(root.toString());
     }
 }

@@ -984,7 +984,7 @@ public class SharedContextZT extends AbstractSharedContext {
             }
         }
         root.put("Extents", extents);
-        root.put("AlignmentAxis", ((DefaultLinearAxis)img.axis(axisID + 2)).type().getLabel());
+        root.put("AlignmentAxis", "Z->T");
         switch(dims - 2) {
         case 2:
             // for simplicities sake create a transformation for each image (this may lead to duplications)
@@ -1073,7 +1073,7 @@ public class SharedContextZT extends AbstractSharedContext {
             }
             break;
         }
-        root.put("Tranformations", transformationArray);
+        root.put("Transformations", transformationArray);
         out.write(root.toString());
     }
 }

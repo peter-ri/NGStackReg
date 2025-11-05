@@ -971,9 +971,12 @@ public class HybridPrecisionNGStackReg extends RegistrationAndTransformation
                         .putArg(doubleFullSizedGPUResidentHelperBuffer)
                         .putArg(width)
                         .putArg(height)
+                        .putArg(width * 2)
+                        .putArg(height * 2)
                         .putArg(((RigidBodyTransformation)scat.transformation).offsetx)
                         .putArg(((RigidBodyTransformation)scat.transformation).offsety)
-                        .putArg(((RigidBodyTransformation)scat.transformation).angle);
+                        .putArg(Math.cos(((RigidBodyTransformation)scat.transformation).angle))
+                        .putArg(-Math.sin(((RigidBodyTransformation)scat.transformation).angle));
                 queue.put1DRangeKernel(uniformBSplineTransformProgramKernels[KERNEL_dtransformImageWithBsplineInterpolation],0,globalWorkSize,localWorkSize);
                 uniformBSplineTransformProgramKernels[KERNEL_dtransformImageWithBsplineInterpolation].rewind();
 
@@ -1016,6 +1019,8 @@ public class HybridPrecisionNGStackReg extends RegistrationAndTransformation
                         .putArg(doubleFullSizedGPUResidentHelperBuffer)
                         .putArg(width)
                         .putArg(height)
+                        .putArg(width * 2)
+                        .putArg(height * 2)
                         .putArg(((TranslationTransformation)scat.transformation).offsetx)
                         .putArg(((TranslationTransformation)scat.transformation).offsety);
                 queue.put1DRangeKernel(uniformBSplineTransformProgramKernels[KERNEL_dtransformImageWithBsplineInterpolation],0,globalWorkSize,localWorkSize);
@@ -1557,9 +1562,12 @@ public class HybridPrecisionNGStackReg extends RegistrationAndTransformation
                         .putArg((int)sourcePyramid[pyramidIndex].height)
                         .putArg((int)targetPyramid[pyramidIndex].width)
                         .putArg((int)targetPyramid[pyramidIndex].height)
+                        .putArg((int)targetPyramid[pyramidIndex].width * 2)
+                        .putArg((int)targetPyramid[pyramidIndex].height * 2)
                         .putArg((float)currentoffsetx)
                         .putArg((float)curentoffsety)
-                        .putArg((float)currentangle);
+                        .putArg((float)Math.cos(currentangle))
+                        .putArg((float)-Math.sin(currentangle));
 
                 int localWorkSize = (int)Math.min(uniformBSplineTransformProgramKernels[KERNEL_rigidBodyErrorWithGradAndHess].getWorkGroupSize(device),blocksizeMultiplier*optimalMultiples[KERNEL_rigidBodyErrorWithGradAndHess]);  // Local work size dimensions
                 int globalWorkSize = StaticUtility.roundUp(localWorkSize, optimalMultiples[KERNEL_rigidBodyErrorWithGradAndHess], (int)(sourcePyramid[pyramidIndex].width*sourcePyramid[pyramidIndex].height));
@@ -1680,7 +1688,8 @@ public class HybridPrecisionNGStackReg extends RegistrationAndTransformation
                 uniformBSplineTransformProgramKernels[KERNEL_rigidBodyErrorWithGradAndHessBrent]
                         .putArg((float)currentoffsetx)
                         .putArg((float)curentoffsety)
-                        .putArg((float)currentangle);
+                        .putArg((float)Math.cos(currentangle))
+                        .putArg((float)-Math.sin(currentangle));
                
                 uniformBSplineTransformProgramKernels[KERNEL_rigidBodyErrorWithGradAndHessBrent]
                         .putArg((int)targetPyramid[pyramidIndex].width*2)
@@ -1800,6 +1809,8 @@ public class HybridPrecisionNGStackReg extends RegistrationAndTransformation
                         .putArg((int)sourcePyramid[pyramidIndex].height)
                         .putArg((int)targetPyramid[pyramidIndex].width)
                         .putArg((int)targetPyramid[pyramidIndex].height)
+                        .putArg((int)targetPyramid[pyramidIndex].width * 2)
+                        .putArg((int)targetPyramid[pyramidIndex].height * 2)
                         .putArg((float)currentoffsetx)
                         .putArg((float)curentoffsety);
 
@@ -1996,9 +2007,12 @@ public class HybridPrecisionNGStackReg extends RegistrationAndTransformation
                             .putArg((int)sourceDoubleSlice.height)
                             .putArg((int)targetDoubleSlice.width)
                             .putArg((int)targetDoubleSlice.height)
+                            .putArg((int)targetDoubleSlice.width * 2)
+                            .putArg((int)targetDoubleSlice.height * 2)
                             .putArg(currentoffsetx)
                             .putArg(currentoffsety)
-                            .putArg(currentangle);
+                            .putArg(Math.cos(currentangle))
+                            .putArg(-Math.sin(currentangle));
 
                     int localWorkSize = (int)Math.min(uniformBSplineTransformProgramKernels[KERNEL_drigidBodyErrorWithGradAndHess].getWorkGroupSize(device),blocksizeMultiplier*optimalMultiples[KERNEL_drigidBodyErrorWithGradAndHess]);  // Local work size dimensions
                     int globalWorkSize = StaticUtility.roundUp(localWorkSize, optimalMultiples[KERNEL_drigidBodyErrorWithGradAndHess], (int)(sourceDoubleSlice.width*sourceDoubleSlice.height));
@@ -2120,7 +2134,8 @@ public class HybridPrecisionNGStackReg extends RegistrationAndTransformation
                     uniformBSplineTransformProgramKernels[KERNEL_drigidBodyErrorWithGradAndHessBrent]
                             .putArg(currentoffsetx)
                             .putArg(currentoffsety)
-                            .putArg(currentangle);
+                            .putArg(Math.cos(currentangle))
+                            .putArg(-Math.sin(currentangle));
 
                     uniformBSplineTransformProgramKernels[KERNEL_drigidBodyErrorWithGradAndHessBrent]
                             .putArg((int)targetDoubleSlice.width*2)
@@ -2363,6 +2378,8 @@ public class HybridPrecisionNGStackReg extends RegistrationAndTransformation
                             .putArg((int)sourceDoubleSlice.height)
                             .putArg((int)targetDoubleSlice.width)
                             .putArg((int)targetDoubleSlice.height)
+                            .putArg((int)targetDoubleSlice.width * 2)
+                            .putArg((int)targetDoubleSlice.height * 2)
                             .putArg(currentoffsetx)
                             .putArg(currentoffsety);
 
@@ -2649,9 +2666,12 @@ public class HybridPrecisionNGStackReg extends RegistrationAndTransformation
                         .putArg((int)sourceDoubleSlice.height)
                         .putArg((int)targetDoubleSlice.width)
                         .putArg((int)targetDoubleSlice.height)
+                        .putArg((int)targetDoubleSlice.width * 2)
+                        .putArg((int)targetDoubleSlice.height * 2)
                         .putArg(currentoffsetx)
                         .putArg(currentoffsety)
-                        .putArg(currentangle);          
+                        .putArg(Math.cos(currentangle))
+                        .putArg(-Math.sin(currentangle));          
                 int localWorkSize = (int)Math.min(uniformBSplineTransformProgramKernels[KERNEL_drigidBodyError].getWorkGroupSize(device),optimalMultiples[KERNEL_drigidBodyError]*blocksizeMultiplier);  // Local work size dimensions
                 int globalWorkSize = StaticUtility.roundUp(localWorkSize, optimalMultiples[KERNEL_drigidBodyError], (int)(sourceDoubleSlice.width*sourceDoubleSlice.height));
                 queue.put1DRangeKernel(uniformBSplineTransformProgramKernels[KERNEL_drigidBodyError],0,globalWorkSize,localWorkSize);
@@ -2848,6 +2868,8 @@ public class HybridPrecisionNGStackReg extends RegistrationAndTransformation
                         .putArg((int)sourceDoubleSlice.height)
                         .putArg((int)targetDoubleSlice.width)
                         .putArg((int)targetDoubleSlice.height)
+                        .putArg((int)targetDoubleSlice.width * 2)
+                        .putArg((int)targetDoubleSlice.height * 2)
                         .putArg(currentoffsetx)
                         .putArg(currentoffsety);          
                 int localWorkSize = (int)Math.min(uniformBSplineTransformProgramKernels[KERNEL_dtranslationError].getWorkGroupSize(device),optimalMultiples[KERNEL_dtranslationError]*blocksizeMultiplier);  // Local work size dimensions
@@ -3057,9 +3079,12 @@ public class HybridPrecisionNGStackReg extends RegistrationAndTransformation
                     .putArg((int)sourcePyramid[pyramidIndex].height)
                     .putArg((int)targetPyramid[pyramidIndex].width)
                     .putArg((int)targetPyramid[pyramidIndex].height)
+                    .putArg((int)targetPyramid[pyramidIndex].width * 2)
+                    .putArg((int)targetPyramid[pyramidIndex].height * 2)
                     .putArg((float)currentoffsetx)
                     .putArg((float)curentoffsety)
-                    .putArg((float)currentangle);
+                    .putArg((float)Math.cos(currentangle))
+                    .putArg((float)-Math.sin(currentangle));
             
             int localWorkSize = (int)Math.min(uniformBSplineTransformProgramKernels[KERNEL_rigidBodyError].getWorkGroupSize(device),optimalMultiples[KERNEL_rigidBodyError]*blocksizeMultiplier);  // Local work size dimensions
             int globalWorkSize = StaticUtility.roundUp(localWorkSize, optimalMultiples[KERNEL_rigidBodyError], (int)(sourcePyramid[pyramidIndex].width*sourcePyramid[pyramidIndex].height));
@@ -3160,6 +3185,8 @@ public class HybridPrecisionNGStackReg extends RegistrationAndTransformation
                     .putArg((int)sourcePyramid[pyramidIndex].height)
                     .putArg((int)targetPyramid[pyramidIndex].width)
                     .putArg((int)targetPyramid[pyramidIndex].height)
+                    .putArg((int)targetPyramid[pyramidIndex].width * 2)
+                    .putArg((int)targetPyramid[pyramidIndex].height * 2)
                     .putArg((float)currentoffsetx)
                     .putArg((float)curentoffsety);
             
