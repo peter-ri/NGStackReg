@@ -153,24 +153,25 @@ public class NGStackReg implements Command
 	        switch(alignmentMode)
 	        {
 	            case "GPU + CPU (hybrid prec.)":
-	            	alignmentMode = "CPU";
+	            	alignmentMode = "CPU (hybrid prec.)";
 	                break;
 	            case "GPU (hybrid prec.)":
-	            	alignmentMode = "CPU";
+	            	alignmentMode = "CPU (hybrid prec.)";
 	                break;
 	            case "CPU (hybrid prec.)":
 	                break;
 	            case "CPU (double prec.)":
 	                break;
 	            case "GPU (single prec.)":
-	            	alignmentMode = "CPU";
+	            	//alignmentMode = "CPU"; // this would break in the next switch statement
+	            	alignmentMode = "CPU (hybrid prec.)";
 	                break;
 	            case "GPU + CPU (double prec.)":
-	            	alignmentMode = "CPU";
+	            	alignmentMode = "CPU (double prec.)";
 	            	forceDoublePrecisionRepr = true;
 	            	break;
 	            case "GPU (double prec.)":
-	            	alignmentMode = "CPU";
+	            	alignmentMode = "CPU (double prec.)";
 	            	forceDoublePrecisionRepr = true;
 	            	break;
 	            default:
