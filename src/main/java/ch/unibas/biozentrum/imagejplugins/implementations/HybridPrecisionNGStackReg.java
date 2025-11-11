@@ -47,10 +47,13 @@ import java.util.List;
 import java.util.concurrent.BrokenBarrierException;
 import net.imglib2.type.numeric.integer.ByteType;
 import net.imglib2.type.numeric.integer.IntType;
+import net.imglib2.type.numeric.integer.LongType;
 import net.imglib2.type.numeric.integer.ShortType;
 import net.imglib2.type.numeric.integer.UnsignedByteType;
 import net.imglib2.type.numeric.integer.UnsignedIntType;
+import net.imglib2.type.numeric.integer.UnsignedLongType;
 import net.imglib2.type.numeric.integer.UnsignedShortType;
+import net.imglib2.type.numeric.real.DoubleType;
 import net.imglib2.type.numeric.real.FloatType;
 
 /**
@@ -61,7 +64,7 @@ import net.imglib2.type.numeric.real.FloatType;
 public class HybridPrecisionNGStackReg extends RegistrationAndTransformation
 {
     // Just constants for accessing the compiled kernels in the program (compiled separately for each device)
-    private static final int NR_OF_OPENCL_KERNELS = 34;
+    private static final int NR_OF_OPENCL_KERNELS = 35;
     private static final int KERNEL_CubicBSplinePrefilter2DXlp = 0;
     private static final int KERNEL_CubicBSplinePrefilter2DYlp = 1;
     private static final int KERNEL_BasicToCardinal2DXhp = 2;
@@ -99,6 +102,7 @@ public class HybridPrecisionNGStackReg extends RegistrationAndTransformation
     private static final int KERNEL_dparallelGroupedSumReduction = 31;
     private static final int KERNEL_drigidBodyErrorWithGradAndHessBrent = 32;
     private static final int KERNEL_dtransformImageWithBsplineInterpolation = 33;
+    private static final int KERNEL_dresizingTransformImageWithBsplineInterpolation = 34;
     
     
     
@@ -457,7 +461,6 @@ public class HybridPrecisionNGStackReg extends RegistrationAndTransformation
 
             if(!usesFloat)
             {
-                // this means that the double GPU implementation is not available so this will stay CPU side
                 if((sharedContext.img.firstElement() instanceof ByteType)||(sharedContext.img.firstElement() instanceof UnsignedByteType))
                 {
                     conversionEntryBuffer = context.createByteBuffer((int) (sharedContext.img.dimension(0)*sharedContext.img.dimension(1)), GPURESIDENTRW);
@@ -483,6 +486,7 @@ public class HybridPrecisionNGStackReg extends RegistrationAndTransformation
             }
             else
             {
+                // this means that the double GPU implementation is not available so this will stay CPU side
                 if((sharedContext.img.firstElement() instanceof ByteType))
                 {
                     converter = new ByteImageConverter();
@@ -556,6 +560,7 @@ public class HybridPrecisionNGStackReg extends RegistrationAndTransformation
                     uniformBSplineTransformProgramKernels[KERNEL_dtranslationSumInLocalMemoryCombined] = uniformBSplineTransformProgram.createCLKernel("dtranslationSumInLocalMemoryCombined");
                     uniformBSplineTransformProgramKernels[KERNEL_dtranslationErrorWithGradAndHessBrent] = uniformBSplineTransformProgram.createCLKernel("dtranslationErrorWithGradAndHessBrent");
                     uniformBSplineTransformProgramKernels[KERNEL_dtranslationtransformImageWithBsplineInterpolation] = uniformBSplineTransformProgram.createCLKernel("dtranslationtransformImageWithBsplineInterpolation");
+                    uniformBSplineTransformProgramKernels[KERNEL_dresizingTransformImageWithBsplineInterpolation] = uniformBSplineTransformProgram.createCLKernel("dresizingTranslationTransformImageWithBsplineInterpolation");
                     break;
                 case RIGIDBODY:
                     uniformBSplineTransformProgramKernels[KERNEL_drigidBodyError] = uniformBSplineTransformProgram.createCLKernel("drigidBodyError");
@@ -563,6 +568,7 @@ public class HybridPrecisionNGStackReg extends RegistrationAndTransformation
                     uniformBSplineTransformProgramKernels[KERNEL_dsumInLocalMemoryCombined] = uniformBSplineTransformProgram.createCLKernel("dsumInLocalMemoryCombined");
                     uniformBSplineTransformProgramKernels[KERNEL_drigidBodyErrorWithGradAndHessBrent] = uniformBSplineTransformProgram.createCLKernel("drigidBodyErrorWithGradAndHessBrent");
                     uniformBSplineTransformProgramKernels[KERNEL_dtransformImageWithBsplineInterpolation] = uniformBSplineTransformProgram.createCLKernel("dtransformImageWithBsplineInterpolation");
+                    uniformBSplineTransformProgramKernels[KERNEL_dresizingTransformImageWithBsplineInterpolation] = uniformBSplineTransformProgram.createCLKernel("dresizingTransformImageWithBsplineInterpolation");
                     break;
                 case SCALEDROTATION:
                     break;
@@ -580,6 +586,7 @@ public class HybridPrecisionNGStackReg extends RegistrationAndTransformation
                 optimalMultiples[KERNEL_dantiSymmetricFirMirrorOffBounds1DY] = uniformBSplineTransformProgramKernels[KERNEL_dantiSymmetricFirMirrorOffBounds1DY].getPreferredWorkGroupSizeMultiple(device);
                 optimalMultiples[KERNEL_dsumInLocalMemory] = uniformBSplineTransformProgramKernels[KERNEL_dsumInLocalMemory].getPreferredWorkGroupSizeMultiple(device);
                 optimalMultiples[KERNEL_dparallelGroupedSumReduction] = uniformBSplineTransformProgramKernels[KERNEL_dparallelGroupedSumReduction].getPreferredWorkGroupSizeMultiple(device);
+                optimalMultiples[KERNEL_dresizingTransformImageWithBsplineInterpolation] = uniformBSplineTransformProgramKernels[KERNEL_dresizingTransformImageWithBsplineInterpolation].getPreferredWorkGroupSizeMultiple(device);
 
                 switch(sharedContext.transformationType) {
                 case TRANSLATION:
@@ -797,6 +804,162 @@ public class HybridPrecisionNGStackReg extends RegistrationAndTransformation
             }
         }
         
+        private void resizeAllocatedBuffers()
+        {
+        	// First release all the memory that isn't needed anymore
+        	switch(sharedContext.transformationType) {
+            case TRANSLATION:
+            	maskBuffer.release();
+                gradient0.release();;
+                gradient1.release();
+                hessian00.release();
+                hessian01.release();
+                hessian11.release();
+                for(int l = 0;l < 2;l++)
+                {
+                    parallelSumReductionBuffers[l].release();
+                }
+                break;
+            case RIGIDBODY:
+                maskBuffer.release();
+                gradient0.release();
+                gradient1.release();
+                gradient2.release();
+                hessian00.release();
+                hessian01.release();
+                hessian02.release();
+                hessian11.release();
+                hessian12.release();
+                hessian22.release();
+                for(int l = 0;l < 2;l++)
+                {
+                    parallelSumReductionBuffers[l].release();
+                }
+                break;
+            case SCALEDROTATION:
+                break;
+            case AFFINE:
+                break;
+            }
+        	for(int j = 0;j < pyramidDepth; j++)
+            {
+                sourcePyramid[j].Image.release();
+                sourcePyramid[j].xGradient.release();
+                sourcePyramid[j].yGradient.release();
+                targetPyramid[j].Coefficient.release();
+            }
+            if(!usesFloat)
+            {
+                sourceDoubleSlice.Image.release();
+                sourceDoubleSlice.xGradient.release();
+                sourceDoubleSlice.yGradient.release();
+                targetDoubleSlice.Coefficient.release();
+                // these are the conversion intermediate buffers
+                // no need to resize this buffer doubleEntryImageBuffer = context.createDoubleBuffer((int) (width*height), GPURESIDENTRW);
+                doubleFullSizedGPUResidentHelperBuffer = context.createDoubleBuffer((int) (sharedContext.resizedTargetImage.dimension(0)*sharedContext.resizedTargetImage.dimension(1)), GPURESIDENTRW);
+            }
+            else
+            {
+                // Has to be done by the CPU so allocate the necessary buffers
+                sourceImageDoubleSlice = null;
+                sourcexGradientDoubleSlice = null;
+                sourceyGradientDoubleSlice = null;
+                //targetCoefficientDoubleSlice = new double[width*height]; no need to change the size
+                CPUentryImageBuffer = new double[(int) (sharedContext.resizedTargetImage.dimension(0)*sharedContext.resizedTargetImage.dimension(1))];
+            }
+            
+
+            if(!usesFloat)
+            {
+            	if((sharedContext.resizedTargetImage.dimension(0)*sharedContext.resizedTargetImage.dimension(1)) > (sharedContext.img.dimension(0)*sharedContext.img.dimension(1)))
+            	{
+            		conversionEntryBuffer.release();
+            		
+	                if((sharedContext.resizedTargetImage.firstElement() instanceof ByteType)||(sharedContext.resizedTargetImage.firstElement() instanceof UnsignedByteType))
+	                {
+	                    conversionEntryBuffer = context.createByteBuffer((int) (sharedContext.resizedTargetImage.dimension(0)*sharedContext.resizedTargetImage.dimension(1)), GPURESIDENTRW);
+	                }
+	                else if((sharedContext.resizedTargetImage.firstElement() instanceof ShortType)||(sharedContext.resizedTargetImage.firstElement() instanceof UnsignedShortType))
+	                {
+	                    conversionEntryBuffer = context.createShortBuffer((int) (sharedContext.resizedTargetImage.dimension(0)*sharedContext.resizedTargetImage.dimension(1)), GPURESIDENTRW);
+	                }
+	                else if((sharedContext.resizedTargetImage.firstElement() instanceof IntType)||(sharedContext.resizedTargetImage.firstElement() instanceof UnsignedIntType))
+	                {
+	                    conversionEntryBuffer = context.createIntBuffer((int) (sharedContext.resizedTargetImage.dimension(0)*sharedContext.resizedTargetImage.dimension(1)), GPURESIDENTRW);
+	                }
+	                else if((sharedContext.resizedTargetImage.firstElement() instanceof FloatType))
+	                {
+	                    conversionEntryBuffer = context.createFloatBuffer((int) (sharedContext.resizedTargetImage.dimension(0)*sharedContext.resizedTargetImage.dimension(1)), GPURESIDENTRW);
+	                }
+	                else
+	                {
+	                    // long and double are not allowed for this method
+	                    throw new RuntimeException("Illegal image type");
+	                }
+            	}
+            }
+
+            entryImageBuffer.release();
+            fullSizedGPUResidentHelperBuffer.release();
+            secondaryGPUResidentHelperBuffer.release();
+            
+            //TODO: shorten
+            if(!usesFloat)
+            {
+                // only useful if the GPU is capable of accepting double
+                // Ugly code but I didn't figure out how to do it more elegantly
+                if(sharedContext.img.firstElement() instanceof ByteType)
+                {
+                    conversionProgramKernel.rewind();
+                    conversionProgramKernel.putArg(conversionEntryBuffer).putArg(doubleEntryImageBuffer).putArg((int)(sharedContext.img.dimension(0)*sharedContext.img.dimension(1)));
+                    deConversionProgramKernel.rewind();
+                    deConversionProgramKernel.putArg(doubleFullSizedGPUResidentHelperBuffer).putArg(conversionEntryBuffer).putArg((int)(sharedContext.resizedTargetImage.dimension(0)*sharedContext.resizedTargetImage.dimension(1)));
+                }
+                if(sharedContext.img.firstElement() instanceof UnsignedByteType)
+                {
+                    conversionProgramKernel.rewind();
+                    conversionProgramKernel.putArg(conversionEntryBuffer).putArg(doubleEntryImageBuffer).putArg((int)(sharedContext.img.dimension(0)*sharedContext.img.dimension(1)));
+                    deConversionProgramKernel.rewind();
+                    deConversionProgramKernel.putArg(doubleFullSizedGPUResidentHelperBuffer).putArg(conversionEntryBuffer).putArg((int)(sharedContext.resizedTargetImage.dimension(0)*sharedContext.resizedTargetImage.dimension(1)));
+                }
+                else if((sharedContext.img.firstElement() instanceof ShortType))
+                {
+                    conversionProgramKernel.rewind();
+                    conversionProgramKernel.putArg(conversionEntryBuffer).putArg(doubleEntryImageBuffer).putArg((int)(sharedContext.img.dimension(0)*sharedContext.img.dimension(1)));
+                    deConversionProgramKernel.rewind();
+                    deConversionProgramKernel.putArg(doubleFullSizedGPUResidentHelperBuffer).putArg(conversionEntryBuffer).putArg((int)(sharedContext.resizedTargetImage.dimension(0)*sharedContext.resizedTargetImage.dimension(1)));
+                }
+                else if((sharedContext.img.firstElement() instanceof UnsignedShortType))
+                {
+                    conversionProgramKernel.rewind();
+                    conversionProgramKernel.putArg(conversionEntryBuffer).putArg(doubleEntryImageBuffer).putArg((int)(sharedContext.img.dimension(0)*sharedContext.img.dimension(1)));
+                    deConversionProgramKernel.rewind();
+                    deConversionProgramKernel.putArg(doubleFullSizedGPUResidentHelperBuffer).putArg(conversionEntryBuffer).putArg((int)(sharedContext.resizedTargetImage.dimension(0)*sharedContext.resizedTargetImage.dimension(1)));
+                }
+                else if((sharedContext.img.firstElement() instanceof IntType))
+                {
+                    conversionProgramKernel.rewind();
+                    conversionProgramKernel.putArg(conversionEntryBuffer).putArg(doubleEntryImageBuffer).putArg((int)(sharedContext.img.dimension(0)*sharedContext.img.dimension(1)));
+                    deConversionProgramKernel.rewind();
+                    deConversionProgramKernel.putArg(doubleFullSizedGPUResidentHelperBuffer).putArg(conversionEntryBuffer).putArg((int)(sharedContext.resizedTargetImage.dimension(0)*sharedContext.resizedTargetImage.dimension(1)));
+                }
+                else if((sharedContext.img.firstElement() instanceof UnsignedIntType))
+                {
+                    conversionProgramKernel.rewind();
+                    conversionProgramKernel.putArg(conversionEntryBuffer).putArg(doubleEntryImageBuffer).putArg((int)(sharedContext.img.dimension(0)*sharedContext.img.dimension(1)));
+                    deConversionProgramKernel.rewind();
+                    deConversionProgramKernel.putArg(doubleFullSizedGPUResidentHelperBuffer).putArg(conversionEntryBuffer).putArg((int)(sharedContext.resizedTargetImage.dimension(0)*sharedContext.resizedTargetImage.dimension(1)));
+                }
+                else if((sharedContext.img.firstElement() instanceof FloatType))
+                {
+                    conversionProgramKernel.rewind();
+                    conversionProgramKernel.putArg(conversionEntryBuffer).putArg(doubleEntryImageBuffer).putArg((int)(sharedContext.img.dimension(0)*sharedContext.img.dimension(1)));
+                    deConversionProgramKernel.rewind();
+                    deConversionProgramKernel.putArg(doubleFullSizedGPUResidentHelperBuffer).putArg(conversionEntryBuffer).putArg((int)(sharedContext.resizedTargetImage.dimension(0)*sharedContext.resizedTargetImage.dimension(1)));
+                }
+            }
+        }
+        
         @Override
         public void run() {
             while(!sharedContext.getNextAlignmentTarget(scat))
@@ -887,7 +1050,20 @@ public class HybridPrecisionNGStackReg extends RegistrationAndTransformation
                     throw new RuntimeException("Worker synchronization barrier is broken.");
                 }
             }
-            
+            // The following code requires the current position to have been reset to the 0vector
+            if(sharedContext.getResizeAfterRegistration())
+            {
+            	/*
+            	 * This means the target buffer has to be resized and we can get rid of the remaining buffers
+            	 * it also depends on whether we have double GPU support or not
+            	 * entryImageBuffer <- source
+            	 * fullSizedGPUResidentHelperBuffer <- target
+            	 * then the deconversion
+            	 * fullSizedGPUResidentHelperBuffer <- source
+            	 * conversionEntryBuffer <- target
+            	 */
+            	resizeAllocatedBuffers();
+            }
             // The following code requires the current position to have been reset to 0vector 
             while(!sharedContext.getTransformationForCurrentPosition(scat))
             {
@@ -958,28 +1134,56 @@ public class HybridPrecisionNGStackReg extends RegistrationAndTransformation
                 int localWorkSize = (int)uniformBSplineTransformProgramKernels[KERNEL_dCubicBSplinePrefilter2Dpremulhp].getWorkGroupSize(device);  // Local work size dimensions
                 int globalWorkSize = StaticUtility.roundUp(localWorkSize, optimalMultiples[KERNEL_dCubicBSplinePrefilter2Dpremulhp], width*height);   // rounded up to the nearest multiple of the localWorkSize
                 convertToBSplineCoeff(width, height, localWorkSize, globalWorkSize);
-
-                /*
-                Now that the B-spline coefficients are in the doubleEntryImageBuffer,
-                the image needs to be transformed, rescaled back and then 
-                converted back to the original image format.
-                */
-                localWorkSize = (int)uniformBSplineTransformProgramKernels[KERNEL_dtransformImageWithBsplineInterpolation].getWorkGroupSize(device);  // Local work size dimensions
-                globalWorkSize = StaticUtility.roundUp(localWorkSize, optimalMultiples[KERNEL_dtransformImageWithBsplineInterpolation], width*height);   // rounded up to the nearest multiple of the localWorkSize
-                uniformBSplineTransformProgramKernels[KERNEL_dtransformImageWithBsplineInterpolation]
-                        .putArg(doubleEntryImageBuffer)
-                        .putArg(doubleFullSizedGPUResidentHelperBuffer)
-                        .putArg(width)
-                        .putArg(height)
-                        .putArg(width * 2)
-                        .putArg(height * 2)
-                        .putArg(((RigidBodyTransformation)scat.transformation).offsetx)
-                        .putArg(((RigidBodyTransformation)scat.transformation).offsety)
-                        .putArg(Math.cos(((RigidBodyTransformation)scat.transformation).angle))
-                        .putArg(-Math.sin(((RigidBodyTransformation)scat.transformation).angle));
-                queue.put1DRangeKernel(uniformBSplineTransformProgramKernels[KERNEL_dtransformImageWithBsplineInterpolation],0,globalWorkSize,localWorkSize);
-                uniformBSplineTransformProgramKernels[KERNEL_dtransformImageWithBsplineInterpolation].rewind();
-
+                if(sharedContext.getResizeAfterRegistration())
+            	{
+                	int targetwidth = (int)sharedContext.resizedTargetImage.dimension(0);
+                	int targetheight = (int)sharedContext.resizedTargetImage.dimension(1);
+	                /*
+	                Now that the B-spline coefficients are in the doubleEntryImageBuffer,
+	                the image needs to be transformed, rescaled back and then 
+	                converted back to the original image format.
+	                */
+	                localWorkSize = (int)uniformBSplineTransformProgramKernels[KERNEL_dresizingTransformImageWithBsplineInterpolation].getWorkGroupSize(device);  // Local work size dimensions
+	                globalWorkSize = StaticUtility.roundUp(localWorkSize, optimalMultiples[KERNEL_dresizingTransformImageWithBsplineInterpolation], targetwidth*targetheight);   // rounded up to the nearest multiple of the localWorkSize
+	                uniformBSplineTransformProgramKernels[KERNEL_dresizingTransformImageWithBsplineInterpolation]
+	                        .putArg(doubleEntryImageBuffer)
+	                        .putArg(doubleFullSizedGPUResidentHelperBuffer)
+	                        .putArg(width)
+	                        .putArg(height)
+	                        .putArg(width * 2)
+	                        .putArg(height * 2)
+	                        .putArg(targetwidth)
+                            .putArg(targetheight)
+	                        .putArg(((RigidBodyTransformation)scat.transformation).offsetx)
+	                        .putArg(((RigidBodyTransformation)scat.transformation).offsety)
+	                        .putArg(Math.cos(((RigidBodyTransformation)scat.transformation).angle))
+	                        .putArg(-Math.sin(((RigidBodyTransformation)scat.transformation).angle));
+	                queue.put1DRangeKernel(uniformBSplineTransformProgramKernels[KERNEL_dresizingTransformImageWithBsplineInterpolation],0,globalWorkSize,localWorkSize);
+	                uniformBSplineTransformProgramKernels[KERNEL_dresizingTransformImageWithBsplineInterpolation].rewind();
+            	}
+                else
+                {
+	                /*
+	                Now that the B-spline coefficients are in the doubleEntryImageBuffer,
+	                the image needs to be transformed, rescaled back and then 
+	                converted back to the original image format.
+	                */
+	                localWorkSize = (int)uniformBSplineTransformProgramKernels[KERNEL_dtransformImageWithBsplineInterpolation].getWorkGroupSize(device);  // Local work size dimensions
+	                globalWorkSize = StaticUtility.roundUp(localWorkSize, optimalMultiples[KERNEL_dtransformImageWithBsplineInterpolation], width*height);   // rounded up to the nearest multiple of the localWorkSize
+	                uniformBSplineTransformProgramKernels[KERNEL_dtransformImageWithBsplineInterpolation]
+	                        .putArg(doubleEntryImageBuffer)
+	                        .putArg(doubleFullSizedGPUResidentHelperBuffer)
+	                        .putArg(width)
+	                        .putArg(height)
+	                        .putArg(width * 2)
+	                        .putArg(height * 2)
+	                        .putArg(((RigidBodyTransformation)scat.transformation).offsetx)
+	                        .putArg(((RigidBodyTransformation)scat.transformation).offsety)
+	                        .putArg(Math.cos(((RigidBodyTransformation)scat.transformation).angle))
+	                        .putArg(-Math.sin(((RigidBodyTransformation)scat.transformation).angle));
+	                queue.put1DRangeKernel(uniformBSplineTransformProgramKernels[KERNEL_dtransformImageWithBsplineInterpolation],0,globalWorkSize,localWorkSize);
+	                uniformBSplineTransformProgramKernels[KERNEL_dtransformImageWithBsplineInterpolation].rewind();
+                }
                 // Transformed and converted back to an image at the same time
                 // now convert it back to the original format
                 fetchTransformedImage();
@@ -989,9 +1193,18 @@ public class HybridPrecisionNGStackReg extends RegistrationAndTransformation
                 // CPU
             	convertToBSplineCoeffCPU(width, height);
 
-                transformImageWithBsplineInterpolation(width,height, ((RigidBodyTransformation)scat.transformation).offsetx, ((RigidBodyTransformation)scat.transformation).offsety, ((RigidBodyTransformation)scat.transformation).angle);
-
-                converter.deConvertTo(CPUentryImageBuffer,scat.targetArray);
+                if(!sharedContext.getResizeAfterRegistration())
+            	{
+                	transformImageWithBsplineInterpolation(width, height, ((RigidBodyTransformation)scat.transformation).offsetx, ((RigidBodyTransformation)scat.transformation).offsety, ((RigidBodyTransformation)scat.transformation).angle);
+            		converter.deConvertTo(CPUentryImageBuffer,scat.targetArray);
+            	}
+            	else
+            	{
+            		int targetwidth = (int)sharedContext.resizedTargetImage.dimension(0);
+                	int targetheight = (int)sharedContext.resizedTargetImage.dimension(1);
+                	resizingTransformImageWithBsplineInterpolation(width, height, targetwidth, targetheight, ((RigidBodyTransformation)scat.transformation).offsetx, ((RigidBodyTransformation)scat.transformation).offsety, ((RigidBodyTransformation)scat.transformation).angle);
+            		converter.deConvertTo(CPUentryImageBuffer,scat.sourceArray);
+            	}
             }
         }
         
@@ -1002,31 +1215,57 @@ public class HybridPrecisionNGStackReg extends RegistrationAndTransformation
             // This has to be done from the double buffers
             if(!usesFloat)
             {
-                // GPU
-                int localWorkSize = (int)uniformBSplineTransformProgramKernels[KERNEL_dCubicBSplinePrefilter2Dpremulhp].getWorkGroupSize(device);  // Local work size dimensions
+            	// GPU
+            	int localWorkSize = (int)uniformBSplineTransformProgramKernels[KERNEL_dCubicBSplinePrefilter2Dpremulhp].getWorkGroupSize(device);  // Local work size dimensions
                 int globalWorkSize = StaticUtility.roundUp(localWorkSize, optimalMultiples[KERNEL_dCubicBSplinePrefilter2Dpremulhp], width*height);   // rounded up to the nearest multiple of the localWorkSize
                 convertToBSplineCoeff(width, height, localWorkSize, globalWorkSize);
-
-                /*
-                Now that the B-spline coefficients are in the doubleEntryImageBuffer,
-                the image needs to be transformed, rescaled back and then 
-                converted back to the original image format.
-                */
-                localWorkSize = (int)uniformBSplineTransformProgramKernels[KERNEL_dtranslationtransformImageWithBsplineInterpolation].getWorkGroupSize(device);  // Local work size dimensions
-                globalWorkSize = StaticUtility.roundUp(localWorkSize, optimalMultiples[KERNEL_dtranslationtransformImageWithBsplineInterpolation], width*height);   // rounded up to the nearest multiple of the localWorkSize
-                uniformBSplineTransformProgramKernels[KERNEL_dtranslationtransformImageWithBsplineInterpolation]
-                        .putArg(doubleEntryImageBuffer)
-                        .putArg(doubleFullSizedGPUResidentHelperBuffer)
-                        .putArg(width)
-                        .putArg(height)
-                        .putArg(width * 2)
-                        .putArg(height * 2)
-                        .putArg(((TranslationTransformation)scat.transformation).offsetx)
-                        .putArg(((TranslationTransformation)scat.transformation).offsety);
-                queue.put1DRangeKernel(uniformBSplineTransformProgramKernels[KERNEL_dtransformImageWithBsplineInterpolation],0,globalWorkSize,localWorkSize);
-                uniformBSplineTransformProgramKernels[KERNEL_dtransformImageWithBsplineInterpolation].rewind();
-
-                // Transformed and converted back to an image at the same time
+            	if(sharedContext.getResizeAfterRegistration())
+            	{
+            		int targetwidth = (int)sharedContext.resizedTargetImage.dimension(0);
+                	int targetheight = (int)sharedContext.resizedTargetImage.dimension(1);
+	                /*
+	                Now that the B-spline coefficients are in the doubleEntryImageBuffer,
+	                the image needs to be transformed, rescaled back and then 
+	                converted back to the original image format.
+	                */
+	                localWorkSize = (int)uniformBSplineTransformProgramKernels[KERNEL_dresizingTransformImageWithBsplineInterpolation].getWorkGroupSize(device);  // Local work size dimensions
+	                globalWorkSize = StaticUtility.roundUp(localWorkSize, optimalMultiples[KERNEL_dresizingTransformImageWithBsplineInterpolation], targetwidth*targetheight);   // rounded up to the nearest multiple of the localWorkSize
+	                uniformBSplineTransformProgramKernels[KERNEL_dresizingTransformImageWithBsplineInterpolation]
+	                        .putArg(doubleEntryImageBuffer)
+	                        .putArg(doubleFullSizedGPUResidentHelperBuffer)
+	                        .putArg(width)
+	                        .putArg(height)
+	                        .putArg(width * 2)
+	                        .putArg(height * 2)
+                            .putArg(targetwidth)
+                            .putArg(targetheight)
+	                        .putArg(((TranslationTransformation)scat.transformation).offsetx)
+	                        .putArg(((TranslationTransformation)scat.transformation).offsety);
+	                queue.put1DRangeKernel(uniformBSplineTransformProgramKernels[KERNEL_dresizingTransformImageWithBsplineInterpolation],0,globalWorkSize,localWorkSize);
+	                uniformBSplineTransformProgramKernels[KERNEL_dresizingTransformImageWithBsplineInterpolation].rewind();
+            	}
+            	else
+            	{
+	                /*
+	                Now that the B-spline coefficients are in the doubleEntryImageBuffer,
+	                the image needs to be transformed, rescaled back and then 
+	                converted back to the original image format.
+	                */
+	                localWorkSize = (int)uniformBSplineTransformProgramKernels[KERNEL_dtranslationtransformImageWithBsplineInterpolation].getWorkGroupSize(device);  // Local work size dimensions
+	                globalWorkSize = StaticUtility.roundUp(localWorkSize, optimalMultiples[KERNEL_dtranslationtransformImageWithBsplineInterpolation], width*height);   // rounded up to the nearest multiple of the localWorkSize
+	                uniformBSplineTransformProgramKernels[KERNEL_dtranslationtransformImageWithBsplineInterpolation]
+	                        .putArg(doubleEntryImageBuffer)
+	                        .putArg(doubleFullSizedGPUResidentHelperBuffer)
+	                        .putArg(width)
+	                        .putArg(height)
+	                        .putArg(width * 2)
+	                        .putArg(height * 2)
+	                        .putArg(((TranslationTransformation)scat.transformation).offsetx)
+	                        .putArg(((TranslationTransformation)scat.transformation).offsety);
+	                queue.put1DRangeKernel(uniformBSplineTransformProgramKernels[KERNEL_dtranslationtransformImageWithBsplineInterpolation],0,globalWorkSize,localWorkSize);
+	                uniformBSplineTransformProgramKernels[KERNEL_dtranslationtransformImageWithBsplineInterpolation].rewind();
+            	}
+            	// Transformed and converted back to an image at the same time
                 // now convert it back to the original format
                 fetchTransformedImage();
             }
@@ -1035,9 +1274,18 @@ public class HybridPrecisionNGStackReg extends RegistrationAndTransformation
                 // CPU
             	convertToBSplineCoeffCPU(width, height);
 
-                translationTransformImageWithBsplineInterpolation(width,height, ((TranslationTransformation)scat.transformation).offsetx, ((TranslationTransformation)scat.transformation).offsety);
-
-                converter.deConvertTo(CPUentryImageBuffer,scat.targetArray);
+            	if(!sharedContext.getResizeAfterRegistration())
+            	{
+            		translationTransformImageWithBsplineInterpolation(width,height, ((TranslationTransformation)scat.transformation).offsetx, ((TranslationTransformation)scat.transformation).offsety);
+            		converter.deConvertTo(CPUentryImageBuffer,scat.targetArray);
+            	}
+            	else
+            	{
+            		int targetwidth = (int)sharedContext.resizedTargetImage.dimension(0);
+                	int targetheight = (int)sharedContext.resizedTargetImage.dimension(1);
+            		resizingTranslationTransformImageWithBsplineInterpolation(width, height, targetwidth, targetheight, ((TranslationTransformation)scat.transformation).offsetx, ((TranslationTransformation)scat.transformation).offsety);
+            		converter.deConvertTo(CPUentryImageBuffer,scat.sourceArray);
+            	}
             }
         }
         
@@ -1071,6 +1319,106 @@ public class HybridPrecisionNGStackReg extends RegistrationAndTransformation
                 coordx = currentoffsetx + ((double)i) * yvecx;
                 coordy = currentoffsety + ((double)i) * yvecy;
                 for(int n = 0;n < width;n++,nIndex++)
+                {
+                    mskx = (int)Math.round(coordx);
+                    msky = (int)Math.round(coordy);
+                    if((mskx >= 0)&&(mskx < width)&&(msky >= 0)&&(msky < height))
+                    {
+                        // Calculate X-interpolation indices
+                        p = (coordx >= 0) ? (((int)coordx) + 2) : (((int)coordx) + 1);
+                        for(int c = 0;c < 4;c++,p--)
+                        {
+                            q = (p < 0) ? (-1 - p) : p;
+                            if(q >= doubleWidth)
+                            {
+                                q -= (doubleWidth) * (q / (doubleWidth)); // this is an integer division it doesn't yield q
+                            }
+                            xInterpolationIndices[c] = q >= width ? (doubleWidth - 1 - q) : q;
+                        }
+                        // calculate Y-interpolation indices
+                        p = (coordy >= 0) ? (((int)coordy) + 2) : (((int)coordy) + 1);
+                        for(int c = 0;c < 4;c++,p--)
+                        {
+                            q = (p < 0) ? (-1 - p) : p;
+                            if(q >= doubleHeight)
+                            {
+                                q -= (doubleHeight) * (q / (doubleHeight)); // this is an integer division it doesn't yield q
+                            }
+                            yInterpolationIndices[c] = q >= height ? (doubleHeight - 1 - q) * width : q * width;// calculate linearized coordinates of the coefficient array
+                        }
+                        // get the residuals of the coordinates
+                        rescoordx = coordx - (coordx >= 0.0 ? ((double)((int)coordx)) : ((double)(((int)coordx) - 1)));
+                        rescoordy = coordy - (coordy >= 0.0 ? ((double)((int)coordy)) : ((double)(((int)coordy) - 1)));
+                        // calculate the X-weights
+                        s = 1.0 - rescoordx;
+                        xWeights[3] = Math.pow(s, 3.0) / 6.0;
+                        s = rescoordx * rescoordx;
+                        xWeights[2] = (2.0 / 3.0) - 0.5 * s * (2.0 - rescoordx);
+                        xWeights[0] = s * rescoordx / 6.0;
+                        xWeights[1] = 1.0 - xWeights[0] - xWeights[2] - xWeights[3];
+                        // calculate the Y-weights
+                        s = 1.0 - rescoordy;
+                        yWeights[3] = Math.pow(s, 3.0) / 6.0;
+                        s = rescoordy * rescoordy;
+                        yWeights[2] = (2.0 / 3.0) - 0.5 * s * (2.0 - rescoordy);
+                        yWeights[0] = s * rescoordy / 6.0;
+                        yWeights[1] = 1.0 - yWeights[0] - yWeights[2] - yWeights[3];
+
+                        // calculate the interpolated value from the target coefficients
+                        s = 0.0;
+                        for(int y = 0;y < 4;y++)
+                        {
+                            rescoordx = 0.0;// To avoid using too many variables this one will be repurposed
+                            tmpindex = yInterpolationIndices[y];
+                            for(int x = 0;x < 4; x++)
+                            {
+                                rescoordx += xWeights[x] * targetCoefficientDoubleSlice[tmpindex + xInterpolationIndices[x]];
+                            }
+                            s += yWeights[y] * rescoordx;
+                        }
+                        CPUentryImageBuffer[nIndex] = s;
+                    }
+                    else
+                    {
+                        CPUentryImageBuffer[nIndex] = 0.0;
+                    }
+                    // walk along the X-vector direction
+                    coordx += xvecx;
+                    coordy += xvecy;
+                }
+            }
+        }
+        
+        private void resizingTransformImageWithBsplineInterpolation(final int width, final int height, final int targetwidth, final int targetheight, double currentoffsetx, double currentoffsety, double currentangle)
+        {
+            /*
+            Requires the coefficients to be in entryImageBuffers and the output
+            will be in fullSizedHelperBuffer
+            */
+            int doubleWidth = width*2;
+            int doubleHeight = height*2;
+            int nIndex = 0;
+            int p;
+            int q;
+            int tmpindex;
+            double s;
+            double xvecx = Math.cos(currentangle);
+            double xvecy = -Math.sin(currentangle);
+            double yvecx = -xvecy;
+            double yvecy = xvecx;
+            double coordx;
+            double rescoordx;
+            double coordy;
+            double rescoordy;
+            int mskx;
+            int msky;
+            for(int i = 0;i < targetheight;i++)
+            {
+            	// First walk along the Y-vector direction and reset the X-position (otherwise the
+                // y position is initially correct and then lagging behind by one all the time)
+                coordx = currentoffsetx + ((double)i) * yvecx;
+                coordy = currentoffsety + ((double)i) * yvecy;
+                for(int n = 0;n < targetwidth;n++,nIndex++)
                 {
                     mskx = (int)Math.round(coordx);
                     msky = (int)Math.round(coordy);
@@ -1236,36 +1584,161 @@ public class HybridPrecisionNGStackReg extends RegistrationAndTransformation
             }
         }
         
+        private void resizingTranslationTransformImageWithBsplineInterpolation(final int width, final int height, final int targetwidth, final int targetheight, double currentoffsetx, double currentoffsety)
+        {
+            /*
+            Requires the coefficients to be in entryImageBuffers and the output
+            will be in fullSizedHelperBuffer
+            */
+            int doubleWidth = width*2;
+            int doubleHeight = height*2;
+            int nIndex = 0;
+            int p;
+            int q;
+            int tmpindex;
+            double s;
+            double coordx;
+            double rescoordx;
+            double coordy;
+            double rescoordy;
+            int mskx;
+            int msky;
+            for(int i = 0;i < targetheight;i++)
+            {
+            	// First walk along the Y-vector direction and reset the X-position (otherwise the
+                // y position is initially correct and then lagging behind by one all the time)
+                coordx = currentoffsetx;
+                coordy = currentoffsety + ((double)i);
+                for(int n = 0;n < targetwidth;n++,nIndex++)
+                {
+                    mskx = (int)Math.round(coordx);
+                    msky = (int)Math.round(coordy);
+                    if((mskx >= 0)&&(mskx < width)&&(msky >= 0)&&(msky < height))
+                    {
+                        // Calculate X-interpolation indices
+                        p = (coordx >= 0) ? (((int)coordx) + 2) : (((int)coordx) + 1);
+                        for(int c = 0;c < 4;c++,p--)
+                        {
+                            q = (p < 0) ? (-1 - p) : p;
+                            if(q >= doubleWidth)
+                            {
+                                q -= (doubleWidth) * (q / (doubleWidth)); // Warning this is an integer division it doesn't yield q
+                            }
+                            xInterpolationIndices[c] = q >= width ? (doubleWidth - 1 - q) : q;
+                        }
+                        // calculate Y-interpolation indices
+                        p = (coordy >= 0) ? (((int)coordy) + 2) : (((int)coordy) + 1);
+                        for(int c = 0;c < 4;c++,p--)
+                        {
+                            q = (p < 0) ? (-1 - p) : p;
+                            if(q >= doubleHeight)
+                            {
+                                q -= (doubleHeight) * (q / (doubleHeight)); // Warning this is an integer division it doesn't yield q
+                            }
+                            yInterpolationIndices[c] = q >= height ? (doubleHeight - 1 - q) * width : q * width;// calculate linearized coordinates of the coefficient array
+                        }
+                        // get the residuals of the coordinates
+                        rescoordx = coordx - (coordx >= 0.0 ? ((double)((int)coordx)) : ((double)(((int)coordx) - 1)));
+                        rescoordy = coordy - (coordy >= 0.0 ? ((double)((int)coordy)) : ((double)(((int)coordy) - 1)));
+                        // calculate the X-weights
+                        s = 1.0 - rescoordx;
+                        xWeights[3] = Math.pow(s, 3.0) / 6.0;
+                        s = rescoordx * rescoordx;
+                        xWeights[2] = (2.0 / 3.0) - 0.5 * s * (2.0 - rescoordx);
+                        xWeights[0] = s * rescoordx / 6.0;
+                        xWeights[1] = 1.0 - xWeights[0] - xWeights[2] - xWeights[3];
+                        // calculate the Y-weights
+                        s = 1.0 - rescoordy;
+                        yWeights[3] = Math.pow(s, 3.0) / 6.0;
+                        s = rescoordy * rescoordy;
+                        yWeights[2] = (2.0 / 3.0) - 0.5 * s * (2.0 - rescoordy);
+                        yWeights[0] = s * rescoordy / 6.0;
+                        yWeights[1] = 1.0 - yWeights[0] - yWeights[2] - yWeights[3];
+
+                        // calculate the interpolated value from the target coefficients
+                        s = 0.0;
+                        for(int y = 0;y < 4;y++)
+                        {
+                            rescoordx = 0.0;// To avoid using too many variables this one will be repurposed
+                            tmpindex = yInterpolationIndices[y];
+                            for(int x = 0;x < 4; x++)
+                            {
+                                rescoordx += xWeights[x] * targetCoefficientDoubleSlice[tmpindex + xInterpolationIndices[x]];
+                            }
+                            s += yWeights[y] * rescoordx;
+                        }
+                        CPUentryImageBuffer[nIndex] = s;
+                    }
+                    else
+                    {
+                        CPUentryImageBuffer[nIndex] = 0.0;
+                    }
+                    // walk along the X-vector direction
+                    coordx += 1.0;
+                }
+            }
+        }
+        
         private void fetchTransformedImage()
         {
             // This function is only called from the GPU code so one can assume !usesFloat == true
             // WARNING: this function overwrites the original image data without a chance to recover it!!!
-           
-            // The following converts the image to its original format and transfers it to conversionEntryBuffer
-            int localWorkSize = (int)deConversionProgramKernel.getWorkGroupSize(device);  // Local work size dimensions
-            int globalWorkSize = StaticUtility.roundUp(localWorkSize, deConversionProgramKernel.getPreferredWorkGroupSizeMultiple(device),(int) sharedContext.img.dimension(0)*(int)sharedContext.img.dimension(1));   // rounded up to the nearest multiple of the localWorkSize
-            queue.put1DRangeKernel(deConversionProgramKernel,0,globalWorkSize,localWorkSize);
-            if ((sharedContext.img.firstElement() instanceof ByteType)||(sharedContext.img.firstElement() instanceof UnsignedByteType)) {
-                ByteBuffer buffer = queue.putMapBuffer(conversionEntryBuffer, CLMemory.Map.READ, true);
-                buffer.rewind();
-                buffer.get((byte[]) scat.targetArray);
-                queue.putUnmapMemory(conversionEntryBuffer, buffer);
-            } else if ((sharedContext.img.firstElement() instanceof ShortType)||(sharedContext.img.firstElement() instanceof UnsignedShortType)) {
-                ByteBuffer buffer = queue.putMapBuffer(conversionEntryBuffer, CLMemory.Map.READ, true);
-                buffer.rewind();
-                buffer.asShortBuffer().get((short[]) scat.targetArray);
-                queue.putUnmapMemory(conversionEntryBuffer, buffer);
-            } else if ((sharedContext.img.firstElement() instanceof IntType)||(sharedContext.img.firstElement() instanceof UnsignedIntType)) {
-                ByteBuffer buffer = queue.putMapBuffer(conversionEntryBuffer, CLMemory.Map.READ, true);
-                buffer.rewind();
-                buffer.asIntBuffer().get((int[]) scat.targetArray);
-                queue.putUnmapMemory(conversionEntryBuffer, buffer);
-            } else if ((sharedContext.img.firstElement() instanceof FloatType)) {
-                ByteBuffer buffer = queue.putMapBuffer(conversionEntryBuffer, CLMemory.Map.READ, true);
-                buffer.rewind();
-                buffer.asFloatBuffer().get((float[]) scat.targetArray);
-                queue.putUnmapMemory(conversionEntryBuffer, buffer);
-            }
+        	if(!sharedContext.getResizeAfterRegistration())
+        	{
+	            // The following converts the image to its original format and transfers it to conversionEntryBuffer
+	            int localWorkSize = (int)deConversionProgramKernel.getWorkGroupSize(device);  // Local work size dimensions
+	            int globalWorkSize = StaticUtility.roundUp(localWorkSize, deConversionProgramKernel.getPreferredWorkGroupSizeMultiple(device),(int) sharedContext.img.dimension(0)*(int)sharedContext.img.dimension(1));   // rounded up to the nearest multiple of the localWorkSize
+	            queue.put1DRangeKernel(deConversionProgramKernel,0,globalWorkSize,localWorkSize);
+	            if ((sharedContext.img.firstElement() instanceof ByteType)||(sharedContext.img.firstElement() instanceof UnsignedByteType)) {
+	                ByteBuffer buffer = queue.putMapBuffer(conversionEntryBuffer, CLMemory.Map.READ, true);
+	                buffer.rewind();
+	                buffer.get((byte[]) scat.targetArray);
+	                queue.putUnmapMemory(conversionEntryBuffer, buffer);
+	            } else if ((sharedContext.img.firstElement() instanceof ShortType)||(sharedContext.img.firstElement() instanceof UnsignedShortType)) {
+	                ByteBuffer buffer = queue.putMapBuffer(conversionEntryBuffer, CLMemory.Map.READ, true);
+	                buffer.rewind();
+	                buffer.asShortBuffer().get((short[]) scat.targetArray);
+	                queue.putUnmapMemory(conversionEntryBuffer, buffer);
+	            } else if ((sharedContext.img.firstElement() instanceof IntType)||(sharedContext.img.firstElement() instanceof UnsignedIntType)) {
+	                ByteBuffer buffer = queue.putMapBuffer(conversionEntryBuffer, CLMemory.Map.READ, true);
+	                buffer.rewind();
+	                buffer.asIntBuffer().get((int[]) scat.targetArray);
+	                queue.putUnmapMemory(conversionEntryBuffer, buffer);
+	            } else if ((sharedContext.img.firstElement() instanceof FloatType)) {
+	                ByteBuffer buffer = queue.putMapBuffer(conversionEntryBuffer, CLMemory.Map.READ, true);
+	                buffer.rewind();
+	                buffer.asFloatBuffer().get((float[]) scat.targetArray);
+	                queue.putUnmapMemory(conversionEntryBuffer, buffer);
+	            }
+        	}
+        	else
+        	{
+	            // The following converts the image to its original format and transfers it to conversionEntryBuffer
+	            int localWorkSize = (int)deConversionProgramKernel.getWorkGroupSize(device);  // Local work size dimensions
+	            int globalWorkSize = StaticUtility.roundUp(localWorkSize, deConversionProgramKernel.getPreferredWorkGroupSizeMultiple(device),(int) sharedContext.resizedTargetImage.dimension(0)*(int)sharedContext.resizedTargetImage.dimension(1));   // rounded up to the nearest multiple of the localWorkSize
+	            queue.put1DRangeKernel(deConversionProgramKernel,0,globalWorkSize,localWorkSize);
+	            if ((sharedContext.resizedTargetImage.firstElement() instanceof ByteType)||(sharedContext.resizedTargetImage.firstElement() instanceof UnsignedByteType)) {
+	                ByteBuffer buffer = queue.putMapBuffer(conversionEntryBuffer, CLMemory.Map.READ, true);
+	                buffer.rewind();
+	                buffer.get((byte[]) scat.sourceArray);
+	                queue.putUnmapMemory(conversionEntryBuffer, buffer);
+	            } else if ((sharedContext.resizedTargetImage.firstElement() instanceof ShortType)||(sharedContext.resizedTargetImage.firstElement() instanceof UnsignedShortType)) {
+	                ByteBuffer buffer = queue.putMapBuffer(conversionEntryBuffer, CLMemory.Map.READ, true);
+	                buffer.rewind();
+	                buffer.asShortBuffer().get((short[]) scat.sourceArray);
+	                queue.putUnmapMemory(conversionEntryBuffer, buffer);
+	            } else if ((sharedContext.resizedTargetImage.firstElement() instanceof IntType)||(sharedContext.resizedTargetImage.firstElement() instanceof UnsignedIntType)) {
+	                ByteBuffer buffer = queue.putMapBuffer(conversionEntryBuffer, CLMemory.Map.READ, true);
+	                buffer.rewind();
+	                buffer.asIntBuffer().get((int[]) scat.sourceArray);
+	                queue.putUnmapMemory(conversionEntryBuffer, buffer);
+	            } else if ((sharedContext.resizedTargetImage.firstElement() instanceof FloatType)) {
+	                ByteBuffer buffer = queue.putMapBuffer(conversionEntryBuffer, CLMemory.Map.READ, true);
+	                buffer.rewind();
+	                buffer.asFloatBuffer().get((float[]) scat.sourceArray);
+	                queue.putUnmapMemory(conversionEntryBuffer, buffer);
+	            }
+        	}
         }
         
         

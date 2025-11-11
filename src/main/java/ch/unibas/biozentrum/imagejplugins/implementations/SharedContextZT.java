@@ -21,12 +21,14 @@ package ch.unibas.biozentrum.imagejplugins.implementations;
 import ch.unibas.biozentrum.imagejplugins.NGStackReg;
 import ch.unibas.biozentrum.imagejplugins.abstracts.Transformation;
 import ch.unibas.biozentrum.imagejplugins.util.RigidBodyTransformation;
+import ch.unibas.biozentrum.imagejplugins.util.Square;
 import ch.unibas.biozentrum.imagejplugins.util.TranslationTransformation;
 import java.io.PrintWriter;
 import java.util.concurrent.CyclicBarrier;
 import net.imagej.ImgPlus;
 import net.imagej.Position;
 import net.imagej.axis.DefaultLinearAxis;
+import net.imglib2.img.ImgFactory;
 import net.imglib2.img.planar.PlanarImg;
 import org.scijava.log.LogService;
 import org.scijava.app.StatusService;
@@ -58,7 +60,7 @@ public class SharedContextZT extends AbstractSharedContext {
     int currentTransformationCount = 0;
     
     private boolean fwd = true;
-    public SharedContextZT(final NGStackReg.TransformationType transformationType, @SuppressWarnings("rawtypes") final ImgPlus img, final Position pos, final int axisIDZ, final int axisIDT, final boolean forceDoublePrecisionRepr, final LogService logService, final StatusService statusService)
+    public SharedContextZT(final NGStackReg.TransformationType transformationType, @SuppressWarnings("rawtypes") final ImgPlus img, final Position pos, final int axisIDZ, final int axisIDT, final boolean forceDoublePrecisionRepr, final boolean resizeAfterRegistration, final LogService logService, final StatusService statusService)
     {
         this.transformationType = transformationType;
         this.img = img;
@@ -69,6 +71,7 @@ public class SharedContextZT extends AbstractSharedContext {
         this.currentPosition = new Position(pos);
         this.logService = logService;
         this.statusService = statusService;
+        this.resizeAfterRegistration = resizeAfterRegistration;
         
         // Determine the number of alignments that have to be calculated
         int dims = img.numDimensions();
@@ -312,7 +315,6 @@ public class SharedContextZT extends AbstractSharedContext {
             // Not sure this would work, because I don't know which synchronization lock is held.
             workerSynchronizationBarrier = new CyclicBarrier(workerSynchronizationBarrier.getParties(),new FinalStackRegTransformationCombinerWorker());
         }
-
     }
     
     private class FinalStackRegTransformationCombinerWorker implements Runnable
@@ -401,6 +403,81 @@ public class SharedContextZT extends AbstractSharedContext {
 	                    transformations[0][k][i].transformWith(transformationsT[0][k][0]);
 	                }
 	            }
+            }
+                        
+            if(resizeAfterRegistration)
+            {
+                /*
+                 * If resizeToFit is set the new image size has to be calculated and the transformations have to be
+                 * updated by adding another translation by (-min(x), -min(y)). This should use the image space most
+                 * efficiently. Be aware that the origin for any transformation is the top left corner of the image
+                 * NOT the center of the image. The easiest way to calculate the new image size is by calculating the
+                 * transformed coordinates of squares (all four corners) and then finding (max(x) - min(x), max(y) - min(y))
+                 */
+                long width = img.dimension(0);
+                long height = img.dimension(1);
+                Square square = new Square(width, height);
+                double minX, minY, maxX, maxY;
+                transformations[0][0][0].transform(square);
+                minX = square.minX();
+                minY = square.minY();
+                maxX = square.maxX();
+                maxY = square.maxY();
+                for(int j = 0;j < transformationExtents[2];j++)
+                {
+                    for(int k = 0;k < transformationExtents[1];k++)
+                    {
+                        for(int i = 0;i < transformationExtents[0];i++)
+                        {
+                            transformations[j][k][i].transform(square);
+                            minX = Math.min(minX, square.minX());
+                            minY = Math.min(minY, square.minY());
+                            maxX = Math.max(maxX, square.maxX());
+                            maxY = Math.max(maxY, square.maxY());
+                            square.set(width, height); //reset for the next round
+                        }
+                    }
+                }
+                for(int j = 0;j < transformationExtents[2];j++)
+                {
+                    for(int k = 0;k < transformationExtents[1];k++)
+                    {
+                        for(int i = 0;i < transformationExtents[0];i++)
+                        {
+                            transformations[j][k][i].translate(minX, minY);
+                        }
+                    }
+                }
+                long transformedWidth = (long)Math.ceil(maxX - minX);
+                long transformedHeight = (long)Math.ceil(maxY - minY);
+                ImgFactory factory = img.factory();
+                long[] newdims = img.dimensionsAsLongArray();
+                newdims[0] = transformedWidth;
+                newdims[1] = transformedHeight;
+                widthAfterResize = (int)transformedWidth;
+                heightAfterResize = (int)transformedHeight;
+                int[] newintdims = new int[newdims.length]; //A bit awkward but the factory only takes int dimensions
+                for(int dimi = 0;dimi < newdims.length; ++dimi)
+                {
+                    newintdims[dimi] = (int)newdims[dimi];
+                }
+                resizedTargetImage = new ImgPlus(factory.create(newintdims));
+                // Often the T axis is replaced by a Z axis otherwise
+                for(int i = 2; i < resizedTargetImage.numDimensions();i++)
+                {
+                    if(!(resizedTargetImage.axis(i) instanceof DefaultLinearAxis))
+                    {
+                        logService.error("The axis type is not supported.");
+                        return;
+                    }
+                    else
+                    {
+                    	((DefaultLinearAxis)resizedTargetImage.axis(i)).setType(((DefaultLinearAxis)img.axis(i)).type());
+                    	((DefaultLinearAxis)resizedTargetImage.axis(i)).setScale(((DefaultLinearAxis)img.axis(i)).scale());
+                    	((DefaultLinearAxis)resizedTargetImage.axis(i)).setUnit(((DefaultLinearAxis)img.axis(i)).unit());
+                    	((DefaultLinearAxis)resizedTargetImage.axis(i)).setOrigin(((DefaultLinearAxis)img.axis(i)).origin());
+                    }
+                }
             }
         }
     }
@@ -924,6 +1001,12 @@ public class SharedContextZT extends AbstractSharedContext {
             target.targetArray = ((PlanarImg) img.getImg()).getPlane((int) currentPosition.getIndex()).getCurrentStorageArray();
             if (target.targetArray == null) {
                 throw new RuntimeException("Could not get image plane at specified index.");
+            }
+            if(resizeAfterRegistration) {
+            	target.sourceArray = ((PlanarImg) resizedTargetImage.getImg()).getPlane((int) currentPosition.getIndex()).getCurrentStorageArray();
+            	if (target.sourceArray == null) {
+                    throw new RuntimeException("Could not get resized image plane at specified index.");
+                }
             }
         }
         // grab the current position as index to the transformation array

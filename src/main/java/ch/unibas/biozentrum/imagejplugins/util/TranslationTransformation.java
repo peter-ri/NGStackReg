@@ -52,6 +52,8 @@ public class TranslationTransformation implements Transformation {
 
     @Override
     public JSONObject serialize() {
+    	//TODO:
+    	//FIXME: The transformations are applied to the access vector and thus the images are transformed inversely, this should be reflected in the output
         JSONObject retval = new JSONObject();
         JSONObject transformation = new JSONObject();
         // Save doubles as string, because JSON does not officially support double precision
@@ -68,5 +70,28 @@ public class TranslationTransformation implements Transformation {
     	retval.offsetx = offsetx;
     	retval.offsety = offsety;
     	return retval;
+    }
+    
+    @Override
+    public Square transform(Square square)
+    {
+        //x1, y1 = 0,0
+        square.x1 = square.x3 = -offsetx;
+        square.y1 = square.y2 = -offsety;
+        //square x2 = width; y2 = 0 
+        square.x2 -= offsetx;
+        //square x3 = 0; y3 = height
+        square.y3 -= offsety;
+        //square x4 = width; y4 = height
+        square.x4 -= offsetx;
+        square.y4 -= offsety;
+        return square;
+    }
+    
+    @Override
+    public void translate(final double offsetx, final double offsety)
+    {
+    	this.offsetx += offsetx;
+    	this.offsety += offsety;
     }
 }

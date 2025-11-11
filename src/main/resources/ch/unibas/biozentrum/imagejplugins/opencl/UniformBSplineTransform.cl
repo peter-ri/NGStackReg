@@ -2242,7 +2242,6 @@ __kernel void transformImageWithBsplineInterpolation(const __global FPT *source 
         __private int column = nIndex % sourcewidth;
         __private int row = (nIndex - column)/sourcewidth;
 
-        //TODO: pass as parameter
         __private FPTTWO xvec = (FPTTWO)(cosangle, negsinangle);//warning: this is not the x vector but it is the vector added in the x direction
         __private FPTTWO yvec = (FPTTWO)(-xvec.y, xvec.x);//warning: this is not the y vector but it is the vector added in the y direction
         __private FPTTWO coord = (FPTTWO)(offsetx, offsety) + ((FPT)column) * xvec + ((FPT)row) * yvec;
@@ -2270,6 +2269,60 @@ __kernel void translationTransformImageWithBsplineInterpolation(const __global F
     {
         __private int column = nIndex % sourcewidth;
         __private int row = (nIndex - column)/sourcewidth;
+
+        __private FPTTWO coord = (FPTTWO)(offsetx, offsety) + (FPTTWO)(((FPT)column), ((FPT)row));
+
+        __private int2 Msk = (int2)((int)round(coord.x), (int)round(coord.y));
+        __private int4 xInterpolationIndices;
+        __private int4 yInterpolationIndices;
+        if ((Msk.x >= 0) && (Msk.x < sourcewidth) && (Msk.y >= 0) && (Msk.y < sourceheight))
+        {
+            xInterpolationIndices = calculatexInterpolationIndices(coord.x, doubleSourceWidth, sourcewidth);
+            yInterpolationIndices = calculateyInterpolationIndices(coord.y, doubleSourceHeight, sourceheight, sourcewidth);
+            target[nIndex] = interpolate(coord, xInterpolationIndices, yInterpolationIndices, source);
+        }
+        else
+        {
+            target[nIndex] = Zero;
+        } 
+    }   
+}
+
+__kernel void resizingTransformImageWithBsplineInterpolation(const __global FPT *source ,__global FPT *target, const int sourcewidth, const int sourceheight, const int doubleSourceWidth, const int doubleSourceHeight, const int targetwidth, const int targetheight, const FPT offsetx, const FPT offsety, const FPT cosangle, const FPT negsinangle)
+{
+    __private int nIndex = get_global_id(0);//this directly corresponds to the linear address of the !TARGET! pixel
+    if(nIndex < targetwidth * targetheight)
+    {
+        __private int column = nIndex % targetwidth;
+        __private int row = (nIndex - column)/targetwidth;
+
+        __private FPTTWO xvec = (FPTTWO)(cosangle, negsinangle);//warning: this is not the x vector but it is the vector added in the x direction
+        __private FPTTWO yvec = (FPTTWO)(-xvec.y, xvec.x);//warning: this is not the y vector but it is the vector added in the y direction
+        __private FPTTWO coord = (FPTTWO)(offsetx, offsety) + ((FPT)column) * xvec + ((FPT)row) * yvec;
+
+        __private int2 Msk = (int2)((int)round(coord.x), (int)round(coord.y));
+        __private int4 xInterpolationIndices;
+        __private int4 yInterpolationIndices;
+        if ((Msk.x >= 0) && (Msk.x < sourcewidth) && (Msk.y >= 0) && (Msk.y < sourceheight))
+        {
+            xInterpolationIndices = calculatexInterpolationIndices(coord.x, doubleSourceWidth, sourcewidth);
+            yInterpolationIndices = calculateyInterpolationIndices(coord.y, doubleSourceHeight, sourceheight, sourcewidth);
+            target[nIndex] = interpolate(coord, xInterpolationIndices, yInterpolationIndices, source);
+        }
+        else
+        {
+            target[nIndex] = Zero;
+        } 
+    }   
+}
+
+__kernel void resizingTranslationTransformImageWithBsplineInterpolation(const __global FPT *source ,__global FPT *target, const int sourcewidth, const int sourceheight, const int doubleSourceWidth, const int doubleSourceHeight, const int targetwidth, const int targetheight, const FPT offsetx, const FPT offsety)
+{
+    __private int nIndex = get_global_id(0);//this directly corresponds to the linear address of the !TARGET! pixel
+    if(nIndex < targetwidth * targetheight)
+    {
+        __private int column = nIndex % targetwidth;
+        __private int row = (nIndex - column)/targetwidth;
 
         __private FPTTWO coord = (FPTTWO)(offsetx, offsety) + (FPTTWO)(((FPT)column), ((FPT)row));
 

@@ -1608,6 +1608,60 @@ __kernel void dtranslationtransformImageWithBsplineInterpolation(const __global 
         } 
     }   
 }
+
+__kernel void dresizingTransformImageWithBsplineInterpolation(const __global double *source ,__global double *target, const int sourcewidth, const int sourceheight, const int doubleSourceWidth, const int doubleSourceHeight, const int targetwidth, const int targetheight, const double offsetx, const double offsety, const double cosangle, const double negsinangle)
+{
+    __private int nIndex = get_global_id(0);//this directly corresponds to the linear address of the !TARGET! pixel
+    if(nIndex < targetwidth * targetheight)
+    {
+        __private int column = nIndex % targetwidth;
+        __private int row = (nIndex - column)/targetwidth;
+
+        __private double2 xvec = (double2)(cosangle, negsinangle);//warning: this is not the x vector but it is the vector added in the x direction
+        __private double2 yvec = (double2)(-xvec.y, xvec.x);//warning: this is not the y vector but it is the vector added in the y direction
+        __private double2 coord = (double2)(offsetx, offsety) + ((double)column) * xvec + ((double)row) * yvec;
+
+        __private int2 Msk = (int2)((int)round(coord.x), (int)round(coord.y));
+        __private int4 xInterpolationIndices;
+        __private int4 yInterpolationIndices;
+        if ((Msk.x >= 0) && (Msk.x < sourcewidth) && (Msk.y >= 0) && (Msk.y < sourceheight))
+        {
+            xInterpolationIndices = dcalculatexInterpolationIndices(coord.x, doubleSourceWidth, sourcewidth);
+            yInterpolationIndices = dcalculateyInterpolationIndices(coord.y, doubleSourceHeight, sourceheight, sourcewidth);
+            target[nIndex] = dinterpolate(coord, xInterpolationIndices, yInterpolationIndices, source);
+        }
+        else
+        {
+            target[nIndex] = dZero;
+        } 
+    }   
+}
+
+__kernel void dresizingTranslationTransformImageWithBsplineInterpolation(const __global double *source ,__global double *target, const int sourcewidth, const int sourceheight, const int doubleSourceWidth, const int doubleSourceHeight, const int targetwidth, const int targetheight, const double offsetx, const double offsety)
+{
+    __private int nIndex = get_global_id(0);//this directly corresponds to the linear address of the !TARGET! pixel
+    if(nIndex < targetwidth * targetheight)
+    {
+        __private int column = nIndex % targetwidth;
+        __private int row = (nIndex - column)/targetwidth;
+
+        __private double2 coord = (double2)(offsetx, offsety) + (double2)(((double)column), ((double)row));
+
+        __private int2 Msk = (int2)((int)round(coord.x), (int)round(coord.y));
+        __private int4 xInterpolationIndices;
+        __private int4 yInterpolationIndices;
+        if ((Msk.x >= 0) && (Msk.x < sourcewidth) && (Msk.y >= 0) && (Msk.y < sourceheight))
+        {
+            xInterpolationIndices = dcalculatexInterpolationIndices(coord.x, doubleSourceWidth, sourcewidth);
+            yInterpolationIndices = dcalculateyInterpolationIndices(coord.y, doubleSourceHeight, sourceheight, sourcewidth);
+            target[nIndex] = dinterpolate(coord, xInterpolationIndices, yInterpolationIndices, source);
+        }
+        else
+        {
+            target[nIndex] = dZero;
+        } 
+    }   
+}
 #endif
 
 

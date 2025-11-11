@@ -21,6 +21,7 @@ package ch.unibas.biozentrum.imagejplugins;
 import com.jogamp.opencl.CLPlatform;
 
 import org.scijava.command.Command;
+import org.scijava.display.DisplayService;
 import org.scijava.log.LogService;
 import org.scijava.plugin.Parameter;
 import org.scijava.plugin.Plugin;
@@ -41,12 +42,14 @@ import java.io.IOException;
 import java.io.PrintWriter;
 
 import net.imagej.Dataset;
+import net.imagej.DatasetService;
 import net.imagej.Extents;
 import net.imagej.ImgPlus;
 import net.imagej.Position;
 import net.imagej.axis.DefaultLinearAxis;
 import net.imagej.display.DataView;
 import net.imglib2.img.cell.CellImg;
+import net.imglib2.img.display.imagej.ImageJFunctions;
 import net.imglib2.img.planar.PlanarImg;
 import net.imglib2.type.numeric.integer.ByteType;
 import net.imglib2.type.numeric.integer.IntType;
@@ -93,6 +96,10 @@ public class NGStackReg implements Command
     @Parameter
     private LogService logService;
     @Parameter
+    private DatasetService datasetService;
+    @Parameter
+    private DisplayService displayService; //Not sure if this will interfere with the headless API
+    @Parameter
     private StatusService statusService;
     @Parameter(label="Transformation:", choices={"Translation", "Rigid Body"/*,"Scaled Rotation","Affine"*/}) //The remaining options are not implemented yet
     private String sTransformationType;
@@ -100,6 +107,8 @@ public class NGStackReg implements Command
     private String sAlignmentAxis;
     @Parameter(label="Alignment mode:", choices= {"GPU + CPU (hybrid prec.)", "GPU (hybrid prec.)", "CPU (hybrid prec.)", "CPU (double prec.)", "GPU (single prec.)", "GPU + CPU (double prec.)", "GPU (double prec.)"})
     private String alignmentMode;
+    @Parameter(label="Resize:")
+    private boolean resizeAfterRegistration;
     @Parameter(label="Save transformations to:", required = false)
     private File transformationOutput;
     @Parameter(persist = false)
@@ -501,11 +510,11 @@ public class NGStackReg implements Command
         {
         	if(alignmentAxis != AlignmentAxisType.ZANDT)
         	{
-        		sharedContext = new SharedContext(transformationType, img,currentPos,axisIndex,forceDoublePrecisionRepr,logService,statusService);        		
+        		sharedContext = new SharedContext(transformationType, img,currentPos,axisIndex,forceDoublePrecisionRepr, resizeAfterRegistration,logService,statusService);        		
         	}
         	else
         	{
-        		sharedContext = new SharedContextZT(transformationType, img,currentPos, axisIndex, taxis, forceDoublePrecisionRepr,logService,statusService);
+        		sharedContext = new SharedContextZT(transformationType, img,currentPos, axisIndex, taxis, forceDoublePrecisionRepr, resizeAfterRegistration, logService,statusService);
         	}
             if(img.dimension(axisIndex+2) > 1)
             {
@@ -582,6 +591,23 @@ public class NGStackReg implements Command
                 cpuimplementation.release();
             }
             
+        }
+        if(resizeAfterRegistration)
+        {
+        	if(dview != null)
+            {
+        		//ImageJFunctions.show(sharedContext.getResizedImgPlus());
+        		Dataset dset = datasetService.create(sharedContext.getResizedImgPlus());
+        		displayService.createDisplay(dset);
+            }
+        	else
+        	{
+        		//TODO: Not sure if this helps
+        		datasetService.create(sharedContext.getResizedImgPlus());
+        	}
+        	//
+        	//dataset.setImgPlus(sharedContext.getResizedImgPlus());
+        	//dataset.update();
         }
         if(debug) {
         	long duration = System.nanoTime() - startTime;

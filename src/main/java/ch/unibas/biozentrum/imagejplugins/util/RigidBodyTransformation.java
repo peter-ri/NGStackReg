@@ -64,6 +64,8 @@ public class RigidBodyTransformation implements Transformation {
 
     @Override
     public JSONObject serialize() {
+    	//TODO:
+    	//FIXME: The transformations are applied to the access vector and thus the images are transformed inversely, this should be reflected in the output
         JSONObject retval = new JSONObject();
         JSONObject transformation = new JSONObject();
         // Save doubles as string, because JSON does not officially support double precision
@@ -82,5 +84,37 @@ public class RigidBodyTransformation implements Transformation {
     	retval.offsety = offsety;
     	retval.angle = angle;
     	return retval;
+    }
+    
+    @Override
+	public Square transform(Square square)
+    {
+    	/*
+    	 * The original math uses the inverse rotation direction because the original
+    	 * app rotates the access vector (which is equivalent to inversely rotating the image.
+    	 */
+    	double s = Math.sin(-angle);
+        double c = Math.cos(-angle);
+        //x1, y1 = 0,0 (square.x1 * c + square.x1 * -s + offsetx)
+        square.x1 = -offsetx;
+        //(square.y1 * s + square.y1 * c + offsety)
+        square.y1 = -offsety;
+        //square x2 = width; y2 = 0 
+        square.x2 = square.x2 * c - offsetx;
+        square.y2 = square.x2 * s - offsety;
+        //square x3 = 0; y3 = height
+        square.x3 = (-offsetx) - square.y3 * s;
+        square.y3 = square.y3 * c - offsety;
+        //square x4 = width; y4 = height
+        square.x4 = square.x4 * c - square.y4 * s - offsetx;
+        square.y4 = square.x4 * s + square.y4 * c - offsety;
+        return square;
+    }
+    
+    @Override
+    public void translate(final double offsetx, final double offsety)
+    {
+    	this.offsetx += offsetx;
+    	this.offsety += offsety;
     }
 }
