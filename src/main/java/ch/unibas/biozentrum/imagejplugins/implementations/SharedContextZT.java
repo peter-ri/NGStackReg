@@ -20,7 +20,9 @@ package ch.unibas.biozentrum.imagejplugins.implementations;
 
 import ch.unibas.biozentrum.imagejplugins.NGStackReg;
 import ch.unibas.biozentrum.imagejplugins.abstracts.Transformation;
+import ch.unibas.biozentrum.imagejplugins.util.AffineTransformation;
 import ch.unibas.biozentrum.imagejplugins.util.RigidBodyTransformation;
+import ch.unibas.biozentrum.imagejplugins.util.ScaledRotationTransformation;
 import ch.unibas.biozentrum.imagejplugins.util.Square;
 import ch.unibas.biozentrum.imagejplugins.util.TranslationTransformation;
 import java.io.PrintWriter;
@@ -209,8 +211,58 @@ public class SharedContextZT extends AbstractSharedContext {
                 }
                 break;
             case SCALEDROTATION:
+            	// T
+                transformationsT = new ScaledRotationTransformation[transformationExtentsT[2]][transformationExtentsT[1]][transformationExtentsT[0]];
+                for(int j = 0;j < transformationExtentsT[2];j++)
+                {
+                    for(int k = 0;k < transformationExtentsT[1];k++)
+                    {
+                        for(int i = 0;i < transformationExtentsT[0];i++)
+                        {
+                            transformationsT[j][k][i] = new ScaledRotationTransformation();// F Z C (not really because if there are less channels this could be different)
+                        }
+                    }
+                }
+                transformations = transformationsT;
+                // Z
+                transformationsZ = new ScaledRotationTransformation[transformationExtentsZ[2]][transformationExtentsZ[1]][transformationExtentsZ[0]];
+                for(int j = 0;j < transformationExtentsZ[2];j++)
+                {
+                    for(int k = 0;k < transformationExtentsZ[1];k++)
+                    {
+                        for(int i = 0;i < transformationExtentsZ[0];i++)
+                        {
+                            transformationsZ[j][k][i] = new ScaledRotationTransformation();// F Z C (not really because if there are less channels this could be different)
+                        }
+                    }
+                }
                 break;
             case AFFINE:
+            	// T
+                transformationsT = new AffineTransformation[transformationExtentsT[2]][transformationExtentsT[1]][transformationExtentsT[0]];
+                for(int j = 0;j < transformationExtentsT[2];j++)
+                {
+                    for(int k = 0;k < transformationExtentsT[1];k++)
+                    {
+                        for(int i = 0;i < transformationExtentsT[0];i++)
+                        {
+                            transformationsT[j][k][i] = new AffineTransformation();// F Z C (not really because if there are less channels this could be different)
+                        }
+                    }
+                }
+                transformations = transformationsT;
+                // Z
+                transformationsZ = new AffineTransformation[transformationExtentsZ[2]][transformationExtentsZ[1]][transformationExtentsZ[0]];
+                for(int j = 0;j < transformationExtentsZ[2];j++)
+                {
+                    for(int k = 0;k < transformationExtentsZ[1];k++)
+                    {
+                        for(int i = 0;i < transformationExtentsZ[0];i++)
+                        {
+                            transformationsZ[j][k][i] = new AffineTransformation();// F Z C (not really because if there are less channels this could be different)
+                        }
+                    }
+                }
                 break;
         }
         this.forceDoublePrecisionRepr = forceDoublePrecisionRepr;
@@ -423,6 +475,7 @@ public class SharedContextZT extends AbstractSharedContext {
                 minY = square.minY();
                 maxX = square.maxX();
                 maxY = square.maxY();
+                square.set(width, height); //reset for the next round
                 for(int j = 0;j < transformationExtents[2];j++)
                 {
                     for(int k = 0;k < transformationExtents[1];k++)

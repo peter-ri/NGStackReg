@@ -40,7 +40,7 @@ public class TranslationTransformation implements Transformation {
         }
         else
         {
-            throw new RuntimeException("RigidBodyTransformation cannot be transformed with a different transformation type.");
+            throw new RuntimeException("TranslationTransformation cannot be transformed with a different transformation type.");
         }
     }
 

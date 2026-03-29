@@ -20,7 +20,9 @@ package ch.unibas.biozentrum.imagejplugins.implementations;
 
 import ch.unibas.biozentrum.imagejplugins.NGStackReg;
 import ch.unibas.biozentrum.imagejplugins.abstracts.Transformation;
+import ch.unibas.biozentrum.imagejplugins.util.AffineTransformation;
 import ch.unibas.biozentrum.imagejplugins.util.RigidBodyTransformation;
+import ch.unibas.biozentrum.imagejplugins.util.ScaledRotationTransformation;
 import ch.unibas.biozentrum.imagejplugins.util.Square;
 import ch.unibas.biozentrum.imagejplugins.util.TranslationTransformation;
 import java.io.PrintWriter;
@@ -154,8 +156,30 @@ public class SharedContext extends AbstractSharedContext {
                 }
                 break;
             case SCALEDROTATION:
+            	transformations = new ScaledRotationTransformation[transformationExtents[2]][transformationExtents[1]][transformationExtents[0]];
+                for(int j = 0;j < transformationExtents[2];j++)
+                {
+                    for(int k = 0;k < transformationExtents[1];k++)
+                    {
+                        for(int i = 0;i < transformationExtents[0];i++)
+                        {
+                            transformations[j][k][i] = new ScaledRotationTransformation();// F Z C (not really because if there are less channels this could be different)
+                        }
+                    }
+                }
                 break;
             case AFFINE:
+            	transformations = new AffineTransformation[transformationExtents[2]][transformationExtents[1]][transformationExtents[0]];
+                for(int j = 0;j < transformationExtents[2];j++)
+                {
+                    for(int k = 0;k < transformationExtents[1];k++)
+                    {
+                        for(int i = 0;i < transformationExtents[0];i++)
+                        {
+                            transformations[j][k][i] = new AffineTransformation();// F Z C (not really because if there are less channels this could be different)
+                        }
+                    }
+                }
                 break;
         }
         this.forceDoublePrecisionRepr = forceDoublePrecisionRepr;
@@ -245,6 +269,7 @@ public class SharedContext extends AbstractSharedContext {
                 minY = square.minY();
                 maxX = square.maxX();
                 maxY = square.maxY();
+                square.set(width, height); //reset for the next round
                 for(int j = 0;j < transformationExtents[2];j++)
                 {
                     for(int k = 0;k < transformationExtents[1];k++)

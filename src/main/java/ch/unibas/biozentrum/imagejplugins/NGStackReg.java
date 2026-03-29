@@ -101,7 +101,7 @@ public class NGStackReg implements Command
     private DisplayService displayService; //Not sure if this will interfere with the headless API
     @Parameter
     private StatusService statusService;
-    @Parameter(label="Transformation:", choices={"Translation", "Rigid Body"/*,"Scaled Rotation","Affine"*/}) //The remaining options are not implemented yet
+    @Parameter(label="Transformation:", choices={"Translation", "Rigid Body", "Scaled Rotation","Affine"})
     private String sTransformationType;
     @Parameter(label="Alignment axis:", choices={"C","Z","T","Z -> T"})
     private String sAlignmentAxis;
@@ -340,11 +340,9 @@ public class NGStackReg implements Command
                 break;
             case "Scaled Rotation":
                 transformationType = TransformationType.SCALEDROTATION;
-                logService.error("Sorry currently only RIGIDBODY is supported.");
-                return;
+                break;
             case "Affine":
                 transformationType = TransformationType.AFFINE;
-                logService.error("Sorry currently only RIGIDBODY is supported.");
                 return;
             default:
                 logService.error("No such transformation type is supported");
@@ -510,11 +508,11 @@ public class NGStackReg implements Command
         {
         	if(alignmentAxis != AlignmentAxisType.ZANDT)
         	{
-        		sharedContext = new SharedContext(transformationType, img,currentPos,axisIndex,forceDoublePrecisionRepr, resizeAfterRegistration,logService,statusService);        		
+        		sharedContext = new SharedContext(transformationType, img, currentPos, axisIndex, forceDoublePrecisionRepr, resizeAfterRegistration, logService, statusService);        		
         	}
         	else
         	{
-        		sharedContext = new SharedContextZT(transformationType, img,currentPos, axisIndex, taxis, forceDoublePrecisionRepr, resizeAfterRegistration, logService,statusService);
+        		sharedContext = new SharedContextZT(transformationType, img, currentPos, axisIndex, taxis, forceDoublePrecisionRepr, resizeAfterRegistration, logService, statusService);
         	}
             if(img.dimension(axisIndex+2) > 1)
             {
