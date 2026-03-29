@@ -33,5 +33,6 @@ public interface Transformation {
     public JSONObject serialize();
     public Transformation copy();
     public Square transform(Square square);
+    //Translate in output space!
     public void translate(final double offsetx, final double offsety);
 }

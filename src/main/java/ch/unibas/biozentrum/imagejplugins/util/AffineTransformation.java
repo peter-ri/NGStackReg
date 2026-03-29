@@ -110,7 +110,7 @@ public class AffineTransformation implements Transformation {
     @Override
 	public Square transform(Square square)
     {
-    	AffineTransformation cp = (AffineTransformation)copy();
+    	/*AffineTransformation cp = (AffineTransformation)copy();
     	cp.invert();
     	//(0,0)
     	square.x1 = cp.offsetx;
@@ -130,13 +130,47 @@ public class AffineTransformation implements Transformation {
     	ly = (cp.a21 * square.x4) + (cp.a22 * square.y4) + cp.offsety;
     	square.x3 = lx;
     	square.y3 = ly;
+        return square;*/
+    	
+    	AffineTransformation cp = (AffineTransformation)copy();
+    	cp.invert();
+    	//(0,0)
+    	square.x1 = cp.offsetx;
+    	square.y1 = cp.offsety;
+    	//(width, 0)
+    	double lx = (cp.a11 * square.x2) + cp.offsetx;
+    	double ly = (cp.a21 * square.x2) + cp.offsety;
+    	square.x2 = lx;
+    	square.y2 = ly;
+    	//(0, height)
+    	lx = (cp.a12 * square.y3) + cp.offsetx;
+    	ly = (cp.a22 * square.y3) + cp.offsety;
+    	square.x3 = lx;
+    	square.y3 = ly;
+    	//(width, height) — fixed: was writing to x3/y3 (copy-paste bug), must write to x4/y4
+    	lx = (cp.a11 * square.x4) + (cp.a12 * square.y4) + cp.offsetx;
+    	ly = (cp.a21 * square.x4) + (cp.a22 * square.y4) + cp.offsety;
+    	square.x4 = lx;
+    	square.y4 = ly;
         return square;
     }
     
     @Override
     public void translate(final double offsetx, final double offsety)
     {
-    	this.offsetx += offsetx;
-    	this.offsety += offsety;
+    	/*this.offsetx += offsetx;
+    	this.offsety += offsety;*/
+    	
+    	/*
+         * The canvas origin is shifted by (offsetx, offsety) in output image space.
+         * New access-vector offset: t_new = t + A·(dx,dy)
+         * where A = | a11  a12 |
+         *           | a21  a22 |
+         *
+         * t_new_x = this.offsetx + a11*dx + a12*dy
+         * t_new_y = this.offsety + a21*dx + a22*dy
+         */
+    	this.offsetx += a11 * offsetx + a12 * offsety;
+    	this.offsety += a21 * offsetx + a22 * offsety;
     }
 }

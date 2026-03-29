@@ -38,10 +38,6 @@ public class ScaledRotationTransformation implements Transformation {
         {
             angle += ((ScaledRotationTransformation) t).angle;
             scale *= ((ScaledRotationTransformation) t).scale;
-            /*
-            double s = Math.sin(((ScaledRotationTransformation) t).angle);
-            double c = Math.cos(((ScaledRotationTransformation) t).angle);
-            */
             double s = Math.sin(-((ScaledRotationTransformation) t).angle);
             double c = Math.cos(-((ScaledRotationTransformation) t).angle);
             double tmpoffsetx = offsetx;
@@ -56,10 +52,6 @@ public class ScaledRotationTransformation implements Transformation {
 
     @Override
     public void invert() {
-    	/*
-        double s = Math.sin(angle);
-        double c = Math.cos(angle);
-        */
     	double s = Math.sin(-angle);
         double c = Math.cos(-angle);
         double tmpoffsetx = offsetx;
@@ -101,32 +93,60 @@ public class ScaledRotationTransformation implements Transformation {
 	public Square transform(Square square)
     {
     	ScaledRotationTransformation cp = (ScaledRotationTransformation)copy();
-    	//FIXME:
     	cp.invert();
+    	/*
+    	 * After invert(): cp.angle = -angle_orig, cp.scale = 1/scale_orig,
+    	 * cp.offsetx/y = t_inv
+    	 *
+    	 * Forward map: output = (1/scale_orig) * R(-angle_orig) * source + t_inv
+    	 *
+    	 * sin(-cp.angle) = sin(angle_orig), cos(-cp.angle) = cos(angle_orig)
+    	 * so s = sin(angle_orig), c = cos(angle_orig).
+    	 *
+    	 * (1/scale_orig) = cp.scale  ->  multiply by cp.scale
+    	 *
+    	 * output_x = (c*sx - s*sy) * cp.scale + cp.offsetx
+    	 * output_y = (s*sx + c*sy) * cp.scale + cp.offsety
+    	 */
     	double s = Math.sin(-cp.angle);
         double c = Math.cos(-cp.angle);
-        //x1, y1 = 0,0 (square.x1 * c + square.y1 * -s + offsetx)
-        square.x1 = -cp.offsetx;
-        //(square.x1 * s + square.y1 * c + offsety)
-        square.y1 = -cp.offsety;
+        //x1, y1 = 0,0
+        square.x1 = cp.offsetx;
+        square.y1 = cp.offsety;
         //square x2 = width; y2 = 0 
         double tmp = square.x2;
-        square.x2 = tmp * c / cp.scale - cp.offsetx;
-        square.y2 = tmp * s / cp.scale - cp.offsety;
+        square.x2 = tmp * c * cp.scale + cp.offsetx;
+        square.y2 = tmp * s * cp.scale + cp.offsety;
         //square x3 = 0; y3 = height
-        square.x3 = -cp.offsetx - square.y3 * s / cp.scale;
-        square.y3 = square.y3 * c / cp.scale - cp.offsety;
+        square.x3 = cp.offsetx - square.y3 * s * cp.scale;
+        square.y3 = square.y3 * c * cp.scale + cp.offsety;
         //square x4 = width; y4 = height
         tmp = square.x4;
-        square.x4 = (tmp * c - square.y4 * s) / cp.scale - cp.offsetx;
-        square.y4 = (tmp * s + square.y4 * c) / cp.scale - cp.offsety;
+        square.x4 = (tmp * c - square.y4 * s) * cp.scale + cp.offsetx;
+        square.y4 = (tmp * s + square.y4 * c) * cp.scale + cp.offsety;
         return square;
     }
     
     @Override
     public void translate(final double offsetx, final double offsety)
     {
-    	this.offsetx += offsetx;
-    	this.offsety += offsety;
+    	/*
+         * The canvas origin is shifted by (offsetx, offsety) in output image space.
+         * New access-vector offset: t_new = t + A·(dx,dy)
+         * where A = scale * R(angle).
+         *
+         * Using s = sin(-angle) = -sin(angle), c = cos(-angle) = cos(angle)
+         *   R(angle) applied to (dx,dy):
+         *     x-component: cos(angle)·dx + sin(angle)·dy  = c·dx - s·dy
+         *     y-component: -sin(angle)·dx + cos(angle)·dy = s·dx + c·dy
+         *
+         * So:
+         *   t_new_x = this.offsetx + scale * (c*dx - s*dy)
+         *   t_new_y = this.offsety + scale * (s*dx + c*dy)
+         */
+        double s = Math.sin(-angle);
+        double c = Math.cos(-angle);
+        this.offsetx += scale * (c * offsetx - s * offsety);
+        this.offsety += scale * (s * offsetx + c * offsety);
     }
 }

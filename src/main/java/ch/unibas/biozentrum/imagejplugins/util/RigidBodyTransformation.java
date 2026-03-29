@@ -40,10 +40,6 @@ public class RigidBodyTransformation implements Transformation {
             and transforming and adding the transformed offsets
             */
             angle += ((RigidBodyTransformation) t).angle;
-            /*
-            double s = Math.sin(((RigidBodyTransformation) t).angle);
-            double c = Math.cos(((RigidBodyTransformation) t).angle);
-            */
             double s = Math.sin(-((RigidBodyTransformation) t).angle);
             double c = Math.cos(-((RigidBodyTransformation) t).angle);
             double tmpoffsetx = offsetx;
@@ -58,20 +54,6 @@ public class RigidBodyTransformation implements Transformation {
 
     @Override
     public void invert() {
-    	/*
-        double s = Math.sin(angle);
-        double c = Math.cos(angle);
-        double tmpoffsetx = offsetx;
-        offsetx = -c * offsetx + s * offsety;
-        offsety = -c * offsety - s * tmpoffsetx;
-        angle = -angle;
-        */
-    	//FIXME: is +angle or -angle correct here? the image has an RHS coordinate system but the access vector is transformed.
-    	//Not clear to me if I make a logical mistake here?
-    	/*
-    	double s = Math.sin(angle);
-        double c = Math.cos(angle);
-        */
     	double s = Math.sin(-angle);
         double c = Math.cos(-angle);
         double tmpoffsetx = offsetx;
@@ -111,27 +93,9 @@ public class RigidBodyTransformation implements Transformation {
     	cp.invert();
     	/*
     	 * The original math uses the inverse rotation direction because the original
-    	 * app rotates the access vector (which is equivalent to inversely rotating the image.
+    	 * app rotates the access vector (which is equivalent to inversely rotating the image).
     	 * The image space is an LHS coordinate system.
     	 */
-    	/*double s = Math.sin(-cp.angle);
-        double c = Math.cos(-cp.angle);
-        //x1, y1 = 0,0 (square.x1 * c + square.y1 * -s + offsetx)
-        square.x1 = cp.offsetx;
-        //(square.x1 * s + square.y1 * c + offsety)
-        square.y1 = cp.offsety;
-        //square x2 = width; y2 = 0 
-        double tmp = square.x2;
-        square.x2 = tmp * c + cp.offsetx;
-        square.y2 = tmp * s + cp.offsety;
-        //square x3 = 0; y3 = height
-        square.x3 = cp.offsetx - square.y3 * s;
-        square.y3 = square.y3 * c + cp.offsety;
-        //square x4 = width; y4 = height
-        tmp = square.x4;
-        square.x4 = tmp * c - square.y4 * s + cp.offsetx;
-        square.y4 = tmp * s + square.y4 * c + cp.offsety;
-        return square;*/
     	double s = Math.sin(-cp.angle);
         double c = Math.cos(-cp.angle);
         //x1, y1 = 0,0 (square.x1 * c + square.y1 * -s + offsetx)
@@ -155,7 +119,30 @@ public class RigidBodyTransformation implements Transformation {
     @Override
     public void translate(final double offsetx, final double offsety)
     {
-    	this.offsetx += offsetx;
-    	this.offsety += offsety;
+    	/*
+         * The canvas origin is shifted by (offsetx, offsety) in output image space.
+         * The access-vector warp is:  source = A·p_old + t
+         * After shift:                source = A·(p_new + (dx,dy)) + t
+         *                                    = A·p_new + (A·(dx,dy) + t)
+         * So the new access-vector offset is: t_new = t + A·(dx,dy)
+         * For rigid body, A = R(angle):
+         *   t_new_x = offsetx + cos(angle)·dx - sin(angle)·dy   [using A with sin(-angle), cos(-angle)]
+         *
+         * With s = sin(-angle) = -sin(angle), c = cos(-angle) = cos(angle):
+         *
+         * The kernel access-vector matrix is R(angle) where:
+         *   R(angle) = | cos(angle)  sin(angle) |
+         *              |-sin(angle)  cos(angle) |
+         *
+         * So: t_new_x = this.offsetx + cos(angle)·dx + sin(angle)·dy
+         *     t_new_y = this.offsety - sin(angle)·dx + cos(angle)·dy
+         * Using s = sin(-angle) = -sin(angle), c = cos(-angle) = cos(angle):
+         *     t_new_x = this.offsetx + c·dx - s·dy
+         *     t_new_y = this.offsety + s·dx + c·dy
+         */
+        double s = Math.sin(-angle);
+        double c = Math.cos(-angle);
+        this.offsetx += c * offsetx - s * offsety;
+        this.offsety += s * offsetx + c * offsety;
     }
 }
