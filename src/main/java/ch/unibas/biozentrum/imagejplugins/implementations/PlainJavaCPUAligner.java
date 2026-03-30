@@ -1669,6 +1669,16 @@ public class PlainJavaCPUAligner extends CPUAligner
             inverseMarquardtLevenbergScaledRotationOptimization(0);
             break;
         case AFFINE:
+            for(int i = pyramidDepth - 1;i > 0;i--)
+            {
+                iterationPower /= 2;
+                inverseMarquardtLevenbergAffineOptimization(i);
+                // scale up (but the rotation and scale are not scale dependent)
+                offsetx *= 2.0;
+                offsety *= 2.0;
+            }
+            iterationPower /= 2;
+            inverseMarquardtLevenbergAffineOptimization(0);
             break;
         }
     }
@@ -2543,5 +2553,670 @@ public class PlainJavaCPUAligner extends CPUAligner
             }
         }
         return msqe / ((double)area);
+    }
+    
+    
+    /*
+     * ========================================================================================
+     * inverseMarquardtLevenbergAffineOptimization
+     * ========================================================================================
+     *
+     * Paper reference: Thévenaz et al., "A Pyramid Approach to Subpixel Registration Based
+     * on Intensity," IEEE TIP 1998, Section III-A.
+     *
+     * This implements the modified Levenberg-Marquardt optimizer for affine registration.
+     *
+     * The affine transformation maps output pixel (n, i) to source coordinates:
+     *   x' = a11*n + a12*i + tx
+     *   y' = a21*n + a22*i + ty
+     *
+     * Parameter vector: p = (a11, a12, a21, a22, tx, ty), dimension = 6.
+     *
+     * At identity: a11=1, a12=0, a21=0, a22=1, tx=0, ty=0.
+     *
+     * The optimization minimizes E(p) = (1/|Ω|) Σ [f(x) - g(T_p(x))]²
+     * using the "inverse" approach where the Jacobian is built from the SOURCE image
+     * gradients ∇f, which remain constant across iterations. This avoids recomputing
+     * the Hessian when the parameters change, as described in Section III-A of the paper.
+     *
+     * LM damping: The pseudoHessian is constructed by copying ONLY the diagonal of the
+     * Gauss-Newton Hessian H, scaled by (1+λ):
+     *   pseudoH[k][k] = (1+λ) * H[k][k]
+     * with all off-diagonal entries left at zero. This reduces the damped step to:
+     *   δp_k = g_k / ((1+λ) * H_kk)
+     * which is an independent damped gradient descent along each parameter axis.
+     * This is a deliberate simplification inherited from the original TurboReg design:
+     * - Computationally cheaper: O(n) diagonal inversion instead of O(n³) full inversion.
+     * - More numerically stable: avoids ill-conditioning from off-diagonal coupling.
+     * - For large λ (far from optimum), LM reduces to gradient descent anyway.
+     * The full Hessian (with off-diagonals) is inverted only for the FINAL undamped
+     * Gauss-Newton step after the LM loop converges.
+     *
+     * Update signs: For affine, ALL parameters live in a vector space (unlike the SE(2)
+     * group for rigid body). The update is purely additive with POSITIVE sign:
+     *   a11_new = a11 + δa11
+     *   a12_new = a12 + δa12
+     *   ...
+     *   tx_new  = tx  + δtx
+     *   ty_new  = ty  + δty
+     *
+     * This is correct because:
+     * - The gradient g_k = Σ r_i * (∂f/∂p_k) points in the direction that increases
+     *   the dot product of residual with the Jacobian column.
+     * - The Gauss-Newton step δp = H⁻¹ g directly gives the parameter increment
+     *   that reduces the least-squares error.
+     * - Unlike rigid body (where the angle update requires a MINUS sign due to the
+     *   inverse/compositional convention and subsequent SE(2) group composition),
+     *   affine parameters are simply linear coefficients with no such group structure.
+     *
+     * Contrast with rigid body:
+     * - Rigid body: angle update is SUBTRACTED (currentangle = angle - update[0])
+     *   because the angle parameterizes a rotation group, and the "inverse" Jacobian
+     *   convention means the gradient points opposite to the forward rotation direction.
+     *   The offsets are then COMPOSED through the incremental rotation matrix.
+     * - Affine: all 6 parameters are ADDED directly. No group composition is needed.
+     *   The affine matrix entries (a11, a12, a21, a22) are dimensionless linear
+     *   coefficients, and (tx, ty) are translations — all updated additively.
+     *
+     * Displacement convergence criterion:
+     *   displacement = sqrt(δtx² + δty²)
+     *                + 0.25 * diagonal * (|δa11| + |δa12| + |δa21| + |δa22|)
+     * The matrix element updates are converted to approximate pixel displacements
+     * by multiplying by 0.25 × the image diagonal. This heuristic estimates the
+     * maximum pixel displacement caused by a small change in a matrix coefficient
+     * (analogous to the 0.25*diagonal*|δθ| term in rigid body).
+     */
+    private void inverseMarquardtLevenbergAffineOptimization(int pyramidIndex)
+    {
+    	pseudoHessian[0][0] = pseudoHessian[0][1] = pseudoHessian[0][2] = pseudoHessian[0][3] = pseudoHessian[0][4] = pseudoHessian[0][5] = 0.0;
+    	pseudoHessian[1][0] = pseudoHessian[1][1] = pseudoHessian[1][2] = pseudoHessian[1][3] = pseudoHessian[1][4] = pseudoHessian[1][5] = 0.0;
+    	pseudoHessian[2][0] = pseudoHessian[2][1] = pseudoHessian[2][2] = pseudoHessian[2][3] = pseudoHessian[2][4] = pseudoHessian[2][5] = 0.0;
+    	pseudoHessian[3][0] = pseudoHessian[3][1] = pseudoHessian[3][2] = pseudoHessian[3][3] = pseudoHessian[3][4] = pseudoHessian[3][5] = 0.0;
+    	pseudoHessian[4][0] = pseudoHessian[4][1] = pseudoHessian[4][2] = pseudoHessian[4][3] = pseudoHessian[4][4] = pseudoHessian[4][5] = 0.0;
+    	pseudoHessian[5][0] = pseudoHessian[5][1] = pseudoHessian[5][2] = pseudoHessian[5][3] = pseudoHessian[5][4] = pseudoHessian[5][5] = 0.0;
+        double[] update = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0};
+        double bestMeanSquares = 0.0;
+        double meanSquares = 0.0;
+        double lambda = 1.0;
+        double displacement;
+        int iteration = 0;
+
+        // Trial parameters for each LM step
+        double currenta11;
+        double currenta12;
+        double currenta21;
+        double currenta22;
+        double currentoffsetx;
+        double currentoffsety;
+
+        /*
+         * Initial evaluation: compute E(p₀), gradient g, and Hessian H
+         * at the current parameter values. The gradient and Hessian are
+         * stored in the class fields gradient[] and hessian[][].
+         */
+        bestMeanSquares = getAffineMeanSquares(pyramidIndex, offsetx, offsety, a11, a12, a21, a22);
+        iteration++;
+
+        do {
+            /*
+             * Construct the LM-damped pseudoHessian.
+             * Only the diagonal is set: pseudoH[k][k] = (1+λ) * H[k][k].
+             * Off-diagonals remain zero (the pseudoHessian arrays are reused
+             * and the off-diagonals were never set to non-zero values).
+             * Inverting this diagonal matrix and multiplying by the gradient
+             * yields: δp_k = g_k / ((1+λ) * H_kk).
+             */
+            for (int k = 0; (k < 6); k++) {
+                pseudoHessian[k][k] = (1.0 + lambda) * hessian[k][k];
+            }
+            StaticUtility.invertGauss(pseudoHessian);
+            update = StaticUtility.matrixMultiply(pseudoHessian, gradient);
+
+            /*
+             * Compute the displacement for convergence testing.
+             * The translational displacement is the Euclidean norm of (δtx, δty).
+             * The matrix-element displacement is heuristically converted to pixels
+             * by multiplying by 0.25 × image diagonal, analogous to the rigid body
+             * angle-to-pixel conversion.
+             */
+            /*double diag = Math.sqrt((double)(targetPyramid[pyramidIndex].width * targetPyramid[pyramidIndex].width)
+                                  + (double)(targetPyramid[pyramidIndex].height * targetPyramid[pyramidIndex].height));
+            displacement = Math.sqrt(update[4] * update[4] + update[5] * update[5])
+                         + 0.25 * diag * (Math.abs(update[0]) + Math.abs(update[1]) + Math.abs(update[2]) + Math.abs(update[3]));*/
+            
+            /*
+             * A change δa11 causes a displacement of approximately |δa11| * |x| at pixel position x. 
+             * The maximum |x| is approximately width/2 (measuring from center). 
+             * Similarly, δa12 causes |δa12| * |y| where max |y| ≈ height/2. 
+             * So a tighter heuristic would be:
+             */
+            displacement = Math.sqrt(update[4] * update[4] + update[5] * update[5])
+                    + 0.5 * (double)targetPyramid[pyramidIndex].width
+                      * (Math.abs(update[0]) + Math.abs(update[2]))
+                    + 0.5 * (double)targetPyramid[pyramidIndex].height
+                      * (Math.abs(update[1]) + Math.abs(update[3]));
+
+            /*
+             * Affine parameter update: purely additive, positive sign.
+             * Unlike rigid body where angle is SUBTRACTED and offsets are COMPOSED
+             * through a rotation matrix, affine parameters form a vector space
+             * and are simply incremented.
+             */
+            currenta11    = this.a11    + update[0];
+            currenta12    = this.a12    + update[1];
+            currenta21    = this.a21    + update[2];
+            currenta22    = this.a22    + update[3];
+            currentoffsetx = this.offsetx + update[4];
+            currentoffsety = this.offsety + update[5];
+
+            /*
+             * Evaluate the MSE at the trial point. This also recomputes gradient
+             * and Hessian for the next iteration (the "accelerated" variant from
+             * the paper always recomputes, since the source gradients are constant
+             * but the B-spline interpolation coordinates change).
+             */
+            meanSquares = getAffineMeanSquares(pyramidIndex, currentoffsetx, currentoffsety,
+                                               currenta11, currenta12, currenta21, currenta22);
+
+            iteration++;
+            if (meanSquares < bestMeanSquares) {
+                /*
+                 * Accept the step: the MSE decreased.
+                 * Reduce λ (shift toward Gauss-Newton / larger steps).
+                 */
+                bestMeanSquares = meanSquares;
+                lambda /= 4.0;
+                this.a11    = currenta11;
+                this.a12    = currenta12;
+                this.a21    = currenta21;
+                this.a22    = currenta22;
+                this.offsetx = currentoffsetx;
+                this.offsety = currentoffsety;
+            }
+            else {
+                /*
+                 * Reject the step: the MSE did not decrease.
+                 * Increase λ (shift toward gradient descent / smaller steps).
+                 * The gradient and Hessian from the PREVIOUS accepted point
+                 * are still valid (they were overwritten by getAffineMeanSquares
+                 * but will be recomputed at the accepted point on the next
+                 * iteration if the step is accepted).
+                 */
+                lambda *= 4.0;
+            }
+        } while ((iteration < (10 * iterationPower - 1)) && (0.001 <= displacement));
+
+        /*
+         * Final undamped Gauss-Newton step: invert the FULL Hessian (with
+         * off-diagonals) and apply one pure quadratic step. This gives the
+         * best local quadratic approximation without LM damping.
+         * Accept only if it improves the MSE.
+         */
+        StaticUtility.invertGauss(hessian);
+        update = StaticUtility.matrixMultiply(hessian, gradient);
+
+        currenta11     = this.a11     + update[0];
+        currenta12     = this.a12     + update[1];
+        currenta21     = this.a21     + update[2];
+        currenta22     = this.a22     + update[3];
+        currentoffsetx = this.offsetx + update[4];
+        currentoffsety = this.offsety + update[5];
+
+        meanSquares = getAffineMeanSquaresWithoutHessian(pyramidIndex, currentoffsetx, currentoffsety,
+                                                          currenta11, currenta12, currenta21, currenta22);
+        iteration++;
+        if (meanSquares < bestMeanSquares) {
+            this.a11     = currenta11;
+            this.a12     = currenta12;
+            this.a21     = currenta21;
+            this.a22     = currenta22;
+            this.offsetx = currentoffsetx;
+            this.offsety = currentoffsety;
+        }
+    }
+
+    /*
+     * ========================================================================================
+     * getAffineMeanSquares
+     * ========================================================================================
+     *
+     * Paper reference: Thévenaz et al., Section III-A, Eq. (3)-(6), specialized to affine.
+     *
+     * This function computes:
+     *   1. The mean squared error E(p) = (1/|Ω|) Σ [f(x_i) - g(T_p(x_i))]²
+     *   2. The gradient vector g_k = Σ r_i * J_ik  (k = 0..5)
+     *   3. The Gauss-Newton Hessian H_kl = Σ J_ik * J_il  (upper triangle, then symmetrized)
+     *
+     * The affine transformation is:
+     *   x' = a11*n + a12*i + tx
+     *   y' = a21*n + a22*i + ty
+     *
+     * where (n, i) is the output pixel position (column, row).
+     *
+     * The "inverse" approach (Section III-A) uses SOURCE image gradients ∇f(x)
+     * instead of target gradients ∇g(T(x)). This is the key innovation: since f
+     * is fixed, ∇f is computed once during pyramid construction and reused across
+     * all iterations. The Hessian H = J^T J is therefore approximately constant,
+     * changing only because the set of valid (in-bounds) pixels varies with the
+     * transformation parameters.
+     *
+     * Jacobian derivation for affine:
+     *   The parameters are p = (a11, a12, a21, a22, tx, ty).
+     *   The coordinate mapping is: [x', y']^T = A * [n, i]^T + [tx, ty]^T
+     *
+     *   ∂x'/∂a11 = n,    ∂y'/∂a11 = 0
+     *   ∂x'/∂a12 = i,    ∂y'/∂a12 = 0
+     *   ∂x'/∂a21 = 0,    ∂y'/∂a21 = n
+     *   ∂x'/∂a22 = 0,    ∂y'/∂a22 = i
+     *   ∂x'/∂tx  = 1,    ∂y'/∂tx  = 0
+     *   ∂x'/∂ty  = 0,    ∂y'/∂ty  = 1
+     *
+     *   By the chain rule (using source gradients for the "inverse" approach):
+     *     ∂f/∂a11 = (∂f/∂x)(∂x'/∂a11) + (∂f/∂y)(∂y'/∂a11) = n * ∂f/∂x
+     *     ∂f/∂a12 = i * ∂f/∂x
+     *     ∂f/∂a21 = n * ∂f/∂y
+     *     ∂f/∂a22 = i * ∂f/∂y
+     *     ∂f/∂tx  = ∂f/∂x
+     *     ∂f/∂ty  = ∂f/∂y
+     *
+     *   So the Jacobian row for pixel (n, i) is:
+     *     J_i = [n*∂f/∂x, i*∂f/∂x, n*∂f/∂y, i*∂f/∂y, ∂f/∂x, ∂f/∂y]
+     *
+     * This yields 6 gradient entries and 21 unique Hessian entries (upper triangle
+     * of the 6×6 symmetric matrix), which are then symmetrized.
+     *
+     * Note on coordinate system:
+     *   The source image and its gradients are indexed by the output pixel position
+     *   (n, i) where n is the column (x) and i is the row (y). The coordinate mapping
+     *   computes where in the TARGET coefficient array to sample from, using cubic
+     *   B-spline interpolation with mirror boundary conditions.
+     *
+     * The B-spline interpolation, boundary handling, and weight computation are
+     * identical to getTranslationMeanSquares and getRigidBodyMeanSquares.
+     */
+    private double getAffineMeanSquares(int pyramidIndex, double currentoffsetx, double currentoffsety,
+                                        double currenta11, double currenta12,
+                                        double currenta21, double currenta22)
+    {
+        // Reset gradient vector (6 entries)
+        gradient[0] = 0.0;
+        gradient[1] = 0.0;
+        gradient[2] = 0.0;
+        gradient[3] = 0.0;
+        gradient[4] = 0.0;
+        gradient[5] = 0.0;
+        // Reset upper triangle of Hessian (6×6 symmetric → 21 unique entries)
+        hessian[0][0] = 0.0;
+        hessian[0][1] = 0.0;
+        hessian[0][2] = 0.0;
+        hessian[0][3] = 0.0;
+        hessian[0][4] = 0.0;
+        hessian[0][5] = 0.0;
+        hessian[1][1] = 0.0;
+        hessian[1][2] = 0.0;
+        hessian[1][3] = 0.0;
+        hessian[1][4] = 0.0;
+        hessian[1][5] = 0.0;
+        hessian[2][2] = 0.0;
+        hessian[2][3] = 0.0;
+        hessian[2][4] = 0.0;
+        hessian[2][5] = 0.0;
+        hessian[3][3] = 0.0;
+        hessian[3][4] = 0.0;
+        hessian[3][5] = 0.0;
+        hessian[4][4] = 0.0;
+        hessian[4][5] = 0.0;
+        hessian[5][5] = 0.0;
+
+        final int width = (int)sourcePyramid[pyramidIndex].width;
+        final int height = (int)sourcePyramid[pyramidIndex].height;
+        final double[] source = sourcePyramid[pyramidIndex].Image;
+        final double[] xGradient = sourcePyramid[pyramidIndex].xGradient;
+        final double[] yGradient = sourcePyramid[pyramidIndex].yGradient;
+        final int targetwidth = (int)targetPyramid[pyramidIndex].width;
+        final int doubletargetwidth = targetwidth * 2;
+        final int targetheight = (int)targetPyramid[pyramidIndex].height;
+        final int doubletargetheight = targetheight * 2;
+        final double[] target = targetPyramid[pyramidIndex].Coefficient;
+        int nIndex = 0;
+        int area = 0;
+        int p;
+        int q;
+        int tmpindex;
+        double s;
+        double msqe = 0.0;
+        double coordx;
+        double rescoordx;
+        double coordy;
+        double rescoordy;
+        int mskx;
+        int msky;
+
+        /*
+         * Affine coordinate vectors:
+         *   xvec = (a11, a21) — the column-step direction (stepping n by +1)
+         *   yvec = (a12, a22) — the row-step direction (stepping i by +1)
+         *
+         * For output pixel (n, i):
+         *   coordx = tx + n*a11 + i*a12
+         *   coordy = ty + n*a21 + i*a22
+         *
+         * We use incremental stepping (adding xvec per column, resetting
+         * to base + i*yvec per row) to avoid per-pixel multiplications,
+         * identical to how rigid body uses cos/sin vectors.
+         */
+        double xvecx = currenta11;
+        double xvecy = currenta21;
+        double yvecx = currenta12;
+        double yvecy = currenta22;
+
+        /*
+         * Jacobian column variables (recomputed per pixel):
+         *   dx0 = n * ∂f/∂x   (∂f/∂a11)
+         *   dx1 = i * ∂f/∂x   (∂f/∂a12)
+         *   dy0 = n * ∂f/∂y   (∂f/∂a21)
+         *   dy1 = i * ∂f/∂y   (∂f/∂a22)
+         *   dx  = ∂f/∂x       (∂f/∂tx)
+         *   dy  = ∂f/∂y       (∂f/∂ty)
+         */
+        double dx0, dx1, dy0, dy1, dx, dy;
+
+        for(int i = 0; i < height; i++)
+        {
+            /*
+             * Reset x-coordinate to the start of this row.
+             * coordx = tx + i * a12  (the n=0 position for row i)
+             * coordy = ty + i * a22
+             */
+            coordx = currentoffsetx + ((double)i) * yvecx;
+            coordy = currentoffsety + ((double)i) * yvecy;
+
+            for(int n = 0; n < width; n++, nIndex++)
+            {
+                mskx = (int)Math.round(coordx);
+                msky = (int)Math.round(coordy);
+                if((mskx >= 0) && (mskx < targetwidth) && (msky >= 0) && (msky < targetheight))
+                {
+                    // ---- B-spline interpolation (identical to translation/rigid body) ----
+
+                    // Calculate X-interpolation indices with mirror boundary
+                    p = (coordx >= 0) ? (((int)coordx) + 2) : (((int)coordx) + 1);
+                    for(int c = 0; c < 4; c++, p--)
+                    {
+                        q = (p < 0) ? (-1 - p) : p;
+                        /*if(q >= doubletargetwidth)
+                        {
+                            q -= (doubletargetwidth) * (q / (doubletargetwidth));
+                        }*/
+                        q = (q < doubletargetwidth) ? q : q % doubletargetwidth;
+                        xInterpolationIndices[c] = q >= targetwidth ? (doubletargetwidth - 1 - q) : q;
+                    }
+                    // Calculate Y-interpolation indices with mirror boundary
+                    p = (coordy >= 0) ? (((int)coordy) + 2) : (((int)coordy) + 1);
+                    for(int c = 0; c < 4; c++, p--)
+                    {
+                        q = (p < 0) ? (-1 - p) : p;
+                        /*if(q >= doubletargetheight)
+                        {
+                            q -= (doubletargetheight) * (q / (doubletargetheight));
+                        }*/
+                        q = (q < doubletargetheight) ? q : q % doubletargetheight;
+                        yInterpolationIndices[c] = q >= targetheight ? (doubletargetheight - 1 - q) * targetwidth : q * targetwidth;
+                    }
+
+                    // Fractional part of coordinates for B-spline weight computation
+                    rescoordx = coordx - (coordx >= 0.0 ? ((double)((int)coordx)) : ((double)(((int)coordx) - 1)));
+                    rescoordy = coordy - (coordy >= 0.0 ? ((double)((int)coordy)) : ((double)(((int)coordy) - 1)));
+
+                    // Cubic B-spline weights for X
+                    s = 1.0 - rescoordx;
+                    xWeights[3] = Math.pow(s, 3.0) / 6.0;
+                    s = rescoordx * rescoordx;
+                    xWeights[2] = (2.0 / 3.0) - 0.5 * s * (2.0 - rescoordx);
+                    xWeights[0] = s * rescoordx / 6.0;
+                    xWeights[1] = 1.0 - xWeights[0] - xWeights[2] - xWeights[3];
+                    // Cubic B-spline weights for Y
+                    s = 1.0 - rescoordy;
+                    yWeights[3] = Math.pow(s, 3.0) / 6.0;
+                    s = rescoordy * rescoordy;
+                    yWeights[2] = (2.0 / 3.0) - 0.5 * s * (2.0 - rescoordy);
+                    yWeights[0] = s * rescoordy / 6.0;
+                    yWeights[1] = 1.0 - yWeights[0] - yWeights[2] - yWeights[3];
+
+                    // Interpolate target at the mapped coordinate
+                    s = 0.0;
+                    for(int y = 0; y < 4; y++)
+                    {
+                        rescoordx = 0.0;// To avoid using too many variables this one will be repurposed
+                        tmpindex = yInterpolationIndices[y];
+                        for(int x = 0; x < 4; x++)
+                        {
+                            rescoordx += xWeights[x] * target[tmpindex + xInterpolationIndices[x]];
+                        }
+                        s += yWeights[y] * rescoordx;
+                    }
+
+                    // ---- Gradient and Hessian accumulation ----
+
+                    /*
+                     * Residual: r_i = f(x_i) - g(T_p(x_i))
+                     * where f is the source image and g is the B-spline-interpolated target.
+                     * We reuse rescoordx to store the residual (same as translation/rigid body).
+                     */
+                    rescoordx = source[nIndex] - s; // repurposed for diff
+                    msqe += rescoordx * rescoordx;
+                    area++;
+
+                    /*
+                     * Jacobian columns for the affine parameterization:
+                     *   ∂f/∂a11 = n * ∂f/∂x       → dx0
+                     *   ∂f/∂a12 = i * ∂f/∂x       → dx1
+                     *   ∂f/∂a21 = n * ∂f/∂y       → dy0
+                     *   ∂f/∂a22 = i * ∂f/∂y       → dy1
+                     *   ∂f/∂tx  = ∂f/∂x           → dx
+                     *   ∂f/∂ty  = ∂f/∂y           → dy
+                     *
+                     * These use the SOURCE gradients (the "inverse" approach).
+                     */
+                    dx = xGradient[nIndex];
+                    dy = yGradient[nIndex];
+                    dx0 = ((double)n) * dx;   // n * ∂f/∂x
+                    dx1 = ((double)i) * dx;   // i * ∂f/∂x
+                    dy0 = ((double)n) * dy;   // n * ∂f/∂y
+                    dy1 = ((double)i) * dy;   // i * ∂f/∂y
+
+                    /*
+                     * Gradient accumulation: g_k += r_i * J_ik
+                     * Parameter order: (a11, a12, a21, a22, tx, ty)
+                     */
+                    gradient[0] += rescoordx * dx0;   // Σ r * n * ∂f/∂x
+                    gradient[1] += rescoordx * dx1;   // Σ r * i * ∂f/∂x
+                    gradient[2] += rescoordx * dy0;   // Σ r * n * ∂f/∂y
+                    gradient[3] += rescoordx * dy1;   // Σ r * i * ∂f/∂y
+                    gradient[4] += rescoordx * dx;    // Σ r * ∂f/∂x
+                    gradient[5] += rescoordx * dy;    // Σ r * ∂f/∂y
+
+                    /*
+                     * Hessian accumulation (upper triangle only):
+                     * H_kl += J_ik * J_il
+                     *
+                     * This is the Gauss-Newton approximation H ≈ J^T J,
+                     * ignoring the second-order terms r_i * ∇²f_i.
+                     * Only 21 unique entries (upper triangle of 6×6 symmetric matrix).
+                     */
+                    // Row 0: a11 × {a11, a12, a21, a22, tx, ty}
+                    hessian[0][0] += dx0 * dx0;
+                    hessian[0][1] += dx0 * dx1;
+                    hessian[0][2] += dx0 * dy0;
+                    hessian[0][3] += dx0 * dy1;
+                    hessian[0][4] += dx0 * dx;
+                    hessian[0][5] += dx0 * dy;
+                    // Row 1: a12 × {a12, a21, a22, tx, ty}
+                    hessian[1][1] += dx1 * dx1;
+                    hessian[1][2] += dx1 * dy0;
+                    hessian[1][3] += dx1 * dy1;
+                    hessian[1][4] += dx1 * dx;
+                    hessian[1][5] += dx1 * dy;
+                    // Row 2: a21 × {a21, a22, tx, ty}
+                    hessian[2][2] += dy0 * dy0;
+                    hessian[2][3] += dy0 * dy1;
+                    hessian[2][4] += dy0 * dx;
+                    hessian[2][5] += dy0 * dy;
+                    // Row 3: a22 × {a22, tx, ty}
+                    hessian[3][3] += dy1 * dy1;
+                    hessian[3][4] += dy1 * dx;
+                    hessian[3][5] += dy1 * dy;
+                    // Row 4: tx × {tx, ty}
+                    hessian[4][4] += dx * dx;
+                    hessian[4][5] += dx * dy;
+                    // Row 5: ty × {ty}
+                    hessian[5][5] += dy * dy;
+                }
+                // Advance along the x-direction vector (column step)
+                coordx += xvecx;
+                coordy += xvecy;
+            }
+        }
+
+        /*
+         * Symmetrize the Hessian: H[j][k] = H[k][j] for j > k.
+         * The Gauss-Newton Hessian J^T J is symmetric by construction;
+         * we only accumulated the upper triangle for efficiency.
+         */
+        for (int i = 1; (i < 6); i++) {
+            for (int j = 0; (j < i); j++) {
+                hessian[i][j] = hessian[j][i];
+            }
+        }
+        return msqe / ((double) area);
+    }
+
+    /*
+     * ========================================================================================
+     * getAffineMeanSquaresWithoutHessian
+     * ========================================================================================
+     *
+     * Paper reference: Same as getAffineMeanSquares, but this is the "accelerated" variant
+     * described in Section III-A of Thévenaz et al.
+     *
+     * This function computes ONLY the mean squared error E(p), WITHOUT accumulating the
+     * gradient or Hessian. It is used for the FINAL undamped Gauss-Newton step after the
+     * LM loop converges.
+     *
+     * Rationale: The final step uses the gradient and Hessian from the LAST accepted point
+     * (already stored in gradient[] and hessian[]). We only need to evaluate the MSE at
+     * the trial point to decide whether to accept the step. Skipping the gradient/Hessian
+     * accumulation saves computation.
+     *
+     * The coordinate mapping, B-spline interpolation, and boundary handling are identical
+     * to getAffineMeanSquares. The only difference is that no gradient[] or hessian[]
+     * entries are written.
+     */
+    private double getAffineMeanSquaresWithoutHessian(int pyramidIndex, double currentoffsetx, double currentoffsety,
+                                                       double currenta11, double currenta12,
+                                                       double currenta21, double currenta22)
+    {
+        final int width = (int)sourcePyramid[pyramidIndex].width;
+        final int height = (int)sourcePyramid[pyramidIndex].height;
+        final double[] source = sourcePyramid[pyramidIndex].Image;
+        final int targetwidth = (int)targetPyramid[pyramidIndex].width;
+        final int doubletargetwidth = targetwidth * 2;
+        final int targetheight = (int)targetPyramid[pyramidIndex].height;
+        final int doubletargetheight = targetheight * 2;
+        final double[] target = targetPyramid[pyramidIndex].Coefficient;
+        int nIndex = 0;
+        int area = 0;
+        int p;
+        int q;
+        int tmpindex;
+        double s;
+        double msqe = 0.0;
+        double coordx;
+        double rescoordx;
+        double coordy;
+        double rescoordy;
+        int mskx;
+        int msky;
+
+        // Affine coordinate step vectors (same as getAffineMeanSquares)
+        double xvecx = currenta11;
+        double xvecy = currenta21;
+        double yvecx = currenta12;
+        double yvecy = currenta22;
+
+        for(int i = 0; i < height; i++)
+        {
+            coordx = currentoffsetx + ((double)i) * yvecx;
+            coordy = currentoffsety + ((double)i) * yvecy;
+
+            for(int n = 0; n < width; n++, nIndex++)
+            {
+                mskx = (int)Math.round(coordx);
+                msky = (int)Math.round(coordy);
+                if((mskx >= 0) && (mskx < targetwidth) && (msky >= 0) && (msky < targetheight))
+                {
+                    // B-spline interpolation indices and weights (identical to above)
+                    p = (coordx >= 0) ? (((int)coordx) + 2) : (((int)coordx) + 1);
+                    for(int c = 0; c < 4; c++, p--)
+                    {
+                        q = (p < 0) ? (-1 - p) : p;
+                        /*if(q >= doubletargetwidth)
+                        {
+                            q -= (doubletargetwidth) * (q / (doubletargetwidth));
+                        }*/
+                        q = q < doubletargetwidth ? q : q % doubletargetwidth;
+                        xInterpolationIndices[c] = q >= targetwidth ? (doubletargetwidth - 1 - q) : q;
+                    }
+                    p = (coordy >= 0) ? (((int)coordy) + 2) : (((int)coordy) + 1);
+                    for(int c = 0; c < 4; c++, p--)
+                    {
+                        q = (p < 0) ? (-1 - p) : p;
+                        /*if(q >= doubletargetheight)
+                        {
+                            q -= (doubletargetheight) * (q / (doubletargetheight));
+                        }*/
+                        q = q < doubletargetheight ? q : q % doubletargetheight;
+                        yInterpolationIndices[c] = q >= targetheight ? (doubletargetheight - 1 - q) * targetwidth : q * targetwidth;
+                    }
+
+                    rescoordx = coordx - (coordx >= 0.0 ? ((double)((int)coordx)) : ((double)(((int)coordx) - 1)));
+                    rescoordy = coordy - (coordy >= 0.0 ? ((double)((int)coordy)) : ((double)(((int)coordy) - 1)));
+
+                    s = 1.0 - rescoordx;
+                    xWeights[3] = Math.pow(s, 3.0) / 6.0;
+                    s = rescoordx * rescoordx;
+                    xWeights[2] = (2.0 / 3.0) - 0.5 * s * (2.0 - rescoordx);
+                    xWeights[0] = s * rescoordx / 6.0;
+                    xWeights[1] = 1.0 - xWeights[0] - xWeights[2] - xWeights[3];
+
+                    s = 1.0 - rescoordy;
+                    yWeights[3] = Math.pow(s, 3.0) / 6.0;
+                    s = rescoordy * rescoordy;
+                    yWeights[2] = (2.0 / 3.0) - 0.5 * s * (2.0 - rescoordy);
+                    yWeights[0] = s * rescoordy / 6.0;
+                    yWeights[1] = 1.0 - yWeights[0] - yWeights[2] - yWeights[3];
+
+                    s = 0.0;
+                    for(int y = 0; y < 4; y++)
+                    {
+                        rescoordx = 0.0;
+                        tmpindex = yInterpolationIndices[y];
+                        for(int x = 0; x < 4; x++)
+                        {
+                            rescoordx += xWeights[x] * target[tmpindex + xInterpolationIndices[x]];
+                        }
+                        s += yWeights[y] * rescoordx;
+                    }
+
+                    // Only compute the residual and MSE — no gradient/Hessian
+                    rescoordx = source[nIndex] - s;
+                    msqe += rescoordx * rescoordx;
+                    area++;
+                }
+                coordx += xvecx;
+                coordy += xvecy;
+            }
+        }
+        return msqe / ((double) area);
     }
 }
