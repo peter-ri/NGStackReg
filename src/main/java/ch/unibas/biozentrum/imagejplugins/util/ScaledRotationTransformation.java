@@ -56,7 +56,6 @@ public class ScaledRotationTransformation implements Transformation {
         double c = Math.cos(-angle);
         double tmpoffsetx = offsetx;
         //The scale is already inverted
-        //FIXME: Check this again
         offsetx = (-c * offsetx - s * offsety) / scale;
         offsety = (s * tmpoffsetx - c * offsety) / scale;
         angle = -angle;

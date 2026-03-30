@@ -110,28 +110,6 @@ public class AffineTransformation implements Transformation {
     @Override
 	public Square transform(Square square)
     {
-    	/*AffineTransformation cp = (AffineTransformation)copy();
-    	cp.invert();
-    	//(0,0)
-    	square.x1 = cp.offsetx;
-    	square.y1 = cp.offsety;
-    	//(width, 0)
-    	double lx = (cp.a11 * square.x2) + cp.offsetx;
-    	double ly = (cp.a21 * square.x2) + cp.offsety;
-    	square.x2 = lx;
-    	square.y2 = ly;
-    	//(0, height)
-    	lx = (cp.a12 * square.y3) + cp.offsetx;
-    	ly = (cp.a22 * square.y3) + cp.offsety;
-    	square.x3 = lx;
-    	square.y3 = ly;
-    	//(width, height)
-    	lx = (cp.a11 * square.x4) + (cp.a12 * square.y4) + cp.offsetx;
-    	ly = (cp.a21 * square.x4) + (cp.a22 * square.y4) + cp.offsety;
-    	square.x3 = lx;
-    	square.y3 = ly;
-        return square;*/
-    	
     	AffineTransformation cp = (AffineTransformation)copy();
     	cp.invert();
     	//(0,0)
@@ -147,7 +125,6 @@ public class AffineTransformation implements Transformation {
     	ly = (cp.a22 * square.y3) + cp.offsety;
     	square.x3 = lx;
     	square.y3 = ly;
-    	//(width, height) — fixed: was writing to x3/y3 (copy-paste bug), must write to x4/y4
     	lx = (cp.a11 * square.x4) + (cp.a12 * square.y4) + cp.offsetx;
     	ly = (cp.a21 * square.x4) + (cp.a22 * square.y4) + cp.offsety;
     	square.x4 = lx;
@@ -158,9 +135,6 @@ public class AffineTransformation implements Transformation {
     @Override
     public void translate(final double offsetx, final double offsety)
     {
-    	/*this.offsetx += offsetx;
-    	this.offsety += offsety;*/
-    	
     	/*
          * The canvas origin is shifted by (offsetx, offsety) in output image space.
          * New access-vector offset: t_new = t + A·(dx,dy)

@@ -491,13 +491,13 @@ public class PlainJavaCPUAligner extends CPUAligner
         double rescoordy;
         int mskx;
         int msky;
-        for(int i = 0;i < height;i++)
+        for(int i = 0;i < targetheight;i++)
         {
         	// First walk along the Y-vector direction and reset the X-position (otherwise the
             // y position is initially correct and then lagging behind by one all the time)
             coordx = currentoffsetx;
             coordy = currentoffsety + ((double)i);
-            for(int n = 0;n < targetheight;n++,nIndex++)
+            for(int n = 0;n < targetwidth;n++,nIndex++)
             {
                 mskx = (int)Math.round(coordx);
                 msky = (int)Math.round(coordy);
@@ -1675,6 +1675,10 @@ public class PlainJavaCPUAligner extends CPUAligner
     
     private void inverseMarquardtLevenbergScaledRotationOptimization(int pyramidIndex)
     {
+    	pseudoHessian[0][0] = pseudoHessian[0][1] = pseudoHessian[0][2] = pseudoHessian[0][3] = 0.0;
+    	pseudoHessian[1][0] = pseudoHessian[1][1] = pseudoHessian[1][2] = pseudoHessian[1][3] = 0.0;
+    	pseudoHessian[2][0] = pseudoHessian[2][1] = pseudoHessian[2][2] = pseudoHessian[2][3] = 0.0;
+    	pseudoHessian[3][0] = pseudoHessian[3][1] = pseudoHessian[3][2] = pseudoHessian[3][3] = 0.0;
         double[] update = {0.0,0.0,0.0,0.0};
         double bestMeanSquares = 0.0;
         double meanSquares = 0.0;
@@ -1702,7 +1706,6 @@ public class PlainJavaCPUAligner extends CPUAligner
             displacement = Math.sqrt(update[2] * update[2] + update[3] * update[3]) + 0.25 * Math.sqrt((double)(targetPyramid[pyramidIndex].width * targetPyramid[pyramidIndex].width) + (double)(targetPyramid[pyramidIndex].height * targetPyramid[pyramidIndex].height)) * (Math.abs(update[0]) + Math.abs(update[1]));
             c = Math.cos(update[1]);
             s = Math.sin(update[1]);
-            //FIXME: does this make sense we are in a right handed coordinate system (but they subtract update[1] from angle so it is left hand side?
             currentoffsetx = ((offsetx + update[2]) * c - (offsety + update[3]) * s) * (1.0 + update[0]);
             currentoffsety = ((offsetx + update[2]) * s + (offsety + update[3]) * c) * (1.0 + update[0]);
             meanSquares = getScaledRotationMeanSquares(pyramidIndex,currentoffsetx,currentoffsety,currentangle,currentscale);
@@ -1740,6 +1743,9 @@ public class PlainJavaCPUAligner extends CPUAligner
 
     private void inverseMarquardtLevenbergRigidBodyOptimization(int pyramidIndex)
     {
+    	pseudoHessian[0][0] = pseudoHessian[0][1] = pseudoHessian[0][2] = 0.0;
+    	pseudoHessian[1][0] = pseudoHessian[1][1] = pseudoHessian[1][2] = 0.0;
+    	pseudoHessian[2][0] = pseudoHessian[2][1] = pseudoHessian[2][2] = 0.0;
         double[] update = {0.0,0.0,0.0};
         double bestMeanSquares = 0.0;
         double meanSquares = 0.0;
@@ -1799,6 +1805,7 @@ public class PlainJavaCPUAligner extends CPUAligner
     
     private void inverseMarquardtLevenbergTranslationOptimization(int pyramidIndex)
     {
+    	pseudoHessian[0][0] = pseudoHessian[0][1] = pseudoHessian[1][0] = pseudoHessian[1][1] = 0.0;
         double[] update = {0.0,0.0};
         double bestMeanSquares = 0.0;
         double meanSquares = 0.0;
