@@ -1477,7 +1477,7 @@ public class OCLNGStackReg extends RegistrationAndTransformation
             } while ((iteration < (10 * iterationPower - 1)) && (0.001 <= displacement));
             StaticUtility.invertGauss(hessian);
             update = StaticUtility.matrixMultiply(hessian, gradient);
-            currentoffsetx = offsety + update[0];
+            currentoffsetx = offsetx + update[0];
             currentoffsety = offsety + update[1];
             meanSquares = getTranslationMeanSquaresWithoutHessian(pyramidIndex,currentoffsetx,currentoffsety);
             iteration++;
