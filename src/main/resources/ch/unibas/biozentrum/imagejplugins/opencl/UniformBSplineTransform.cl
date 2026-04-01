@@ -984,6 +984,36 @@ static inline FPT interpolate(const FPTTWO coordinates, const int4 xInterpolatio
 }
 
 //calculate the square error
+__kernel void translationError(const __global FPT *source ,const __global FPT *target, __global FPT *diffout, __global FPT *mask, const int sourcewidth, const int sourceheight, const int targetwidth, const int targetheight, const int doubletargetwidth, const int doubletargetheight, const FPT offsetx, const FPT offsety)
+{
+    __private int nIndex = get_global_id(0);//this directly corresponds to the linear address of the !SOURCE! pixel
+    if(nIndex < sourcewidth * sourceheight)
+    {
+        __private int column = nIndex % sourcewidth;
+        __private int row = (nIndex - column)/sourcewidth;
+
+        __private FPTTWO coord = (FPTTWO)(offsetx + ((FPT)column), offsety + ((FPT)row));
+
+        __private int2 Msk = (int2)((int)round(coord.x), (int)round(coord.y));
+        __private int4 xInterpolationIndices;
+        __private int4 yInterpolationIndices;
+        if ((Msk.x >= 0) && (Msk.x < targetwidth) && (Msk.y >= 0) && (Msk.y < targetheight))
+        {
+            mask[nIndex] = One;
+            xInterpolationIndices = calculatexInterpolationIndices(coord.x, doubletargetwidth, targetwidth);
+            yInterpolationIndices = calculateyInterpolationIndices(coord.y, doubletargetheight, targetheight, targetwidth);
+            __private FPT s = interpolate(coord, xInterpolationIndices, yInterpolationIndices, target);
+            diffout[nIndex] = pown(source[nIndex] - s,2);
+        }
+        else
+        {
+            diffout[nIndex] = Zero;
+            mask[nIndex] = Zero;
+        } 
+    }   
+}
+
+//calculate the square error
 __kernel void rigidBodyError(const __global FPT *source ,const __global FPT *target, __global FPT *diffout, __global FPT *mask, const int sourcewidth, const int sourceheight, const int targetwidth, const int targetheight, const int doubletargetwidth, const int doubletargetheight, const FPT offsetx, const FPT offsety, const FPT cosangle, const FPT negsinangle)
 {
     __private int nIndex = get_global_id(0);//this directly corresponds to the linear address of the !SOURCE! pixel
@@ -1016,7 +1046,70 @@ __kernel void rigidBodyError(const __global FPT *source ,const __global FPT *tar
 }
 
 //calculate the square error
-__kernel void translationError(const __global FPT *source ,const __global FPT *target, __global FPT *diffout, __global FPT *mask, const int sourcewidth, const int sourceheight, const int targetwidth, const int targetheight, const int doubletargetwidth, const int doubletargetheight, const FPT offsetx, const FPT offsety)
+__kernel void scaledRotationError(const __global FPT *source ,const __global FPT *target, __global FPT *diffout, __global FPT *mask, const int sourcewidth, const int sourceheight, const int targetwidth, const int targetheight, const int doubletargetwidth, const int doubletargetheight, const FPT offsetx, const FPT offsety, const FPT cosangle, const FPT negsinangle, const FPT scale)
+{
+    __private int nIndex = get_global_id(0);//this directly corresponds to the linear address of the !SOURCE! pixel
+    if(nIndex < sourcewidth * sourceheight)
+    {
+        __private int column = nIndex % sourcewidth;
+        __private int row = (nIndex - column)/sourcewidth;
+        
+        __private FPTTWO xvec = (FPTTWO)(cosangle,negsinangle) * scale;//warning: this is not the x vector but it is the vector added in the x direction
+        __private FPTTWO yvec = (FPTTWO)(-xvec.y,xvec.x);//warning: this is not the y vector but it is the vector added in the y direction
+        __private FPTTWO coord = (FPTTWO)(offsetx, offsety) + ((FPT)column) * xvec + ((FPT)row) * yvec;
+
+        __private int2 Msk = (int2)((int)round(coord.x), (int)round(coord.y));
+        __private int4 xInterpolationIndices;
+        __private int4 yInterpolationIndices;
+        if ((Msk.x >= 0) && (Msk.x < targetwidth) && (Msk.y >= 0) && (Msk.y < targetheight))
+        {
+            mask[nIndex] = One;
+            xInterpolationIndices = calculatexInterpolationIndices(coord.x, doubletargetwidth, targetwidth);
+            yInterpolationIndices = calculateyInterpolationIndices(coord.y, doubletargetheight, targetheight, targetwidth); 
+            __private FPT s = interpolate(coord, xInterpolationIndices, yInterpolationIndices, target);
+            diffout[nIndex] = pown(source[nIndex] - s,2);
+        }
+        else
+        {
+            diffout[nIndex] = Zero;
+            mask[nIndex] = Zero;
+        } 
+    }   
+}
+
+//calculate the square error
+__kernel void affineError(const __global FPT *source ,const __global FPT *target, __global FPT *diffout, __global FPT *mask, const int sourcewidth, const int sourceheight, const int targetwidth, const int targetheight, const int doubletargetwidth, const int doubletargetheight, const FPT offsetx, const FPT offsety, const FPT a11, const FPT a12, const FPT a21, const FPT a22)
+{
+    __private int nIndex = get_global_id(0);//this directly corresponds to the linear address of the !SOURCE! pixel
+    if(nIndex < sourcewidth * sourceheight)
+    {
+        __private int column = nIndex % sourcewidth;
+        __private int row = (nIndex - column)/sourcewidth;
+        
+        __private FPTTWO xvec = (FPTTWO)(a11,a21);//warning: this is not the x vector but it is the vector added in the x direction
+        __private FPTTWO yvec = (FPTTWO)(a12,a22);//warning: this is not the y vector but it is the vector added in the y direction
+        __private FPTTWO coord = (FPTTWO)(offsetx, offsety) + ((FPT)column) * xvec + ((FPT)row) * yvec;
+
+        __private int2 Msk = (int2)((int)round(coord.x), (int)round(coord.y));
+        __private int4 xInterpolationIndices;
+        __private int4 yInterpolationIndices;
+        if ((Msk.x >= 0) && (Msk.x < targetwidth) && (Msk.y >= 0) && (Msk.y < targetheight))
+        {
+            mask[nIndex] = One;
+            xInterpolationIndices = calculatexInterpolationIndices(coord.x, doubletargetwidth, targetwidth);
+            yInterpolationIndices = calculateyInterpolationIndices(coord.y, doubletargetheight, targetheight, targetwidth); 
+            __private FPT s = interpolate(coord, xInterpolationIndices, yInterpolationIndices, target);
+            diffout[nIndex] = pown(source[nIndex] - s,2);
+        }
+        else
+        {
+            diffout[nIndex] = Zero;
+            mask[nIndex] = Zero;
+        } 
+    }   
+}
+
+__kernel void translationErrorWithGradAndHess(const __global FPT *source ,const __global FPT *target,const __global FPT *xGradient,const __global FPT *yGradient,__global FPT *grad0,__global FPT *grad1,__global FPT *hessian00,__global FPT *hessian01,__global FPT *hessian11, __global FPT *diffout, __global FPT *mask, const int sourcewidth, const int sourceheight, const int targetwidth, const int targetheight, const int doubletargetwidth, const int doubletargetheight, const FPT offsetx, const FPT offsety)
 {
     __private int nIndex = get_global_id(0);//this directly corresponds to the linear address of the !SOURCE! pixel
     if(nIndex < sourcewidth * sourceheight)
@@ -1035,14 +1128,33 @@ __kernel void translationError(const __global FPT *source ,const __global FPT *t
             xInterpolationIndices = calculatexInterpolationIndices(coord.x, doubletargetwidth, targetwidth);
             yInterpolationIndices = calculateyInterpolationIndices(coord.y, doubletargetheight, targetheight, targetwidth);
             __private FPT s = interpolate(coord, xInterpolationIndices, yInterpolationIndices, target);
-            diffout[nIndex] = pown(source[nIndex] - s,2);
+            __private FPT diff = source[nIndex] - s;
+            //diffout[nIndex] = pown(diff,2);
+            //grad0[nIndex] = diff * xGradient[nIndex];
+            //grad1[nIndex] = diff * yGradient[nIndex];
+            __private FPTTHREE tmp = (FPTTHREE)(diff, xGradient[nIndex], yGradient[nIndex]) * diff;
+            diffout[nIndex] = tmp.x;
+            grad0[nIndex] = tmp.y;
+            grad1[nIndex] = tmp.z;
+            //hessian00[nIndex] = pown(xGradient[nIndex],2);
+            //hessian01[nIndex] = xGradient[nIndex] * yGradient[nIndex];
+            //hessian11[nIndex] = pown(yGradient[nIndex],2);
+            tmp = ((FPTTHREE)(xGradient[nIndex], xGradient[nIndex], yGradient[nIndex])) * ((FPTTHREE)(xGradient[nIndex], yGradient[nIndex], yGradient[nIndex])); 
+            hessian00[nIndex] = tmp.x;
+            hessian01[nIndex] = tmp.y;
+            hessian11[nIndex] = tmp.z;
         }
         else
         {
+            grad0[nIndex] = Zero;
+            grad1[nIndex] = Zero;
+            hessian00[nIndex] = Zero;
+            hessian01[nIndex] = Zero;
+            hessian11[nIndex] = Zero;
             diffout[nIndex] = Zero;
             mask[nIndex] = Zero;
-        } 
-    }   
+        }
+    }
 }
 
 __kernel void rigidBodyErrorWithGradAndHess(const __global FPT *source ,const __global FPT *target,const __global FPT *xGradient,const __global FPT *yGradient,__global FPT *grad0,__global FPT *grad1,__global FPT *grad2,__global FPT *hessian00,__global FPT *hessian01,__global FPT *hessian02,__global FPT *hessian11,__global FPT *hessian12,__global FPT *hessian22, __global FPT *diffout, __global FPT *mask, const int sourcewidth, const int sourceheight, const int targetwidth, const int targetheight, const int doubletargetwidth, const int doubletargetheight, const FPT offsetx, const FPT offsety, const FPT cosangle, const FPT negsinangle)
@@ -1110,8 +1222,7 @@ __kernel void rigidBodyErrorWithGradAndHess(const __global FPT *source ,const __
     }
 }
 
-
-__kernel void translationErrorWithGradAndHess(const __global FPT *source ,const __global FPT *target,const __global FPT *xGradient,const __global FPT *yGradient,__global FPT *grad0,__global FPT *grad1,__global FPT *hessian00,__global FPT *hessian01,__global FPT *hessian11, __global FPT *diffout, __global FPT *mask, const int sourcewidth, const int sourceheight, const int targetwidth, const int targetheight, const int doubletargetwidth, const int doubletargetheight, const FPT offsetx, const FPT offsety)
+__kernel void scaledRotationErrorWithGradAndHess(const __global FPT *source ,const __global FPT *target,const __global FPT *xGradient,const __global FPT *yGradient,__global FPT *grad0,__global FPT *grad1,__global FPT *grad2,__global FPT *grad3,__global FPT *hessian00,__global FPT *hessian01,__global FPT *hessian02,__global FPT *hessian03,__global FPT *hessian11,__global FPT *hessian12,__global FPT *hessian13,__global FPT *hessian22,__global FPT *hessian23,__global FPT *hessian33, __global FPT *diffout, __global FPT *mask, const int sourcewidth, const int sourceheight, const int targetwidth, const int targetheight, const int doubletargetwidth, const int doubletargetheight, const FPT offsetx, const FPT offsety, const FPT cosangle, const FPT negsinangle, const FPT scale)
 {
     __private int nIndex = get_global_id(0);//this directly corresponds to the linear address of the !SOURCE! pixel
     if(nIndex < sourcewidth * sourceheight)
@@ -1119,7 +1230,9 @@ __kernel void translationErrorWithGradAndHess(const __global FPT *source ,const 
         __private int column = nIndex % sourcewidth;
         __private int row = (nIndex - column)/sourcewidth;
 
-        __private FPTTWO coord = (FPTTWO)(offsetx + ((FPT)column), offsety + ((FPT)row));
+        __private FPTTWO xvec = (FPTTWO)(cosangle,negsinangle) * scale;//warning: this is not the x vector but it is the vector added in the x direction
+        __private FPTTWO yvec = (FPTTWO)(-xvec.y,xvec.x);//warning: this is not the y vector but it is the vector added in the y direction
+        __private FPTTWO coord = (FPTTWO)(offsetx, offsety) + ((FPT)column) * xvec + ((FPT)row) * yvec;
 
         __private int2 Msk = (int2)((int)round(coord.x), (int)round(coord.y));
         __private int4 xInterpolationIndices;
@@ -1131,34 +1244,250 @@ __kernel void translationErrorWithGradAndHess(const __global FPT *source ,const 
             yInterpolationIndices = calculateyInterpolationIndices(coord.y, doubletargetheight, targetheight, targetwidth);
             __private FPT s = interpolate(coord, xInterpolationIndices, yInterpolationIndices, target);
             __private FPT diff = source[nIndex] - s;
+            //__private FPT Theta = yGradient[nIndex] * (FPT)column - xGradient[nIndex] * (FPT)row;
+            __private FPT Theta = dot((FPTTWO)(yGradient[nIndex], -xGradient[nIndex]), (FPTTWO)((FPT)column, (FPT)row));
+            __private FPT j_scale = dot((FPTTWO)(xGradient[nIndex], yGradient[nIndex]), (FPTTWO)((FPT)column, (FPT)row));
             //diffout[nIndex] = pown(diff,2);
-            //grad0[nIndex] = diff * xGradient[nIndex];
-            //grad1[nIndex] = diff * yGradient[nIndex];
-            __private FPTTHREE tmp = (FPTTHREE)(diff, xGradient[nIndex], yGradient[nIndex]) * diff;
-            diffout[nIndex] = tmp.x;
-            grad0[nIndex] = tmp.y;
-            grad1[nIndex] = tmp.z;
-            //hessian00[nIndex] = pown(xGradient[nIndex],2);
-            //hessian01[nIndex] = xGradient[nIndex] * yGradient[nIndex];
-            //hessian11[nIndex] = pown(yGradient[nIndex],2);
-            tmp = ((FPTTHREE)(xGradient[nIndex], xGradient[nIndex], yGradient[nIndex])) * ((FPTTHREE)(xGradient[nIndex], yGradient[nIndex], yGradient[nIndex])); 
+            //grad0[nIndex] = diff * j_scale;
+            //grad1[nIndex] = diff * Theta;
+            //grad2[nIndex] = diff * xGradient[nIndex];
+            //grad3[nIndex] = diff * yGradient[nIndex];
+            diffout[nIndex] = diff * diff;
+            __private FPTFOUR tmp4 = (FPTFOUR)(j_scale, Theta, xGradient[nIndex], yGradient[nIndex]) * diff; //Slightly less accurate
+            grad0[nIndex] = tmp4.x;
+            grad1[nIndex] = tmp4.y;
+            grad2[nIndex] = tmp4.z;
+            grad3[nIndex] = tmp4.w;
+            //hessian00[nIndex] = pown(j_scale,2); //this is more accurate
+            //hessian01[nIndex] = j_scale * Theta;
+            //hessian02[nIndex] = j_scale * xGradient[nIndex];
+            //hessian03[nIndex] = j_scale * yGradient[nIndex];
+            tmp4 = (FPTFOUR)(j_scale, Theta, xGradient[nIndex], yGradient[nIndex]) * j_scale; //Slightly less accurate
             hessian00[nIndex] = tmp.x;
             hessian01[nIndex] = tmp.y;
-            hessian11[nIndex] = tmp.z;
+            hessian02[nIndex] = tmp.z;
+            hessian03[nIndex] = tmp.w;
+            
+            //hessian11[nIndex] = pown(Theta,2); //this is more accurate
+            //hessian12[nIndex] = Theta * xGradient[nIndex];
+            //hessian13[nIndex] = Theta * yGradient[nIndex];
+            __private FPTTHREE tmp = (FPTTHREE)(Theta, xGradient[nIndex], yGradient[nIndex]) * Theta; //Slightly less accurate
+            hessian11[nIndex] = tmp.x;
+            hessian12[nIndex] = tmp.y;
+            hessian13[nIndex] = tmp.z;
+            
+            //hessian22[nIndex] = pown(xGradient[nIndex],2);
+            //hessian23[nIndex] = xGradient[nIndex] * yGradient[nIndex];
+            //hessian33[nIndex] = pown(yGradient[nIndex],2);
+            tmp = ((FPTTHREE)(xGradient[nIndex], xGradient[nIndex], yGradient[nIndex])) * ((FPTTHREE)(xGradient[nIndex], yGradient[nIndex], yGradient[nIndex])); //Slightly less accurate
+            hessian22[nIndex] = tmp.x;
+            hessian23[nIndex] = tmp.y;
+            hessian33[nIndex] = tmp.z;
         }
         else
         {
             grad0[nIndex] = Zero;
             grad1[nIndex] = Zero;
+            grad2[nIndex] = Zero;
+            grad3[nIndex] = Zero;
             hessian00[nIndex] = Zero;
             hessian01[nIndex] = Zero;
+            hessian02[nIndex] = Zero;
+            hessian03[nIndex] = Zero;
             hessian11[nIndex] = Zero;
+            hessian12[nIndex] = Zero;
+            hessian13[nIndex] = Zero;
+            hessian22[nIndex] = Zero;
+            hessian23[nIndex] = Zero;
+            hessian33[nIndex] = Zero;
             diffout[nIndex] = Zero;
             mask[nIndex] = Zero;
         }
     }
 }
 
+__kernel void affineErrorWithGradAndHess(const __global FPT *source,
+const __global FPT *target,
+const __global FPT *xGradient,
+const __global FPT *yGradient,
+__global FPT *grad0,
+__global FPT *grad1,
+__global FPT *grad2,
+__global FPT *grad3,
+__global FPT *grad4,
+__global FPT *grad5,
+__global FPT *hessian00,
+__global FPT *hessian01,
+__global FPT *hessian02,
+__global FPT *hessian03,
+__global FPT *hessian04,
+__global FPT *hessian05,
+__global FPT *hessian11,
+__global FPT *hessian12,
+__global FPT *hessian13,
+__global FPT *hessian14,
+__global FPT *hessian15,
+__global FPT *hessian22,
+__global FPT *hessian23,
+__global FPT *hessian24,
+__global FPT *hessian25,
+__global FPT *hessian33,
+__global FPT *hessian34,
+__global FPT *hessian35,
+__global FPT *hessian44,
+__global FPT *hessian45,
+__global FPT *hessian55, 
+__global FPT *diffout, 
+__global FPT *mask, 
+const int sourcewidth, 
+const int sourceheight, 
+const int targetwidth, 
+const int targetheight, 
+const int doubletargetwidth, 
+const int doubletargetheight, 
+const FPT offsetx, 
+const FPT offsety, 
+const FPT a11, 
+const FPT a12, 
+const FPT a21, 
+const FPT a22)
+{
+    __private int nIndex = get_global_id(0);//this directly corresponds to the linear address of the !SOURCE! pixel
+    if(nIndex < sourcewidth * sourceheight)
+    {
+        __private int column = nIndex % sourcewidth;
+        __private int row = (nIndex - column)/sourcewidth;
+
+        __private FPTTWO xvec = (FPTTWO)(a11,a21);//warning: this is not the x vector but it is the vector added in the x direction
+        __private FPTTWO yvec = (FPTTWO)(a12,a22);//warning: this is not the y vector but it is the vector added in the y direction
+        __private FPTTWO coord = (FPTTWO)(offsetx, offsety) + ((FPT)column) * xvec + ((FPT)row) * yvec;
+
+        __private int2 Msk = (int2)((int)round(coord.x), (int)round(coord.y));
+        __private int4 xInterpolationIndices;
+        __private int4 yInterpolationIndices;
+        if ((Msk.x >= 0) && (Msk.x < targetwidth) && (Msk.y >= 0) && (Msk.y < targetheight))
+        {
+            mask[nIndex] = One;
+            xInterpolationIndices = calculatexInterpolationIndices(coord.x, doubletargetwidth, targetwidth);
+            yInterpolationIndices = calculateyInterpolationIndices(coord.y, doubletargetheight, targetheight, targetwidth);
+            __private FPT s = interpolate(coord, xInterpolationIndices, yInterpolationIndices, target);
+            __private FPT diff = source[nIndex] - s;
+
+            /*
+             * Jacobian column variables (recomputed per pixel):
+             *   dx0 = n * ∂f/∂x   (∂f/∂a11)
+             *   dx1 = i * ∂f/∂x   (∂f/∂a12)
+             *   dy0 = n * ∂f/∂y   (∂f/∂a21)
+             *   dy1 = i * ∂f/∂y   (∂f/∂a22)
+             *   dx  = ∂f/∂x       (∂f/∂tx)
+             *   dy  = ∂f/∂y       (∂f/∂ty)
+             */
+            __private FPTTWO dx = (FPTTWO)((FPT)column, (FPT)row) * xGradient[nIndex];
+            __private FPTTWO dy = (FPTTWO)((FPT)column, (FPT)row) * yGradient[nIndex];
+            __private FPTTWO dxy = (FPTTWO)(xGradient[nIndex], yGradient[nIndex]);
+            
+            //diffout[nIndex] = pown(diff,2);
+            //grad0[nIndex] = diff * dx0;
+            //grad1[nIndex] = diff * dx1;
+            //grad2[nIndex] = diff * dy0;
+            //grad3[nIndex] = diff * dy1;
+            //grad4[nIndex] = diff * dx;
+            //grad5[nIndex] = diff * dy;
+            __private FPTEIGHT tmp8 = (FPTEIGHT)(diff, dx.x, dx.y, dy.x, dy.y, dxy.x, dxy.y, Zero) * diff; //Slightly less accurate
+            diffout[nIndex] = tmp8.s0;
+            grad0[nIndex] = tmp8.s1;
+            grad1[nIndex] = tmp8.s2;
+            grad2[nIndex] = tmp8.s3;
+            grad3[nIndex] = tmp8.s4;
+            grad4[nIndex] = tmp8.s5;
+            grad5[nIndex] = tmp8.s6;
+            //hessian00[nIndex] = pown(dx0,2); //this is more accurate
+            //hessian01[nIndex] = dx0 * dx1;
+            //hessian02[nIndex] = dx0 * dy0;
+            //hessian03[nIndex] = dx0 * dy1;
+            //hessian04[nIndex] = dx0 * dx;
+            //hessian05[nIndex] = dx0 * dy;
+            __private FPTTHREE tmp3 = (FPTTHREE)(dx.x, dx.y, dy.x) * dx.x; //Slightly less accurate
+            hessian00[nIndex] = tmp3.x;
+            hessian01[nIndex] = tmp3.y;
+            hessian02[nIndex] = tmp3.z;
+            tmp3 = (FPTTHREE)(dy.y, dxy.x, dxy.y) * dx.x; //Slightly less accurate
+            hessian03[nIndex] = tmp3.x;
+            hessian04[nIndex] = tmp3.y;
+            hessian05[nIndex] = tmp3.z;
+            
+            //hessian11[nIndex] = pown(dx1,2); //this is more accurate
+            //hessian12[nIndex] = dx1 * dy0;
+            //hessian13[nIndex] = dx1 * dy1;
+            //hessian14[nIndex] = dx1 * dx;
+            //hessian15[nIndex] = dx1 * dy;
+            hessian11[nIndex] = dx.y * dx.y; //Slightly less accurate
+            FPTFOUR tmp4 = (FPTFOUR)(dy.x, dy.y, dxy.x, dxy.y) * dx.y;
+            hessian12[nIndex] = tmp4.x;
+            hessian13[nIndex] = tmp4.y;
+            hessian14[nIndex] = tmp4.z;
+            hessian15[nIndex] = tmp4.w;
+            
+            //hessian22[nIndex] = pown(dy0,2);
+            //hessian23[nIndex] = dy0 * dy1;
+            //hessian24[nIndex] = dy0 * dx;
+            //hessian25[nIndex] = dy0 * dy;
+            tmp4 = (FPTFOUR)(dy.x, dy.y, dxy.x, dxy.y) * dy.x; //Slightly less accurate
+            hessian22[nIndex] = tmp4.x;
+            hessian23[nIndex] = tmp4.y;
+            hessian24[nIndex] = tmp4.z;
+            hessian25[nIndex] = tmp4.w;
+            
+            //hessian33[nIndex] = pown(dy1,2);
+            //hessian34[nIndex] = dy1 * dx;
+            //hessian35[nIndex] = dy1 * dy;
+            tmp3 = (FPTTHREE)(dy.y, dxy.x, dxy.y) * dy.y; //Slightly less accurate
+            hessian33[nIndex] = tmp3.x;
+            hessian34[nIndex] = tmp3.y;
+            hessian35[nIndex] = tmp3.z;
+            
+            //hessian44[nIndex] = pown(dx,2);
+            //hessian45[nIndex] = dx * dy;
+            //hessian55[nIndex] = pown(dy,2);
+            tmp3 = (FPTTHREE)(dxy.x, dxy.y, dxy.y) * (FPTTHREE)(dxy.x, dxy.x, dxy.y); //Slightly less accurate
+            hessian44[nIndex] = tmp3.x;
+            hessian45[nIndex] = tmp3.y;
+            hessian55[nIndex] = tmp3.z;
+        }
+        else
+        {
+            grad0[nIndex] = Zero;
+            grad1[nIndex] = Zero;
+            grad2[nIndex] = Zero;
+            grad3[nIndex] = Zero;
+            grad4[nIndex] = Zero;
+            grad5[nIndex] = Zero;
+            hessian00[nIndex] = Zero;
+            hessian01[nIndex] = Zero;
+            hessian02[nIndex] = Zero;
+            hessian03[nIndex] = Zero;
+            hessian04[nIndex] = Zero;
+            hessian05[nIndex] = Zero;
+            hessian11[nIndex] = Zero;
+            hessian12[nIndex] = Zero;
+            hessian13[nIndex] = Zero;
+            hessian14[nIndex] = Zero;
+            hessian15[nIndex] = Zero;
+            hessian22[nIndex] = Zero;
+            hessian23[nIndex] = Zero;
+            hessian24[nIndex] = Zero;
+            hessian25[nIndex] = Zero;
+            hessian33[nIndex] = Zero;
+            hessian34[nIndex] = Zero;
+            hessian35[nIndex] = Zero;
+            hessian44[nIndex] = Zero;
+            hessian45[nIndex] = Zero;
+            hessian55[nIndex] = Zero;
+            diffout[nIndex] = Zero;
+            mask[nIndex] = Zero;
+        }
+    }
+}
 
 __kernel void sumInLocalMemory(__global FPT *gdata, __local volatile FPT* ldata, const int size)
 {
@@ -1210,7 +1539,267 @@ __kernel void sumInLocalMemory(__global FPT *gdata, __local volatile FPT* ldata,
     }
 }
 
-__kernel void sumInLocalMemoryCombined(__global FPT *gdata0,__global FPT *gdata1,__global FPT *gdata2,__global FPT *gdata3,__global FPT *gdata4,__global FPT *gdata5,__global FPT *gdata6,__global FPT *gdata7,__global FPT *gdata8,__global FPT *gdata9,__global FPT *gdata10, __local volatile FPT* ldata, const int size)
+__kernel void translationSumInLocalMemoryCombined(__global FPT *gdata0,__global FPT *gdata1,__global FPT *gdata2,__global FPT *gdata3,__global FPT *gdata4,__global FPT *gdata5,__global FPT *gdata6, __local volatile FPT* ldata, const int size)
+{
+    /*
+    Only a single workgroup must be started but this won't be tested here.
+    The number of threads MUST be at least (size + (size % 2))/2!!!!!
+    Watch out for the barriers. A barrier must be reached by all threads,
+    therefore you can't use a global return statement to get rid of them,
+    rather you just define behavior for the threads you want to be active
+    and then let all threads hit the barriers.
+    */
+    __private int nIndex = get_local_id(0);
+    __private int nrOfElems = size + (MODULO2(size));//now it's divisible by two
+    __private int divs = nrOfElems / 2;
+    if(nIndex < divs)
+    {
+        if(nIndex + divs < size)
+        {
+            ldata[nIndex] = gdata0[nIndex] + gdata0[nIndex + divs];//linear addressing within a warp where divs is the stride
+        }
+        else
+        {
+            ldata[nIndex] = gdata0[nIndex];
+        }
+    }
+    //Now we need to do a tree based reduction, unfortunately we don't know the nr of loops at compile time
+    barrier(CLK_LOCAL_MEM_FENCE);//Synchronize the local memory access
+    /*
+    Unlike the examples presented by NVidia we don't have the luxury of assuming n being a power of two
+    meaning for example the first step is 14 which is %2 = 0 but 14/2=7 which is %2 = 1!!!
+    This forces us to check for every tree step iteration whether the step is %2 = 0
+    */
+    //Didn't do loop unrolling for warp where it is not necessary to synchronize (SIMD synchronous) because the "warp" size is different on each architecture
+    nrOfElems = divs;
+    divs = (divs + (MODULO2(divs)))/2;
+    while(nrOfElems >= 2)
+    {
+        if((nIndex < divs) && (nIndex + divs < nrOfElems))
+        {
+            ldata[nIndex] += ldata[nIndex + divs];
+        }
+        barrier(CLK_LOCAL_MEM_FENCE);
+        nrOfElems = divs;
+        divs = (divs + (MODULO2(divs)))/2;
+    }
+    if(nIndex == 0)
+    {
+        gdata0[nIndex] = ldata[nIndex];//transfer back to global memory
+    }
+
+    nrOfElems = size + (MODULO2(size));//now it's divisible by two
+    divs = nrOfElems / 2;
+    if(nIndex < divs)
+    {
+        if(nIndex + divs < size)
+        {
+            ldata[nIndex] = gdata1[nIndex] + gdata1[nIndex + divs];//linear addressing within a warp where divs is the stride
+        }
+        else
+        {
+            ldata[nIndex] = gdata1[nIndex];
+        }
+    }
+    //Now we need to do a tree based reduction, unfortunately we don't know the nr of loops at compile time
+    barrier(CLK_LOCAL_MEM_FENCE);//Synchronize the local memory access
+    //Didn't do loop unrolling for warp where it is not necessary to synchronize (SIMD synchronous) because the "warp" size is different on each architecture
+    nrOfElems = divs;
+    divs = (divs + (MODULO2(divs)))/2;
+    while(nrOfElems >= 2)
+    {
+        if((nIndex < divs) && (nIndex + divs < nrOfElems))
+        {
+            ldata[nIndex] += ldata[nIndex + divs];
+        }
+        barrier(CLK_LOCAL_MEM_FENCE);
+        nrOfElems = divs;
+        divs = (divs + (MODULO2(divs)))/2;
+    }
+    if(nIndex == 0)
+    {
+        gdata1[nIndex] = ldata[nIndex];//transfer back to global memory
+    }
+
+    nrOfElems = size + (MODULO2(size));//now it's divisible by two
+    divs = nrOfElems / 2;
+    if(nIndex < divs)
+    {
+        if(nIndex + divs < size)
+        {
+            ldata[nIndex] = gdata2[nIndex] + gdata2[nIndex + divs];//linear addressing within a warp where divs is the stride
+        }
+        else
+        {
+            ldata[nIndex] = gdata2[nIndex];
+        }
+    }
+    //Now we need to do a tree based reduction, unfortunately we don't know the nr of loops at compile time
+    barrier(CLK_LOCAL_MEM_FENCE);//Synchronize the local memory access
+    //Didn't do loop unrolling for warp where it is not necessary to synchronize (SIMD synchronous) because the "warp" size is different on each architecture
+    nrOfElems = divs;
+    divs = (divs + (MODULO2(divs)))/2;
+    while(nrOfElems >= 2)
+    {
+        if((nIndex < divs) && (nIndex + divs < nrOfElems))
+        {
+            ldata[nIndex] += ldata[nIndex + divs];
+        }
+        barrier(CLK_LOCAL_MEM_FENCE);
+        nrOfElems = divs;
+        divs = (divs + (MODULO2(divs)))/2;
+    }
+    if(nIndex == 0)
+    {
+        gdata2[nIndex] = ldata[nIndex];//transfer back to global memory
+    }
+
+    nrOfElems = size + (MODULO2(size));//now it's divisible by two
+    divs = nrOfElems / 2;
+    if(nIndex < divs)
+    {
+        if(nIndex + divs < size)
+        {
+            ldata[nIndex] = gdata3[nIndex] + gdata3[nIndex + divs];//linear addressing within a warp where divs is the stride
+        }
+        else
+        {
+            ldata[nIndex] = gdata3[nIndex];
+        }
+    }
+    //Now we need to do a tree based reduction, unfortunately we don't know the nr of loops at compile time
+    barrier(CLK_LOCAL_MEM_FENCE);//Synchronize the local memory access
+    //Didn't do loop unrolling for warp where it is not necessary to synchronize (SIMD synchronous) because the "warp" size is different on each architecture
+    nrOfElems = divs;
+    divs = (divs + (MODULO2(divs)))/2;
+    while(nrOfElems >= 2)
+    {
+        if((nIndex < divs) && (nIndex + divs < nrOfElems))
+        {
+            ldata[nIndex] += ldata[nIndex + divs];
+        }
+        barrier(CLK_LOCAL_MEM_FENCE);
+        nrOfElems = divs;
+        divs = (divs + (MODULO2(divs)))/2;
+    }
+    if(nIndex == 0)
+    {
+        gdata3[nIndex] = ldata[nIndex];//transfer back to global memory
+    }
+
+    nrOfElems = size + (MODULO2(size));//now it's divisible by two
+    divs = nrOfElems / 2;
+    if(nIndex < divs)
+    {
+        if(nIndex + divs < size)
+        {
+            ldata[nIndex] = gdata4[nIndex] + gdata4[nIndex + divs];//linear addressing within a warp where divs is the stride
+        }
+        else
+        {
+            ldata[nIndex] = gdata4[nIndex];
+        }
+    }
+    //Now we need to do a tree based reduction, unfortunately we don't know the nr of loops at compile time
+    barrier(CLK_LOCAL_MEM_FENCE);//Synchronize the local memory access
+    //Didn't do loop unrolling for warp where it is not necessary to synchronize (SIMD synchronous) because the "warp" size is different on each architecture
+    nrOfElems = divs;
+    divs = (divs + (MODULO2(divs)))/2;
+    while(nrOfElems >= 2)
+    {
+        if((nIndex < divs) && (nIndex + divs < nrOfElems))
+        {
+            ldata[nIndex] += ldata[nIndex + divs];
+        }
+        barrier(CLK_LOCAL_MEM_FENCE);
+        nrOfElems = divs;
+        divs = (divs + (MODULO2(divs)))/2;
+    }
+    if(nIndex == 0)
+    {
+        gdata4[nIndex] = ldata[nIndex];//transfer back to global memory
+    }
+
+    nrOfElems = size + (MODULO2(size));//now it's divisible by two
+    divs = nrOfElems / 2;
+    if(nIndex < divs)
+    {
+        if(nIndex + divs < size)
+        {
+            ldata[nIndex] = gdata5[nIndex] + gdata5[nIndex + divs];//linear addressing within a warp where divs is the stride
+        }
+        else
+        {
+            ldata[nIndex] = gdata5[nIndex];
+        }
+    }
+    //Now we need to do a tree based reduction, unfortunately we don't know the nr of loops at compile time
+    barrier(CLK_LOCAL_MEM_FENCE);//Synchronize the local memory access
+    //Didn't do loop unrolling for warp where it is not necessary to synchronize (SIMD synchronous) because the "warp" size is different on each architecture
+    nrOfElems = divs;
+    divs = (divs + (MODULO2(divs)))/2;
+    while(nrOfElems >= 2)
+    {
+        if((nIndex < divs) && (nIndex + divs < nrOfElems))
+        {
+            ldata[nIndex] += ldata[nIndex + divs];
+        }
+        barrier(CLK_LOCAL_MEM_FENCE);
+        nrOfElems = divs;
+        divs = (divs + (MODULO2(divs)))/2;
+    }
+    if(nIndex == 0)
+    {
+        gdata5[nIndex] = ldata[nIndex];//transfer back to global memory
+    }
+
+    nrOfElems = size + (MODULO2(size));//now it's divisible by two
+    divs = nrOfElems / 2;
+    if(nIndex < divs)
+    {
+        if(nIndex + divs < size)
+        {
+            ldata[nIndex] = gdata6[nIndex] + gdata6[nIndex + divs];//linear addressing within a warp where divs is the stride
+        }
+        else
+        {
+            ldata[nIndex] = gdata6[nIndex];
+        }
+    }
+    //Now we need to do a tree based reduction, unfortunately we don't know the nr of loops at compile time
+    barrier(CLK_LOCAL_MEM_FENCE);//Synchronize the local memory access
+    //Didn't do loop unrolling for warp where it is not necessary to synchronize (SIMD synchronous) because the "warp" size is different on each architecture
+    nrOfElems = divs;
+    divs = (divs + (MODULO2(divs)))/2;
+    while(nrOfElems >= 2)
+    {
+        if((nIndex < divs) && (nIndex + divs < nrOfElems))
+        {
+            ldata[nIndex] += ldata[nIndex + divs];
+        }
+        barrier(CLK_LOCAL_MEM_FENCE);
+        nrOfElems = divs;
+        divs = (divs + (MODULO2(divs)))/2;
+    }
+    if(nIndex == 0)
+    {
+        gdata6[nIndex] = ldata[nIndex];//transfer back to global memory
+    }
+}
+
+__kernel void sumInLocalMemoryCombined(__global FPT *gdata0,
+__global FPT *gdata1,
+__global FPT *gdata2,
+__global FPT *gdata3,
+__global FPT *gdata4,
+__global FPT *gdata5,
+__global FPT *gdata6,
+__global FPT *gdata7,
+__global FPT *gdata8,
+__global FPT *gdata9,
+__global FPT *gdata10,
+__local volatile FPT* ldata, 
+const int size)
 {
     /*
     Only a single workgroup must be started but this won't be tested here.
@@ -1590,253 +2179,44 @@ __kernel void sumInLocalMemoryCombined(__global FPT *gdata0,__global FPT *gdata1
     }
 }
 
-__kernel void translationSumInLocalMemoryCombined(__global FPT *gdata0,__global FPT *gdata1,__global FPT *gdata2,__global FPT *gdata3,__global FPT *gdata4,__global FPT *gdata5,__global FPT *gdata6, __local volatile FPT* ldata, const int size)
-{
-    /*
-    Only a single workgroup must be started but this won't be tested here.
-    The number of threads MUST be at least (size + (size % 2))/2!!!!!
-    Watch out for the barriers. A barrier must be reached by all threads,
-    therefore you can't use a global return statement to get rid of them,
-    rather you just define behavior for the threads you want to be active
-    and then let all threads hit the barriers.
-    */
-    __private int nIndex = get_local_id(0);
-    __private int nrOfElems = size + (MODULO2(size));//now it's divisible by two
-    __private int divs = nrOfElems / 2;
-    if(nIndex < divs)
-    {
-        if(nIndex + divs < size)
-        {
-            ldata[nIndex] = gdata0[nIndex] + gdata0[nIndex + divs];//linear addressing within a warp where divs is the stride
-        }
-        else
-        {
-            ldata[nIndex] = gdata0[nIndex];
-        }
-    }
-    //Now we need to do a tree based reduction, unfortunately we don't know the nr of loops at compile time
-    barrier(CLK_LOCAL_MEM_FENCE);//Synchronize the local memory access
-    /*
-    Unlike the examples presented by NVidia we don't have the luxury of assuming n being a power of two
-    meaning for example the first step is 14 which is %2 = 0 but 14/2=7 which is %2 = 1!!!
-    This forces us to check for every tree step iteration whether the step is %2 = 0
-    */
-    //Didn't do loop unrolling for warp where it is not necessary to synchronize (SIMD synchronous) because the "warp" size is different on each architecture
-    nrOfElems = divs;
-    divs = (divs + (MODULO2(divs)))/2;
-    while(nrOfElems >= 2)
-    {
-        if((nIndex < divs) && (nIndex + divs < nrOfElems))
-        {
-            ldata[nIndex] += ldata[nIndex + divs];
-        }
-        barrier(CLK_LOCAL_MEM_FENCE);
-        nrOfElems = divs;
-        divs = (divs + (MODULO2(divs)))/2;
-    }
-    if(nIndex == 0)
-    {
-        gdata0[nIndex] = ldata[nIndex];//transfer back to global memory
-    }
 
-    nrOfElems = size + (MODULO2(size));//now it's divisible by two
-    divs = nrOfElems / 2;
-    if(nIndex < divs)
-    {
-        if(nIndex + divs < size)
-        {
-            ldata[nIndex] = gdata1[nIndex] + gdata1[nIndex + divs];//linear addressing within a warp where divs is the stride
-        }
-        else
-        {
-            ldata[nIndex] = gdata1[nIndex];
-        }
-    }
-    //Now we need to do a tree based reduction, unfortunately we don't know the nr of loops at compile time
-    barrier(CLK_LOCAL_MEM_FENCE);//Synchronize the local memory access
-    //Didn't do loop unrolling for warp where it is not necessary to synchronize (SIMD synchronous) because the "warp" size is different on each architecture
-    nrOfElems = divs;
-    divs = (divs + (MODULO2(divs)))/2;
-    while(nrOfElems >= 2)
-    {
-        if((nIndex < divs) && (nIndex + divs < nrOfElems))
-        {
-            ldata[nIndex] += ldata[nIndex + divs];
-        }
-        barrier(CLK_LOCAL_MEM_FENCE);
-        nrOfElems = divs;
-        divs = (divs + (MODULO2(divs)))/2;
-    }
-    if(nIndex == 0)
-    {
-        gdata1[nIndex] = ldata[nIndex];//transfer back to global memory
-    }
 
-    nrOfElems = size + (MODULO2(size));//now it's divisible by two
-    divs = nrOfElems / 2;
-    if(nIndex < divs)
-    {
-        if(nIndex + divs < size)
-        {
-            ldata[nIndex] = gdata2[nIndex] + gdata2[nIndex + divs];//linear addressing within a warp where divs is the stride
-        }
-        else
-        {
-            ldata[nIndex] = gdata2[nIndex];
-        }
-    }
-    //Now we need to do a tree based reduction, unfortunately we don't know the nr of loops at compile time
-    barrier(CLK_LOCAL_MEM_FENCE);//Synchronize the local memory access
-    //Didn't do loop unrolling for warp where it is not necessary to synchronize (SIMD synchronous) because the "warp" size is different on each architecture
-    nrOfElems = divs;
-    divs = (divs + (MODULO2(divs)))/2;
-    while(nrOfElems >= 2)
-    {
-        if((nIndex < divs) && (nIndex + divs < nrOfElems))
-        {
-            ldata[nIndex] += ldata[nIndex + divs];
-        }
-        barrier(CLK_LOCAL_MEM_FENCE);
-        nrOfElems = divs;
-        divs = (divs + (MODULO2(divs)))/2;
-    }
-    if(nIndex == 0)
-    {
-        gdata2[nIndex] = ldata[nIndex];//transfer back to global memory
-    }
 
-    nrOfElems = size + (MODULO2(size));//now it's divisible by two
-    divs = nrOfElems / 2;
-    if(nIndex < divs)
-    {
-        if(nIndex + divs < size)
-        {
-            ldata[nIndex] = gdata3[nIndex] + gdata3[nIndex + divs];//linear addressing within a warp where divs is the stride
-        }
-        else
-        {
-            ldata[nIndex] = gdata3[nIndex];
-        }
-    }
-    //Now we need to do a tree based reduction, unfortunately we don't know the nr of loops at compile time
-    barrier(CLK_LOCAL_MEM_FENCE);//Synchronize the local memory access
-    //Didn't do loop unrolling for warp where it is not necessary to synchronize (SIMD synchronous) because the "warp" size is different on each architecture
-    nrOfElems = divs;
-    divs = (divs + (MODULO2(divs)))/2;
-    while(nrOfElems >= 2)
-    {
-        if((nIndex < divs) && (nIndex + divs < nrOfElems))
-        {
-            ldata[nIndex] += ldata[nIndex + divs];
-        }
-        barrier(CLK_LOCAL_MEM_FENCE);
-        nrOfElems = divs;
-        divs = (divs + (MODULO2(divs)))/2;
-    }
-    if(nIndex == 0)
-    {
-        gdata3[nIndex] = ldata[nIndex];//transfer back to global memory
-    }
 
-    nrOfElems = size + (MODULO2(size));//now it's divisible by two
-    divs = nrOfElems / 2;
-    if(nIndex < divs)
-    {
-        if(nIndex + divs < size)
-        {
-            ldata[nIndex] = gdata4[nIndex] + gdata4[nIndex + divs];//linear addressing within a warp where divs is the stride
-        }
-        else
-        {
-            ldata[nIndex] = gdata4[nIndex];
-        }
-    }
-    //Now we need to do a tree based reduction, unfortunately we don't know the nr of loops at compile time
-    barrier(CLK_LOCAL_MEM_FENCE);//Synchronize the local memory access
-    //Didn't do loop unrolling for warp where it is not necessary to synchronize (SIMD synchronous) because the "warp" size is different on each architecture
-    nrOfElems = divs;
-    divs = (divs + (MODULO2(divs)))/2;
-    while(nrOfElems >= 2)
-    {
-        if((nIndex < divs) && (nIndex + divs < nrOfElems))
-        {
-            ldata[nIndex] += ldata[nIndex + divs];
-        }
-        barrier(CLK_LOCAL_MEM_FENCE);
-        nrOfElems = divs;
-        divs = (divs + (MODULO2(divs)))/2;
-    }
-    if(nIndex == 0)
-    {
-        gdata4[nIndex] = ldata[nIndex];//transfer back to global memory
-    }
 
-    nrOfElems = size + (MODULO2(size));//now it's divisible by two
-    divs = nrOfElems / 2;
-    if(nIndex < divs)
-    {
-        if(nIndex + divs < size)
-        {
-            ldata[nIndex] = gdata5[nIndex] + gdata5[nIndex + divs];//linear addressing within a warp where divs is the stride
-        }
-        else
-        {
-            ldata[nIndex] = gdata5[nIndex];
-        }
-    }
-    //Now we need to do a tree based reduction, unfortunately we don't know the nr of loops at compile time
-    barrier(CLK_LOCAL_MEM_FENCE);//Synchronize the local memory access
-    //Didn't do loop unrolling for warp where it is not necessary to synchronize (SIMD synchronous) because the "warp" size is different on each architecture
-    nrOfElems = divs;
-    divs = (divs + (MODULO2(divs)))/2;
-    while(nrOfElems >= 2)
-    {
-        if((nIndex < divs) && (nIndex + divs < nrOfElems))
-        {
-            ldata[nIndex] += ldata[nIndex + divs];
-        }
-        barrier(CLK_LOCAL_MEM_FENCE);
-        nrOfElems = divs;
-        divs = (divs + (MODULO2(divs)))/2;
-    }
-    if(nIndex == 0)
-    {
-        gdata5[nIndex] = ldata[nIndex];//transfer back to global memory
-    }
 
-    nrOfElems = size + (MODULO2(size));//now it's divisible by two
-    divs = nrOfElems / 2;
-    if(nIndex < divs)
-    {
-        if(nIndex + divs < size)
-        {
-            ldata[nIndex] = gdata6[nIndex] + gdata6[nIndex + divs];//linear addressing within a warp where divs is the stride
-        }
-        else
-        {
-            ldata[nIndex] = gdata6[nIndex];
-        }
-    }
-    //Now we need to do a tree based reduction, unfortunately we don't know the nr of loops at compile time
-    barrier(CLK_LOCAL_MEM_FENCE);//Synchronize the local memory access
-    //Didn't do loop unrolling for warp where it is not necessary to synchronize (SIMD synchronous) because the "warp" size is different on each architecture
-    nrOfElems = divs;
-    divs = (divs + (MODULO2(divs)))/2;
-    while(nrOfElems >= 2)
-    {
-        if((nIndex < divs) && (nIndex + divs < nrOfElems))
-        {
-            ldata[nIndex] += ldata[nIndex + divs];
-        }
-        barrier(CLK_LOCAL_MEM_FENCE);
-        nrOfElems = divs;
-        divs = (divs + (MODULO2(divs)))/2;
-    }
-    if(nIndex == 0)
-    {
-        gdata6[nIndex] = ldata[nIndex];//transfer back to global memory
-    }
-}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 /*
 The following code is inspired by the parallel sum reduction according to Brent's
@@ -1949,7 +2329,8 @@ const int doubleTargetHeight)
     //These vectors remain the same during the loops
     __private FPTTWO xvec = (FPTTWO)(cosangle,negsinangle);//warning: this is not the x vector but it is the vector added in the x direction
     __private FPTTWO yvec = (FPTTWO)(-xvec.y,xvec.x);//warning: this is not the y vector but it is the vector added in the y direction
-    while(i < sourcewidth * sourceheight)
+    __private const int totalPixels = sourcewidth * sourceheight;
+    while(i < totalPixels)
     {
         __private int column = i % sourcewidth;
         __private int row = (i - column)/sourcewidth;
@@ -1999,7 +2380,7 @@ const int doubleTargetHeight)
             lhessian22[nIndex] = tmp.z;
         }
         // ensure reads are not out of bounds
-        if(i + blockSize < sourcewidth * sourceheight)
+        if(i + blockSize < totalPixels)
         {
             __private int lIdx = i + blockSize;
             column = lIdx % sourcewidth;
@@ -2128,7 +2509,8 @@ const int doubleTargetHeight)
     ldiffout[nIndex] = Zero;
     lmask[nIndex] = Zero;
 
-    while(i < sourcewidth * sourceheight)
+    __private const int totalPixels = sourcewidth * sourceheight;
+    while(i < totalPixels)
     {
         __private int column = i % sourcewidth;
         __private int row = (i - column)/sourcewidth;
@@ -2166,7 +2548,7 @@ const int doubleTargetHeight)
             lhessian11[nIndex] = tmp3.z;
         }
         // ensure reads are not out of bounds
-        if(i + blockSize < sourcewidth * sourceheight)
+        if(i + blockSize < totalPixels)
         {
             __private int lIdx = i + blockSize;
             column = lIdx % sourcewidth;

@@ -343,7 +343,7 @@ public class NGStackReg implements Command
                 break;
             case "Affine":
                 transformationType = TransformationType.AFFINE;
-                return;
+                break;
             default:
                 logService.error("No such transformation type is supported");
                 return;
