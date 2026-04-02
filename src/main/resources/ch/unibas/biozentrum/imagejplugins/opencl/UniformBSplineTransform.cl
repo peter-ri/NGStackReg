@@ -88,7 +88,7 @@ __constant FPT Three = 3.0f;
 static inline int4 calculatexInterpolationIndxs(const FPT coordx, const int doubleTargetWidth, const int targetwidth)
 {
     //Following is the calculation using mirrored boundaries of the x indices of the coefficients used for interpolation
-    __private int4 xInterpolationIndxs;
+    __private int4 xInterpolationIndices;
     __private int p = (coordx >= 0) ? (((int)trunc(coordx)) + 2) : (((int)trunc(coordx)) + 1);
     /*
     q = (p < 0) ? (-1 - p) : p;
@@ -97,53 +97,53 @@ static inline int4 calculatexInterpolationIndxs(const FPT coordx, const int doub
     __private int q = abs(p) - rotate(p&(int)0x80000000,(int)1);
     //loop iteration 0
     q = q<doubleTargetWidth?q:q%doubleTargetWidth;
-    xInterpolationIndxs.x = q >= targetwidth ? (doubleTargetWidth - 1 - q) : q;
+    xInterpolationIndices.x = q >= targetwidth ? (doubleTargetWidth - 1 - q) : q;
     //loop iteration 1
     p--;
     q = abs(p) - rotate(p&(int)0x80000000,(int)1);
     q = q<doubleTargetWidth?q:q%doubleTargetWidth;
-    xInterpolationIndxs.y = q >= targetwidth ? (doubleTargetWidth - 1 - q) : q;
+    xInterpolationIndices.y = q >= targetwidth ? (doubleTargetWidth - 1 - q) : q;
     //loop iteration 2
     p--;
     q = abs(p) - rotate(p&(int)0x80000000,(int)1);
     q = q<doubleTargetWidth?q:q%doubleTargetWidth;
-    xInterpolationIndxs.z = q >= targetwidth ? (doubleTargetWidth - 1 - q) : q;
+    xInterpolationIndices.z = q >= targetwidth ? (doubleTargetWidth - 1 - q) : q;
     //loop iteration 3
     p--;
     q = abs(p) - rotate(p&(int)0x80000000,(int)1);
     q = q<doubleTargetWidth?q:q%doubleTargetWidth;
-    xInterpolationIndxs.w = q >= targetwidth ? (doubleTargetWidth - 1 - q) : q;
-    return xInterpolationIndxs;
+    xInterpolationIndices.w = q >= targetwidth ? (doubleTargetWidth - 1 - q) : q;
+    return xInterpolationIndices;
 }
 
 static inline int4 calculateyInterpolationIndxs(const FPT coordy, const int doubleTargetHeight, const int targetheight, const int targetwidth)
 {
     //Following is the calculation using mirrored boundaries of the y indices of the coefficients used for interpolation
-    __private int4 yInterpolationIndxs;
+    __private int4 yInterpolationIndices;
     __private int p = (coordy >= 0) ? (((int)trunc(coordy)) + 2) : (((int)trunc(coordy)) + 1);
     //loop iteration 0
     __private int q = abs(p) - rotate(p&(int)0x80000000,(int)1);
     q = q<doubleTargetHeight?q:q%doubleTargetHeight;
-    yInterpolationIndxs.x = (targetheight <= q) ? (((doubleTargetHeight) - 1 - q) * targetwidth) : (q * targetwidth);//this is the linear absolute index NOT the row
+    yInterpolationIndices.x = (targetheight <= q) ? (((doubleTargetHeight) - 1 - q) * targetwidth) : (q * targetwidth);//this is the linear absolute index NOT the row
     //loop iteration 1
     p--;
     q = abs(p) - rotate(p&(int)0x80000000,(int)1);
     q = q<doubleTargetHeight?q:q%doubleTargetHeight;
-    yInterpolationIndxs.y = (targetheight <= q) ? (((doubleTargetHeight) - 1 - q) * targetwidth) : (q * targetwidth);//this is the linear absolute index NOT the row
+    yInterpolationIndices.y = (targetheight <= q) ? (((doubleTargetHeight) - 1 - q) * targetwidth) : (q * targetwidth);//this is the linear absolute index NOT the row
     //loop iteration 2
     p--;
     q = abs(p) - rotate(p&(int)0x80000000,(int)1);
     q = q<doubleTargetHeight?q:q%doubleTargetHeight;
-    yInterpolationIndxs.z = (targetheight <= q) ? (((doubleTargetHeight) - 1 - q) * targetwidth) : (q * targetwidth);//this is the linear absolute index NOT the row
+    yInterpolationIndices.z = (targetheight <= q) ? (((doubleTargetHeight) - 1 - q) * targetwidth) : (q * targetwidth);//this is the linear absolute index NOT the row
     //loop iteration 3
     p--;
     q = abs(p) - rotate(p&(int)0x80000000,(int)1);
     q = q<doubleTargetHeight?q:q%doubleTargetHeight;
-    yInterpolationIndxs.w = (targetheight <= q) ? (((doubleTargetHeight) - 1 - q) * targetwidth) : (q * targetwidth);//this is the linear absolute index NOT the row
-    return yInterpolationIndxs;
+    yInterpolationIndices.w = (targetheight <= q) ? (((doubleTargetHeight) - 1 - q) * targetwidth) : (q * targetwidth);//this is the linear absolute index NOT the row
+    return yInterpolationIndices;
 }
 
-static inline void inlineSumInLocalMemory(const int nIndex, const int nrOfElems, const int divs, const int subdivs, volatile FPT *ldata, FPT *gdata, const int size)
+static inline void inlineSumInLocalMemory(const int nIndex, const int nrOfElems, const int divs, const int subdivs, __local volatile FPT *ldata, __global FPT *gdata, const int size)
 {
     if(nIndex < divs)
     {
