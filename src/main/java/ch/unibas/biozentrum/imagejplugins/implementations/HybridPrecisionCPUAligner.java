@@ -2685,6 +2685,7 @@ public class HybridPrecisionCPUAligner extends CPUAligner {
         hessian[1][3] = fhessian[1][3];
         hessian[2][2] = fhessian[2][2];
         hessian[2][3] = fhessian[2][3];
+        hessian[3][3] = fhessian[3][3];
         // symmetrize hessian
         for (int i = 1; (i < 4); i++) {
             for (int j = 0; (j < i); j++) {
@@ -3124,7 +3125,7 @@ public class HybridPrecisionCPUAligner extends CPUAligner {
                     msqe += diff * diff;
                 }
                 // walk along the X-vector direction
-                coordx += 1.0;
+                coordx += 1.0f;
             }
         }
         return msqe / ((double) area);

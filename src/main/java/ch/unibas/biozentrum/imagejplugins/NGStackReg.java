@@ -19,7 +19,11 @@
 package ch.unibas.biozentrum.imagejplugins;
 
 import com.jogamp.opencl.CLPlatform;
-
+import static org.jocl.CL.*;
+import org.jocl.CL;
+import org.jocl.cl_context_properties;
+import org.jocl.cl_device_id;
+import org.jocl.cl_platform_id;
 import org.scijava.command.Command;
 import org.scijava.display.DisplayService;
 import org.scijava.log.LogService;
@@ -63,6 +67,7 @@ import net.imglib2.type.numeric.real.DoubleType;
 import net.imglib2.type.numeric.real.FloatType;
 import org.apache.commons.lang3.SystemUtils;
 
+
 //TODO: not tested in headless mode
 
 /**
@@ -74,7 +79,7 @@ import org.apache.commons.lang3.SystemUtils;
 @Plugin(type = Command.class, headless = true, menuPath="Plugins>Registration>NGStackReg>NGStackReg")
 public class NGStackReg implements Command
 {
-	final static boolean debug = false;
+	final static boolean debug = true;
     public static final int MIN_SIZE = 24;
     public enum TransformationType
     {
@@ -650,6 +655,52 @@ public class NGStackReg implements Command
         // will not be used.
         try
         {
+        	{
+	        	final int platformIndex = 0;
+	            final long deviceType = CL_DEVICE_TYPE_GPU;
+	            final int deviceIndex = 0;
+	        	CL.setExceptionsEnabled(true);
+	        	// Obtain the number of platforms
+	            int numPlatformsArray[] = new int[1];
+	            clGetPlatformIDs(0, null, numPlatformsArray);
+	            int numPlatforms = numPlatformsArray[0];
+	            if(debug) 
+	        	{
+	        		logService.info(numPlatforms + " OpenCL platforms detected.");
+	        	}
+	
+	            // Obtain a platform ID
+	            cl_platform_id platforms[] = new cl_platform_id[numPlatforms];
+	            clGetPlatformIDs(platforms.length, platforms, null);
+	            if(debug) 
+	        	{
+	            	for(cl_platform_id p: platforms)
+					{
+						logService.info("Platform ID" + p);
+					}
+	        	}
+	            cl_platform_id platform = platforms[platformIndex];
+	
+	            // Initialize the context properties
+	            cl_context_properties contextProperties = new cl_context_properties();
+	            contextProperties.addProperty(CL_CONTEXT_PLATFORM, platform);
+	            if(debug)
+	            {
+	            	logService.info("Context properties: " + contextProperties);
+					logService.info("Platform: " + platform);
+					logService.info("Device type: " + deviceType);
+	            }
+	            
+	            // Obtain the number of devices for the platform
+	            int numDevicesArray[] = new int[1];
+	            clGetDeviceIDs(platform, deviceType, 0, null, numDevicesArray);
+	            int numDevices = numDevicesArray[0];
+	            
+	            // Obtain a device ID 
+	            cl_device_id devices[] = new cl_device_id[numDevices];
+	            clGetDeviceIDs(platform, deviceType, numDevices, devices, null);
+	            cl_device_id device = devices[deviceIndex];
+        	}
             if(!CLPlatform.isAvailable())
             {
                 return false;

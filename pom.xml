@@ -176,5 +176,9 @@
             <groupId>org.json</groupId>
             <artifactId>json</artifactId>
         </dependency>
+        <dependency>
+		    <groupId>org.jocl</groupId>
+		    <artifactId>jocl</artifactId>
+		</dependency>
     </dependencies>
 </project>
