@@ -79,7 +79,7 @@ import org.apache.commons.lang3.SystemUtils;
 @Plugin(type = Command.class, headless = true, menuPath="Plugins>Registration>NGStackReg>NGStackReg")
 public class NGStackReg implements Command
 {
-	final static boolean debug = true;
+	final static boolean debug = false;
     public static final int MIN_SIZE = 24;
     public enum TransformationType
     {
@@ -655,7 +655,12 @@ public class NGStackReg implements Command
         // will not be used.
         try
         {
+        	/*
+        	 * TODO: move to JOCL.org instead of JogAmp JOCL
+        	 * 
+        	
         	{
+        	 
 	        	final int platformIndex = 0;
 	            final long deviceType = CL_DEVICE_TYPE_GPU;
 	            final int deviceIndex = 0;
@@ -701,6 +706,7 @@ public class NGStackReg implements Command
 	            clGetDeviceIDs(platform, deviceType, numDevices, devices, null);
 	            cl_device_id device = devices[deviceIndex];
         	}
+        	*/
             if(!CLPlatform.isAvailable())
             {
                 return false;

@@ -170,8 +170,6 @@ public class OCLNGStackReg extends RegistrationAndTransformation
         private long optimalMultiples[];
         private int maximumElementsForLocalFPTsum;
         private int maximumElementsForLocalFPTcombinedSum;
-        private final long requiredMemoryAlignmentForSubBuffers;
-        private int secondBufferOffsetInElements;
         
         private final CLContext context;
         private final CLDevice device;
@@ -249,41 +247,11 @@ public class OCLNGStackReg extends RegistrationAndTransformation
         @SuppressWarnings("rawtypes")
         private CLBuffer maskBuffer;
         
-        @SuppressWarnings("rawtypes")
-        private CLBuffer maskBufferBase;
-        @SuppressWarnings("rawtypes")
-        private CLBuffer gradient1Base;
-        @SuppressWarnings("rawtypes")
-        private CLBuffer gradient3Base;
-        @SuppressWarnings("rawtypes")
-        private CLBuffer gradient5Base;
-        @SuppressWarnings("rawtypes")
-        private CLBuffer hessian01Base;
-        @SuppressWarnings("rawtypes")
-        private CLBuffer hessian03Base;
-        @SuppressWarnings("rawtypes")
-        private CLBuffer hessian05Base;
-        @SuppressWarnings("rawtypes")
-        private CLBuffer hessian12Base;
-        @SuppressWarnings("rawtypes")
-        private CLBuffer hessian14Base;
-        @SuppressWarnings("rawtypes")
-        private CLBuffer hessian22Base;
-        @SuppressWarnings("rawtypes")
-        private CLBuffer hessian24Base;
-        @SuppressWarnings("rawtypes")
-        private CLBuffer hessian33Base;
-        @SuppressWarnings("rawtypes")
-        private CLBuffer hessian35Base;
-        @SuppressWarnings("rawtypes")
-        private CLBuffer hessian45Base;
-        
         private CLProgram conversionProgram;
         private CLKernel conversionProgramKernel;
         private CLKernel deConversionProgramKernel;
         
         private CLProgram uniformBSplineTransformProgram;
-        private CLProgram affineExtendedProgram;
         private CLKernel uniformBSplineTransformProgramKernels[];
 
         private final SharedContextAlignmentTarget scat = new SharedContextAlignmentTarget();
@@ -317,7 +285,6 @@ public class OCLNGStackReg extends RegistrationAndTransformation
             }
             this.context = context;
             this.device = device;
-            requiredMemoryAlignmentForSubBuffers = device.getMemBaseAddrAlign() / 8;
             enumerateOCLDevicesAndInitialize();
             allocateMemory();
             CompileAndSetupOpenCLKernerls();
@@ -353,11 +320,6 @@ public class OCLNGStackReg extends RegistrationAndTransformation
             	uniformBSplineTransformProgram.release();
             	uniformBSplineTransformProgram = null;
             }
-            if(affineExtendedProgram != null)
-			{
-				affineExtendedProgram.release();
-				affineExtendedProgram = null;
-			}
         	
             switch(sharedContext.transformationType) {
             case TRANSLATION:
@@ -662,77 +624,6 @@ public class OCLNGStackReg extends RegistrationAndTransformation
             		hessian55.release();
 					hessian55 = null;
             	}
-                
-                if(maskBufferBase != null)
-				{
-					maskBufferBase.release();
-					maskBufferBase = null;
-				}
-                if(gradient1Base != null)
-                {
-                	gradient1Base.release();
-                	gradient1Base = null;
-                }
-                if(gradient3Base != null)
-				{
-					gradient3Base.release();
-					gradient3Base = null;
-				}
-                if(gradient5Base != null)
-                {
-                	gradient5Base.release();
-                	gradient5Base = null;
-                }
-                if(hessian01Base != null)
-                {
-                	hessian01Base.release();
-                	hessian01Base = null;
-                }
-                if(hessian03Base != null)
-				{
-					hessian03Base.release();
-					hessian03Base = null;
-				}
-                if(hessian05Base != null)
-				{
-					hessian05Base.release();
-					hessian05Base = null;
-				}
-                if(hessian12Base != null)
-                {
-                	hessian12Base.release();
-                	hessian12Base = null;
-                }
-                if(hessian14Base != null)
-                {
-                	hessian14Base.release();
-					hessian14Base = null;
-                }
-                if(hessian22Base != null)
-                {
-                	hessian22Base.release();
-                	hessian22Base = null;
-                }
-                if(hessian24Base != null)
-				{
-					hessian24Base.release();
-					hessian24Base = null;
-				}
-                if(hessian33Base != null)
-                {
-                	hessian33Base.release();
-                	hessian33Base = null;
-                }
-                if(hessian35Base != null)
-                {
-                	hessian35Base.release();
-                	hessian35Base = null;
-                }
-                if(hessian45Base != null)
-				{
-					hessian45Base.release();
-					hessian45Base = null;
-				};
                 break;
             }
         	for(int l = 0;l < 2;l++)
@@ -948,35 +839,6 @@ public class OCLNGStackReg extends RegistrationAndTransformation
                 hessian45 = null;
                 hessian55.release();
                 hessian55 = null;
-                
-                maskBufferBase.release();
-                maskBufferBase = null;
-                gradient1Base.release();
-                gradient1Base = null;
-                gradient3Base.release();
-                gradient3Base = null;
-                gradient5Base.release();
-                gradient5Base = null;
-                hessian01Base.release();
-                hessian01Base = null;
-                hessian03Base.release();
-                hessian03Base = null;
-                hessian05Base.release();
-                hessian05Base = null;
-                hessian12Base.release();
-                hessian12Base = null;
-                hessian14Base.release();
-                hessian14Base = null;
-                hessian22Base.release();
-                hessian22Base = null;
-                hessian24Base.release();
-                hessian24Base = null;
-                hessian33Base.release();
-                hessian33Base = null;
-                hessian35Base.release();
-                hessian35Base = null;
-                hessian45Base.release();
-                hessian45Base = null;
                 break;
             }
             for(int l = 0;l < 2;l++)
@@ -1246,120 +1108,76 @@ public class OCLNGStackReg extends RegistrationAndTransformation
                     	 * limit the maximum image size that can be processed on the GPU because of 
                     	 * the maximum buffer size.
                     	 */
-                    	int additionalBufferSizeForAlignment = (((width*height*4) % (int)(requiredMemoryAlignmentForSubBuffers)) == 0) ? 0 : (((int)(requiredMemoryAlignmentForSubBuffers) - ((int)((width*height*4) % requiredMemoryAlignmentForSubBuffers)))/4);
-                    	int totalBufferSize = (int)(width * height * 2) + additionalBufferSizeForAlignment;
-                    	secondBufferOffsetInElements = (int)(width * height) + additionalBufferSizeForAlignment;
-                    	maskBufferBase = context.createFloatBuffer(totalBufferSize, GPURESIDENTRW);
-                        //maskBuffer = context.createFloatBuffer((int)(width*height), GPURESIDENTRW);
+                        maskBuffer = context.createFloatBuffer((int)(width*height), GPURESIDENTRW);
                         //maskBuffer.getCLSize();
-                        //gradient0 = context.createFloatBuffer((int) (width*height), GPURESIDENTRW);
+                        gradient0 = context.createFloatBuffer((int) (width*height), GPURESIDENTRW);
                         //gradient0.getCLSize();
-                    	maskBuffer = maskBufferBase.createSubBuffer(0, (int)(width*height), GPURESIDENTRW);
-                    	gradient0 = maskBufferBase.createSubBuffer(secondBufferOffsetInElements, (int)(width*height), GPURESIDENTRW);
-                    	
-                    	gradient1Base = context.createFloatBuffer(totalBufferSize, GPURESIDENTRW);
-                        //gradient1 = context.createFloatBuffer((int) (width*height), GPURESIDENTRW);
+                        
+                        gradient1 = context.createFloatBuffer((int) (width*height), GPURESIDENTRW);
                         //gradient1.getCLSize();
-                        //gradient2 = context.createFloatBuffer((int) (width*height), GPURESIDENTRW);
+                        gradient2 = context.createFloatBuffer((int) (width*height), GPURESIDENTRW);
                         //gradient2.getCLSize();
-                    	gradient1 = gradient1Base.createSubBuffer(0, (int)(width*height), GPURESIDENTRW);
-                    	gradient2 = gradient1Base.createSubBuffer(secondBufferOffsetInElements, (int)(width*height), GPURESIDENTRW);
                     	
-                    	gradient3Base = context.createFloatBuffer(totalBufferSize, GPURESIDENTRW);
-                        //gradient3 = context.createFloatBuffer((int) (width*height), GPURESIDENTRW);
+                        gradient3 = context.createFloatBuffer((int) (width*height), GPURESIDENTRW);
                         //gradient3.getCLSize();
-                        //gradient4 = context.createFloatBuffer((int) (width*height), GPURESIDENTRW);
+                        gradient4 = context.createFloatBuffer((int) (width*height), GPURESIDENTRW);
                         //gradient4.getCLSize();
-                    	gradient3 = gradient3Base.createSubBuffer(0, (int)(width*height), GPURESIDENTRW);
-                    	gradient4 = gradient3Base.createSubBuffer(secondBufferOffsetInElements, (int)(width*height), GPURESIDENTRW);
                     	
-                    	gradient5Base = context.createFloatBuffer(totalBufferSize, GPURESIDENTRW);
-                        //gradient5 = context.createFloatBuffer((int) (width*height), GPURESIDENTRW);
+                        gradient5 = context.createFloatBuffer((int) (width*height), GPURESIDENTRW);
                         //gradient5.getCLSize();
-                        //hessian00 = context.createFloatBuffer((int) (width*height), GPURESIDENTRW);
+                        hessian00 = context.createFloatBuffer((int) (width*height), GPURESIDENTRW);
                         //hessian00.getCLSize();
-                    	gradient5 = gradient5Base.createSubBuffer(0, (int)(width*height), GPURESIDENTRW);
-                    	hessian00 = gradient5Base.createSubBuffer(secondBufferOffsetInElements, (int)(width*height), GPURESIDENTRW);
                     	
-                    	hessian01Base = context.createFloatBuffer(totalBufferSize, GPURESIDENTRW);
-                        //hessian01 = context.createFloatBuffer((int) (width*height), GPURESIDENTRW);
+                        hessian01 = context.createFloatBuffer((int) (width*height), GPURESIDENTRW);
                         //hessian01.getCLSize();
-                        //hessian02 = context.createFloatBuffer((int) (width*height), GPURESIDENTRW);
+                        hessian02 = context.createFloatBuffer((int) (width*height), GPURESIDENTRW);
                         //hessian02.getCLSize();
-                    	hessian01 = hessian01Base.createSubBuffer(0, (int)(width*height), GPURESIDENTRW);
-                    	hessian02 = hessian01Base.createSubBuffer(secondBufferOffsetInElements, (int)(width*height), GPURESIDENTRW);
                     	
-                    	hessian03Base = context.createFloatBuffer(totalBufferSize, GPURESIDENTRW);
-                        //hessian03 = context.createFloatBuffer((int) (width*height), GPURESIDENTRW);
+                        hessian03 = context.createFloatBuffer((int) (width*height), GPURESIDENTRW);
                         //hessian03.getCLSize();
-                        //hessian04 = context.createFloatBuffer((int) (width*height), GPURESIDENTRW);
+                        hessian04 = context.createFloatBuffer((int) (width*height), GPURESIDENTRW);
                         //hessian04.getCLSize();
-                    	hessian03 = hessian03Base.createSubBuffer(0, (int)(width*height), GPURESIDENTRW);
-                    	hessian04 = hessian03Base.createSubBuffer(secondBufferOffsetInElements, (int)(width*height), GPURESIDENTRW);
                     	
-                    	hessian05Base = context.createFloatBuffer(totalBufferSize, GPURESIDENTRW);
-                        //hessian05 = context.createFloatBuffer((int) (width*height), GPURESIDENTRW);
+                        hessian05 = context.createFloatBuffer((int) (width*height), GPURESIDENTRW);
                         //hessian05.getCLSize();
-                        //hessian11 = context.createFloatBuffer((int) (width*height), GPURESIDENTRW);
+                        hessian11 = context.createFloatBuffer((int) (width*height), GPURESIDENTRW);
                         //hessian11.getCLSize();
-                    	hessian05 = hessian05Base.createSubBuffer(0, (int)(width*height), GPURESIDENTRW);
-                    	hessian11 = hessian05Base.createSubBuffer(secondBufferOffsetInElements, (int)(width*height), GPURESIDENTRW);
                     	
-                    	hessian12Base = context.createFloatBuffer(totalBufferSize, GPURESIDENTRW);
-                        //hessian12 = context.createFloatBuffer((int) (width*height), GPURESIDENTRW);
+                        hessian12 = context.createFloatBuffer((int) (width*height), GPURESIDENTRW);
                         //hessian12.getCLSize();
-                        //hessian13 = context.createFloatBuffer((int) (width*height), GPURESIDENTRW);
+                        hessian13 = context.createFloatBuffer((int) (width*height), GPURESIDENTRW);
                         //hessian13.getCLSize();
-                    	hessian12 = hessian12Base.createSubBuffer(0, (int)(width*height), GPURESIDENTRW);
-                    	hessian13 = hessian12Base.createSubBuffer(secondBufferOffsetInElements, (int)(width*height), GPURESIDENTRW);
                     	
-                    	hessian14Base = context.createFloatBuffer(totalBufferSize, GPURESIDENTRW);
-                        //hessian14 = context.createFloatBuffer((int) (width*height), GPURESIDENTRW);
+                        hessian14 = context.createFloatBuffer((int) (width*height), GPURESIDENTRW);
                         //hessian14.getCLSize();
-                        //hessian15 = context.createFloatBuffer((int) (width*height), GPURESIDENTRW);
+                        hessian15 = context.createFloatBuffer((int) (width*height), GPURESIDENTRW);
                         //hessian15.getCLSize();
-                    	hessian14 = hessian14Base.createSubBuffer(0, (int)(width*height), GPURESIDENTRW);
-                    	hessian15 = hessian14Base.createSubBuffer(secondBufferOffsetInElements, (int)(width*height), GPURESIDENTRW);
                     	
-                    	hessian22Base = context.createFloatBuffer(totalBufferSize, GPURESIDENTRW);
-                        //hessian22 = context.createFloatBuffer((int) (width*height), GPURESIDENTRW);
+                        hessian22 = context.createFloatBuffer((int) (width*height), GPURESIDENTRW);
                         //hessian22.getCLSize();
-                        //hessian23 = context.createFloatBuffer((int) (width*height), GPURESIDENTRW);
+                        hessian23 = context.createFloatBuffer((int) (width*height), GPURESIDENTRW);
                         //hessian23.getCLSize();
-                    	hessian22 = hessian22Base.createSubBuffer(0, (int)(width*height), GPURESIDENTRW);
-                    	hessian23 = hessian22Base.createSubBuffer(secondBufferOffsetInElements, (int)(width*height), GPURESIDENTRW);
                     	
-                    	hessian24Base = context.createFloatBuffer(totalBufferSize, GPURESIDENTRW);
-                        //hessian24 = context.createFloatBuffer((int) (width*height), GPURESIDENTRW);
+                        hessian24 = context.createFloatBuffer((int) (width*height), GPURESIDENTRW);
                         //hessian24.getCLSize();
-                        //hessian25 = context.createFloatBuffer((int) (width*height), GPURESIDENTRW);
+                        hessian25 = context.createFloatBuffer((int) (width*height), GPURESIDENTRW);
                         //hessian25.getCLSize();
-                    	hessian24 = hessian24Base.createSubBuffer(0, (int)(width*height), GPURESIDENTRW);
-                    	hessian25 = hessian24Base.createSubBuffer(secondBufferOffsetInElements, (int)(width*height), GPURESIDENTRW);
                     	
-                    	hessian33Base = context.createFloatBuffer(totalBufferSize, GPURESIDENTRW);
-                        //hessian33 = context.createFloatBuffer((int) (width*height), GPURESIDENTRW);
+                        hessian33 = context.createFloatBuffer((int) (width*height), GPURESIDENTRW);
                         //hessian33.getCLSize();
-                        //hessian34 = context.createFloatBuffer((int) (width*height), GPURESIDENTRW);
+                        hessian34 = context.createFloatBuffer((int) (width*height), GPURESIDENTRW);
                         //hessian34.getCLSize();
-                    	hessian33 = hessian33Base.createSubBuffer(0, (int)(width*height), GPURESIDENTRW);
-                    	hessian34 = hessian33Base.createSubBuffer(secondBufferOffsetInElements, (int)(width*height), GPURESIDENTRW);
                     	
-                    	hessian35Base = context.createFloatBuffer(totalBufferSize, GPURESIDENTRW);
-                        //hessian35 = context.createFloatBuffer((int) (width*height), GPURESIDENTRW);
+                        hessian35 = context.createFloatBuffer((int) (width*height), GPURESIDENTRW);
                         //hessian35.getCLSize();
-                        //hessian44 = context.createFloatBuffer((int) (width*height), GPURESIDENTRW);
+                        hessian44 = context.createFloatBuffer((int) (width*height), GPURESIDENTRW);
                         //hessian44.getCLSize();
-                    	hessian35 = hessian35Base.createSubBuffer(0, (int)(width*height), GPURESIDENTRW);
-                    	hessian44 = hessian35Base.createSubBuffer(secondBufferOffsetInElements, (int)(width*height), GPURESIDENTRW);
                     	
-                    	hessian45Base = context.createFloatBuffer(totalBufferSize, GPURESIDENTRW);
-                        //hessian45 = context.createFloatBuffer((int) (width*height), GPURESIDENTRW);
+                        hessian45 = context.createFloatBuffer((int) (width*height), GPURESIDENTRW);
                         //hessian45.getCLSize();
-                        //hessian55 = context.createFloatBuffer((int) (width*height), GPURESIDENTRW);
+                        hessian55 = context.createFloatBuffer((int) (width*height), GPURESIDENTRW);
                         //hessian55.getCLSize();
-                    	hessian45 = hessian45Base.createSubBuffer(0, (int)(width*height), GPURESIDENTRW);
-                    	hessian55 = hessian45Base.createSubBuffer(secondBufferOffsetInElements, (int)(width*height), GPURESIDENTRW);
+                    	
                         for(int l = 0;l < 2;l++)
                         {
                             parallelSumReductionBuffers[l] = context.createFloatBuffer(maximumSumReductionBlockNr, GPURESIDENTRW);
@@ -1461,121 +1279,77 @@ public class OCLNGStackReg extends RegistrationAndTransformation
                     	 * and sub-buffers instead. I will only combine two buffers, but this will
                     	 * limit the maximum image size that can be processed on the GPU because of 
                     	 * the maximum buffer size.
-                    	 */
-                    	int additionalBufferSizeForAlignment = (((width*height*8) % (int)(requiredMemoryAlignmentForSubBuffers)) == 0) ? 0 : (((int)(requiredMemoryAlignmentForSubBuffers) - ((int)((width*height*8) % requiredMemoryAlignmentForSubBuffers)))/8);
-                    	int totalBufferSize = (int)(width * height * 2) + additionalBufferSizeForAlignment;
-                    	secondBufferOffsetInElements = (int)(width * height) + additionalBufferSizeForAlignment;
-                    	maskBufferBase = context.createDoubleBuffer(totalBufferSize, GPURESIDENTRW);
-                        //maskBuffer = context.createDoubleBuffer((int)(width*height), GPURESIDENTRW);
+                    	 */                    	
+                        maskBuffer = context.createDoubleBuffer((int)(width*height), GPURESIDENTRW);
                         //maskBuffer.getCLSize();
-                        //gradient0 = context.createDoubleBuffer((int) (width*height), GPURESIDENTRW);
+                        gradient0 = context.createDoubleBuffer((int) (width*height), GPURESIDENTRW);
                         //gradient0.getCLSize();
-                    	maskBuffer = maskBufferBase.createSubBuffer(0, (int)(width*height), GPURESIDENTRW);
-                    	gradient0 = maskBufferBase.createSubBuffer(secondBufferOffsetInElements, (int)(width*height), GPURESIDENTRW);
                     	
-                    	gradient1Base = context.createDoubleBuffer(totalBufferSize, GPURESIDENTRW);
-                        //gradient1 = context.createDoubleBuffer((int) (width*height), GPURESIDENTRW);
+                        gradient1 = context.createDoubleBuffer((int) (width*height), GPURESIDENTRW);
                         //gradient1.getCLSize();
-                        //gradient2 = context.createDoubleBuffer((int) (width*height), GPURESIDENTRW);
+                        gradient2 = context.createDoubleBuffer((int) (width*height), GPURESIDENTRW);
                         //gradient2.getCLSize();
-                    	gradient1 = gradient1Base.createSubBuffer(0, (int)(width*height), GPURESIDENTRW);
-                    	gradient2 = gradient1Base.createSubBuffer(secondBufferOffsetInElements, (int)(width*height), GPURESIDENTRW);
                     	
-                    	gradient3Base = context.createDoubleBuffer(totalBufferSize, GPURESIDENTRW);
-                        //gradient3 = context.createDoubleBuffer((int) (width*height), GPURESIDENTRW);
+                        gradient3 = context.createDoubleBuffer((int) (width*height), GPURESIDENTRW);
                         //gradient3.getCLSize();
-                        //gradient4 = context.createDoubleBuffer((int) (width*height), GPURESIDENTRW);
+                        gradient4 = context.createDoubleBuffer((int) (width*height), GPURESIDENTRW);
                         //gradient4.getCLSize();
-                    	gradient3 = gradient3Base.createSubBuffer(0, (int)(width*height), GPURESIDENTRW);
-                    	gradient4 = gradient3Base.createSubBuffer(secondBufferOffsetInElements, (int)(width*height), GPURESIDENTRW);
                     	
-                    	gradient5Base = context.createDoubleBuffer(totalBufferSize, GPURESIDENTRW);
-                        //gradient5 = context.createDoubleBuffer((int) (width*height), GPURESIDENTRW);
+                        gradient5 = context.createDoubleBuffer((int) (width*height), GPURESIDENTRW);
                         //gradient5.getCLSize();
-                        //hessian00 = context.createDoubleBuffer((int) (width*height), GPURESIDENTRW);
+                        hessian00 = context.createDoubleBuffer((int) (width*height), GPURESIDENTRW);
                         //hessian00.getCLSize();
-                    	gradient5 = gradient5Base.createSubBuffer(0, (int)(width*height), GPURESIDENTRW);
-                    	hessian00 = gradient5Base.createSubBuffer(secondBufferOffsetInElements, (int)(width*height), GPURESIDENTRW);
                     	
-                    	hessian01Base = context.createDoubleBuffer(totalBufferSize, GPURESIDENTRW);
-                        //hessian01 = context.createDoubleBuffer((int) (width*height), GPURESIDENTRW);
+                        hessian01 = context.createDoubleBuffer((int) (width*height), GPURESIDENTRW);
                         //hessian01.getCLSize();
-                        //hessian02 = context.createDoubleBuffer((int) (width*height), GPURESIDENTRW);
+                        hessian02 = context.createDoubleBuffer((int) (width*height), GPURESIDENTRW);
                         //hessian02.getCLSize();
-                    	hessian01 = hessian01Base.createSubBuffer(0, (int)(width*height), GPURESIDENTRW);
-                    	hessian02 = hessian01Base.createSubBuffer(secondBufferOffsetInElements, (int)(width*height), GPURESIDENTRW);
                     	
-                    	hessian03Base = context.createDoubleBuffer(totalBufferSize, GPURESIDENTRW);
-                        //hessian03 = context.createDoubleBuffer((int) (width*height), GPURESIDENTRW);
+                        hessian03 = context.createDoubleBuffer((int) (width*height), GPURESIDENTRW);
                         //hessian03.getCLSize();
-                        //hessian04 = context.createDoubleBuffer((int) (width*height), GPURESIDENTRW);
+                        hessian04 = context.createDoubleBuffer((int) (width*height), GPURESIDENTRW);
                         //hessian04.getCLSize();
-                    	hessian03 = hessian03Base.createSubBuffer(0, (int)(width*height), GPURESIDENTRW);
-                    	hessian04 = hessian03Base.createSubBuffer(secondBufferOffsetInElements, (int)(width*height), GPURESIDENTRW);
                     	
-                    	hessian05Base = context.createDoubleBuffer(totalBufferSize, GPURESIDENTRW);
-                        //hessian05 = context.createDoubleBuffer((int) (width*height), GPURESIDENTRW);
+                        hessian05 = context.createDoubleBuffer((int) (width*height), GPURESIDENTRW);
                         //hessian05.getCLSize();
-                        //hessian11 = context.createDoubleBuffer((int) (width*height), GPURESIDENTRW);
+                        hessian11 = context.createDoubleBuffer((int) (width*height), GPURESIDENTRW);
                         //hessian11.getCLSize();
-                    	hessian05 = hessian05Base.createSubBuffer(0, (int)(width*height), GPURESIDENTRW);
-                    	hessian11 = hessian05Base.createSubBuffer(secondBufferOffsetInElements, (int)(width*height), GPURESIDENTRW);
                     	
-                    	hessian12Base = context.createDoubleBuffer(totalBufferSize, GPURESIDENTRW);
-                        //hessian12 = context.createDoubleBuffer((int) (width*height), GPURESIDENTRW);
+                        hessian12 = context.createDoubleBuffer((int) (width*height), GPURESIDENTRW);
                         //hessian12.getCLSize();
-                        //hessian13 = context.createDoubleBuffer((int) (width*height), GPURESIDENTRW);
+                        hessian13 = context.createDoubleBuffer((int) (width*height), GPURESIDENTRW);
                         //hessian13.getCLSize();
-                    	hessian12 = hessian12Base.createSubBuffer(0, (int)(width*height), GPURESIDENTRW);
-                    	hessian13 = hessian12Base.createSubBuffer(secondBufferOffsetInElements, (int)(width*height), GPURESIDENTRW);
                     	
-                    	hessian14Base = context.createDoubleBuffer(totalBufferSize, GPURESIDENTRW);
-                        //hessian14 = context.createDoubleBuffer((int) (width*height), GPURESIDENTRW);
+                        hessian14 = context.createDoubleBuffer((int) (width*height), GPURESIDENTRW);
                         //hessian14.getCLSize();
-                        //hessian15 = context.createDoubleBuffer((int) (width*height), GPURESIDENTRW);
+                        hessian15 = context.createDoubleBuffer((int) (width*height), GPURESIDENTRW);
                         //hessian15.getCLSize();
-                    	hessian14 = hessian14Base.createSubBuffer(0, (int)(width*height), GPURESIDENTRW);
-                    	hessian15 = hessian14Base.createSubBuffer(secondBufferOffsetInElements, (int)(width*height), GPURESIDENTRW);
                     	
-                    	hessian22Base = context.createDoubleBuffer(totalBufferSize, GPURESIDENTRW);
-                        //hessian22 = context.createDoubleBuffer((int) (width*height), GPURESIDENTRW);
+                        hessian22 = context.createDoubleBuffer((int) (width*height), GPURESIDENTRW);
                         //hessian22.getCLSize();
-                        //hessian23 = context.createDoubleBuffer((int) (width*height), GPURESIDENTRW);
+                        hessian23 = context.createDoubleBuffer((int) (width*height), GPURESIDENTRW);
                         //hessian23.getCLSize();
-                    	hessian22 = hessian22Base.createSubBuffer(0, (int)(width*height), GPURESIDENTRW);
-                    	hessian23 = hessian22Base.createSubBuffer(secondBufferOffsetInElements, (int)(width*height), GPURESIDENTRW);
                     	
-                    	hessian24Base = context.createDoubleBuffer(totalBufferSize, GPURESIDENTRW);
-                        //hessian24 = context.createDoubleBuffer((int) (width*height), GPURESIDENTRW);
+                        hessian24 = context.createDoubleBuffer((int) (width*height), GPURESIDENTRW);
                         //hessian24.getCLSize();
-                        //hessian25 = context.createDoubleBuffer((int) (width*height), GPURESIDENTRW);
+                        hessian25 = context.createDoubleBuffer((int) (width*height), GPURESIDENTRW);
                         //hessian25.getCLSize();
-                    	hessian24 = hessian24Base.createSubBuffer(0, (int)(width*height), GPURESIDENTRW);
-                    	hessian25 = hessian24Base.createSubBuffer(secondBufferOffsetInElements, (int)(width*height), GPURESIDENTRW);
                     	
-                    	hessian33Base = context.createDoubleBuffer(totalBufferSize, GPURESIDENTRW);
-                        //hessian33 = context.createDoubleBuffer((int) (width*height), GPURESIDENTRW);
+                        hessian33 = context.createDoubleBuffer((int) (width*height), GPURESIDENTRW);
                         //hessian33.getCLSize();
-                        //hessian34 = context.createDoubleBuffer((int) (width*height), GPURESIDENTRW);
+                        hessian34 = context.createDoubleBuffer((int) (width*height), GPURESIDENTRW);
                         //hessian34.getCLSize();
-                    	hessian33 = hessian33Base.createSubBuffer(0, (int)(width*height), GPURESIDENTRW);
-                    	hessian34 = hessian33Base.createSubBuffer(secondBufferOffsetInElements, (int)(width*height), GPURESIDENTRW);
                     	
-                    	hessian35Base = context.createDoubleBuffer(totalBufferSize, GPURESIDENTRW);
-                        //hessian35 = context.createDoubleBuffer((int) (width*height), GPURESIDENTRW);
+                        hessian35 = context.createDoubleBuffer((int) (width*height), GPURESIDENTRW);
                         //hessian35.getCLSize();
-                        //hessian44 = context.createDoubleBuffer((int) (width*height), GPURESIDENTRW);
+                        hessian44 = context.createDoubleBuffer((int) (width*height), GPURESIDENTRW);
                         //hessian44.getCLSize();
-                    	hessian35 = hessian35Base.createSubBuffer(0, (int)(width*height), GPURESIDENTRW);
-                    	hessian44 = hessian35Base.createSubBuffer(secondBufferOffsetInElements, (int)(width*height), GPURESIDENTRW);
                     	
-                    	hessian45Base = context.createDoubleBuffer(totalBufferSize, GPURESIDENTRW);
-                        //hessian45 = context.createDoubleBuffer((int) (width*height), GPURESIDENTRW);
+                        hessian45 = context.createDoubleBuffer((int) (width*height), GPURESIDENTRW);
                         //hessian45.getCLSize();
-                        //hessian55 = context.createDoubleBuffer((int) (width*height), GPURESIDENTRW);
+                        hessian55 = context.createDoubleBuffer((int) (width*height), GPURESIDENTRW);
                         //hessian55.getCLSize();
-                    	hessian45 = hessian45Base.createSubBuffer(0, (int)(width*height), GPURESIDENTRW);
-                    	hessian55 = hessian45Base.createSubBuffer(secondBufferOffsetInElements, (int)(width*height), GPURESIDENTRW);
+                    	
                         for(int l = 0;l < 2;l++)
                         {
                             parallelSumReductionBuffers[l] = context.createDoubleBuffer(maximumSumReductionBlockNr, GPURESIDENTRW);
@@ -1680,22 +1454,8 @@ public class OCLNGStackReg extends RegistrationAndTransformation
 					break;
 				case AFFINE:
 					uniformBSplineTransformProgram = context.createProgram(getClass().getResourceAsStream("/ch/unibas/biozentrum/imagejplugins/opencl/UniformBSplineTransformAffine.cl")).build("-D AFFINE", device);
-					affineExtendedProgram = context.createProgram(getClass().getResourceAsStream("/ch/unibas/biozentrum/imagejplugins/opencl/UniformBSplineTransformAffineExtended.cl")).build("-D AFFINE", device);
 					break;
             	}
-            	/*Map<CLDevice, byte[]> binaries = new HashMap<>();
-            	InputStream inpStream = getClass().getResourceAsStream("/ch/unibas/biozentrum/imagejplugins/opencl/UniformBSplineTransform_single.spv");
-            	//byte[] spvBytes = inpStream.readAllBytes(); only exists in Java 9 and later, so we do it manually for Java 8 compatibility
-            	ByteArrayOutputStream buffer = new ByteArrayOutputStream();
-            	int nRead;
-            	byte[] data = new byte[16384];
-            	while ((nRead = inpStream.read(data, 0, data.length)) != -1) {
-				    buffer.write(data, 0, nRead);
-				}
-            	byte[] spvBytes = buffer.toByteArray();
-            	inpStream.close();
-            	binaries.put(device, spvBytes);
-            	uniformBSplineTransformProgram = context.createProgram(binaries).build(device);*/
             }
             else
             {
@@ -1711,21 +1471,14 @@ public class OCLNGStackReg extends RegistrationAndTransformation
 					break;
 				case AFFINE:
 					uniformBSplineTransformProgram = context.createProgram(getClass().getResourceAsStream("/ch/unibas/biozentrum/imagejplugins/opencl/UniformBSplineTransformAffine.cl")).build("-D AFFINE -D USE_DOUBLE", device);
-					/*try (InputStream inpStream = getClass().getResourceAsStream("/ch/unibas/biozentrum/imagejplugins/opencl/UniformBSplineTransformAffineExtended.cl")) {
-						if (inpStream == null) {
-							throw new IOException("Could not find kernel source for UniformBSplineTransformAffineExtended.cl");
-						}
-						ByteArrayOutputStream buffer = new ByteArrayOutputStream();
-		            	int nRead;
-		            	byte[] data = new byte[16384];
-		            	while ((nRead = inpStream.read(data, 0, data.length)) != -1) {
-						    buffer.write(data, 0, nRead);
-						}
-		            	byte[] spvBytes = buffer.toByteArray();
-		            	inpStream.close();
-						affineExtendedProgram = context.createProgram(new String(spvBytes, StandardCharsets.UTF_8)).build("-D AFFINE -D USE_DOUBLE", device);
-						
-						*/
+					/*
+					 * TODO:
+					 * Potentially use SPIR-V precompiled programs
+					 * use the following command to compile the OpenCL C source to SPIR-V binary:
+					 * clang -target spirv64 -cl-std=CL1.2 -D USE_DOUBLE -O3 -c UniformBSplineTransformAffineExtended.cl -o UniformBSplineTransformAffineExtended_double.spv
+					 *
+					try (InputStream inpStream = getClass().getResourceAsStream("/ch/unibas/biozentrum/imagejplugins/opencl/UniformBSplineTransformAffineExtended.cl")) {
+					 
 						
 						/*Map<CLDevice, byte[]> binaries = new HashMap<>();
 						if (inpStream == null) {
@@ -1741,24 +1494,10 @@ public class OCLNGStackReg extends RegistrationAndTransformation
 		            	byte[] spvBytes = buffer.toByteArray();
 		            	inpStream.close();
 		            	binaries.put(device, spvBytes);
-		            	affineExtendedProgram = context.createProgram(binaries).build("-x spirv", device);*/
+		            	uniformBSplineTransformProgram = context.createProgram(binaries).build("-x spirv", device);*/
 					//}
-					affineExtendedProgram = context.createProgram(getClass().getResourceAsStream("/ch/unibas/biozentrum/imagejplugins/opencl/UniformBSplineTransformAffineExtended.cl")).build("-D AFFINE -D USE_DOUBLE", device);
 					break;
             	}
-            	/*Map<CLDevice, byte[]> binaries = new HashMap<>();
-            	InputStream inpStream = getClass().getResourceAsStream("/ch/unibas/biozentrum/imagejplugins/opencl/UniformBSplineTransform_double.spv");
-            	//byte[] spvBytes = inpStream.readAllBytes(); only exists in Java 9 and later, so we do it manually for Java 8 compatibility
-            	ByteArrayOutputStream buffer = new ByteArrayOutputStream();
-            	int nRead;
-            	byte[] data = new byte[16384];
-            	while ((nRead = inpStream.read(data, 0, data.length)) != -1) {
-				    buffer.write(data, 0, nRead);
-				}
-            	byte[] spvBytes = buffer.toByteArray();
-            	inpStream.close();
-            	binaries.put(device, spvBytes);
-            	uniformBSplineTransformProgram = context.createProgram(binaries).build(device);*/
             }
             uniformBSplineTransformProgramKernels[KERNEL_CubicBSplinePrefilter2Dpremulhp] = uniformBSplineTransformProgram.createCLKernel("CubicBSplinePrefilter2Dpremulhp");
             uniformBSplineTransformProgramKernels[KERNEL_CubicBSplinePrefilter2DXhp] = uniformBSplineTransformProgram.createCLKernel("CubicBSplinePrefilter2DXhp");
@@ -1805,15 +1544,11 @@ public class OCLNGStackReg extends RegistrationAndTransformation
                 break;
             case AFFINE:
                 uniformBSplineTransformProgramKernels[KERNEL_affineError] = uniformBSplineTransformProgram.createCLKernel("affineError");
-                uniformBSplineTransformProgramKernels[KERNEL_affineErrorWithGradAndHess] = affineExtendedProgram.createCLKernel("affineErrorWithGradAndHess");
-                uniformBSplineTransformProgramKernels[KERNEL_affineErrorWithGradAndHessBrent] = affineExtendedProgram.createCLKernel("affineErrorWithGradAndHessBrent");
+                uniformBSplineTransformProgramKernels[KERNEL_affineErrorWithGradAndHess] = uniformBSplineTransformProgram.createCLKernel("affineErrorWithGradAndHess");
+                uniformBSplineTransformProgramKernels[KERNEL_affineErrorWithGradAndHessBrent] = uniformBSplineTransformProgram.createCLKernel("affineErrorWithGradAndHessBrent");
                 uniformBSplineTransformProgramKernels[KERNEL_affineTransformImageWithBsplineInterpolation] = uniformBSplineTransformProgram.createCLKernel("affineTransformImageWithBsplineInterpolation");
                 uniformBSplineTransformProgramKernels[KERNEL_resizeTransformImageWithBsplineInterpolation] = uniformBSplineTransformProgram.createCLKernel("resizingAffineTransformImageWithBsplineInterpolation");
-                uniformBSplineTransformProgramKernels[KERNEL_affineSumInLocalMemoryCombined] = affineExtendedProgram.createCLKernel("sumInLocalMemoryAffineCombined");
-                
-                //affineComputePerPixel = uniformBSplineTransformProgram.createCLKernel("affineComputePerPixel");
-                //affineReduceGradAndSmallHess = uniformBSplineTransformProgram.createCLKernel("affineReduceGradAndSmallHess");
-                //affineReduceLargeHess = uniformBSplineTransformProgram.createCLKernel("affineReduceLargeHess");
+                uniformBSplineTransformProgramKernels[KERNEL_affineSumInLocalMemoryCombined] = uniformBSplineTransformProgram.createCLKernel("sumInLocalMemoryAffineCombined");
                 break;
             }
             
@@ -4045,36 +3780,35 @@ public class OCLNGStackReg extends RegistrationAndTransformation
                         .putArg(targetPyramid[pyramidIndex].Coefficient)
                         .putArg(sourcePyramid[pyramidIndex].xGradient)
                         .putArg(sourcePyramid[pyramidIndex].yGradient)
-                        .putArg(maskBufferBase)
-                        //.putArg(gradient0)
-                        .putArg(gradient1Base)
-                        //.putArg(gradient2)
-                        .putArg(gradient3Base)
-                        //.putArg(gradient4)
-                        .putArg(gradient5Base)
-                        //.putArg(hessian00)
-                        .putArg(hessian01Base)
-                        //.putArg(hessian02)
-                        .putArg(hessian03Base)
-                        //.putArg(hessian04)
-                        .putArg(hessian05Base)
-                        //.putArg(hessian11)
-                        .putArg(hessian12Base)
-                        //.putArg(hessian13)
-                        .putArg(hessian14Base)
-                        //.putArg(hessian15)
-                        .putArg(hessian22Base)
-                        //.putArg(hessian23)
-                        .putArg(hessian24Base)
-                        //.putArg(hessian25)
-                        .putArg(hessian33Base)
-                        //.putArg(hessian34)
-                        .putArg(hessian35Base)
-                        //.putArg(hessian44)
-                        .putArg(hessian45Base)
-                        //.putArg(hessian55)
+                        .putArg(maskBuffer)
+                        .putArg(gradient0)
+                        .putArg(gradient1)
+                        .putArg(gradient2)
+                        .putArg(gradient3)
+                        .putArg(gradient4)
+                        .putArg(gradient5)
+                        .putArg(hessian00)
+                        .putArg(hessian01)
+                        .putArg(hessian02)
+                        .putArg(hessian03)
+                        .putArg(hessian04)
+                        .putArg(hessian05)
+                        .putArg(hessian11)
+                        .putArg(hessian12)
+                        .putArg(hessian13)
+                        .putArg(hessian14)
+                        .putArg(hessian15)
+                        .putArg(hessian22)
+                        .putArg(hessian23)
+                        .putArg(hessian24)
+                        .putArg(hessian25)
+                        .putArg(hessian33)
+                        .putArg(hessian34)
+                        .putArg(hessian35)
+                        .putArg(hessian44)
+                        .putArg(hessian45)
+                        .putArg(hessian55)
                         .putArg(entryImageBuffer)
-                        .putArg(secondBufferOffsetInElements)
                         .putArg((int)sourcePyramid[pyramidIndex].width)
                         .putArg((int)sourcePyramid[pyramidIndex].height)
                         .putArg((int)targetPyramid[pyramidIndex].width)
@@ -4128,12 +3862,6 @@ public class OCLNGStackReg extends RegistrationAndTransformation
                         .putArg(hessian03)
                         .putArg(hessian04)
                         .putArg(hessian05)
-                        .putNullArg(localWorkSize*(usesFloatGPU?4:8) /*size in bytes of local mem allocation*/)
-                        .putArg((int)(sourcePyramid[pyramidIndex].width * sourcePyramid[pyramidIndex].height));
-                queue.put1DRangeKernel(uniformBSplineTransformProgramKernels[KERNEL_affineSumInLocalMemoryCombined],0,globalWorkSize,localWorkSize);
-                uniformBSplineTransformProgramKernels[KERNEL_affineSumInLocalMemoryCombined].rewind();
-                
-                uniformBSplineTransformProgramKernels[KERNEL_affineSumInLocalMemoryCombined]
                         .putArg(hessian11)
                         .putArg(hessian12)
                         .putArg(hessian13)
@@ -4148,17 +3876,11 @@ public class OCLNGStackReg extends RegistrationAndTransformation
                         .putArg(hessian35)
                         .putArg(hessian44)
                         .putArg(hessian45)
+                        .putArg(hessian55)
                         .putNullArg(localWorkSize*(usesFloatGPU?4:8) /*size in bytes of local mem allocation*/)
                         .putArg((int)(sourcePyramid[pyramidIndex].width * sourcePyramid[pyramidIndex].height));
                 queue.put1DRangeKernel(uniformBSplineTransformProgramKernels[KERNEL_affineSumInLocalMemoryCombined],0,globalWorkSize,localWorkSize);
                 uniformBSplineTransformProgramKernels[KERNEL_affineSumInLocalMemoryCombined].rewind();
-                
-                uniformBSplineTransformProgramKernels[KERNEL_sumInLocalMemory]
-                		.putArg(hessian55)
-                		.putNullArg(localWorkSize*(usesFloatGPU?4:8) /*size in bytes of local mem allocation*/)
-                		.putArg((int)(sourcePyramid[pyramidIndex].width * sourcePyramid[pyramidIndex].height));
-                queue.put1DRangeKernel(uniformBSplineTransformProgramKernels[KERNEL_sumInLocalMemory],0,globalWorkSize,localWorkSize);
-                uniformBSplineTransformProgramKernels[KERNEL_sumInLocalMemory].rewind();
                 
                 //TODO: the implicit if's for float/double can be reduced by separating the cases into two blocks using a single if statement
                 buffer = queue.putMapBuffer(maskBuffer, CLMemory.Map.READ, 0, (usesFloatGPU?4:8), true);
@@ -4420,7 +4142,7 @@ public class OCLNGStackReg extends RegistrationAndTransformation
                 globalWorkSize = localWorkSize;
                 uniformBSplineTransformProgramKernels[KERNEL_affineSumInLocalMemoryCombined]
                 		.putArg(maskBuffer)
-                		.putArg(entryImageBuffer)
+                        .putArg(entryImageBuffer)
                         .putArg(gradient0)
                         .putArg(gradient1)
                         .putArg(gradient2)
@@ -4433,12 +4155,6 @@ public class OCLNGStackReg extends RegistrationAndTransformation
                         .putArg(hessian03)
                         .putArg(hessian04)
                         .putArg(hessian05)
-                        .putNullArg(halfReductionSize*(usesFloatGPU?4:8) /*size in bytes of local mem allocation*/)
-                        .putArg((int)(nrOfBlocks));
-                queue.put1DRangeKernel(uniformBSplineTransformProgramKernels[KERNEL_affineSumInLocalMemoryCombined],0,globalWorkSize,localWorkSize);
-                uniformBSplineTransformProgramKernels[KERNEL_affineSumInLocalMemoryCombined].rewind();
-                
-                uniformBSplineTransformProgramKernels[KERNEL_affineSumInLocalMemoryCombined]
                         .putArg(hessian11)
                         .putArg(hessian12)
                         .putArg(hessian13)
@@ -4453,17 +4169,11 @@ public class OCLNGStackReg extends RegistrationAndTransformation
                         .putArg(hessian35)
                         .putArg(hessian44)
                         .putArg(hessian45)
+                        .putArg(hessian55)
                         .putNullArg(halfReductionSize*(usesFloatGPU?4:8) /*size in bytes of local mem allocation*/)
                         .putArg((int)(nrOfBlocks));
                 queue.put1DRangeKernel(uniformBSplineTransformProgramKernels[KERNEL_affineSumInLocalMemoryCombined],0,globalWorkSize,localWorkSize);
                 uniformBSplineTransformProgramKernels[KERNEL_affineSumInLocalMemoryCombined].rewind();
-                
-                uniformBSplineTransformProgramKernels[KERNEL_sumInLocalMemory]
-                		.putArg(hessian55)
-                		.putNullArg(halfReductionSize*(usesFloatGPU?4:8) /*size in bytes of local mem allocation*/)
-                		.putArg((int)(nrOfBlocks));
-                queue.put1DRangeKernel(uniformBSplineTransformProgramKernels[KERNEL_sumInLocalMemory],0,globalWorkSize,localWorkSize);
-                uniformBSplineTransformProgramKernels[KERNEL_sumInLocalMemory].rewind();
                 
                 buffer = queue.putMapBuffer(maskBuffer, CLMemory.Map.READ, 0, (usesFloatGPU?4:8), true);
                 buffer.rewind();
