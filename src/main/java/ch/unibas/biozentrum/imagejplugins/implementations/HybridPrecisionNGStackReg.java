@@ -20,7 +20,9 @@ package ch.unibas.biozentrum.imagejplugins.implementations;
 import ch.unibas.biozentrum.imagejplugins.NGStackReg;
 import ch.unibas.biozentrum.imagejplugins.abstracts.ImageConverter;
 import ch.unibas.biozentrum.imagejplugins.abstracts.RegistrationAndTransformation;
+import ch.unibas.biozentrum.imagejplugins.util.AffineTransformation;
 import ch.unibas.biozentrum.imagejplugins.util.RigidBodyTransformation;
+import ch.unibas.biozentrum.imagejplugins.util.ScaledRotationTransformation;
 import ch.unibas.biozentrum.imagejplugins.util.TranslationTransformation;
 import ch.unibas.biozentrum.imagejplugins.util.imageconverters.ByteImageConverter;
 import ch.unibas.biozentrum.imagejplugins.util.imageconverters.FloatImageConverter;
@@ -104,19 +106,38 @@ public class HybridPrecisionNGStackReg extends RegistrationAndTransformation
     private static final int KERNEL_dtransformImageWithBsplineInterpolation = 33;
     private static final int KERNEL_dresizingTransformImageWithBsplineInterpolation = 34;
     
-    
-    
     private static final int KERNEL_ftranslationError = 14; //KERNEL_rigidBodyError
     private static final int KERNEL_ftranslationErrorWithGradAndHess = 15; //KERNEL_rigidBodyErrorWithGradAndHess
     private static final int KERNEL_ftranslationSumInLocalMemoryCombined = 18; //KERNEL_sumInLocalMemoryCombined
     private static final int KERNEL_ftranslationErrorWithGradAndHessBrent = 19; //KERNEL_rigidBodyErrorWithGradAndHessBrent
-    
     
     private static final int KERNEL_dtranslationError = 27; //KERNEL_drigidBodyError
     private static final int KERNEL_dtranslationErrorWithGradAndHess = 28; //KERNEL_drigidBodyErrorWithGradAndHess
     private static final int KERNEL_dtranslationSumInLocalMemoryCombined = 30; //KERNEL_dsumInLocalMemoryCombined
     private static final int KERNEL_dtranslationErrorWithGradAndHessBrent = 32; //KERNEL_drigidBodyErrorWithGradAndHessBrent
     private static final int KERNEL_dtranslationtransformImageWithBsplineInterpolation = 33; //KERNEL_dtransformImageWithBsplineInterpolation
+    
+    private static final int KERNEL_fscaledRotationError = 14; //KERNEL_rigidBodyError
+    private static final int KERNEL_fscaledRotationErrorWithGradAndHess = 15; //KERNEL_rigidBodyErrorWithGradAndHess
+    private static final int KERNEL_fscaledRotationSumInLocalMemoryCombined = 18; //KERNEL_sumInLocalMemoryCombined
+    private static final int KERNEL_fscaledRotationErrorWithGradAndHessBrent = 19; //KERNEL_rigidBodyErrorWithGradAndHessBrent
+    
+    private static final int KERNEL_dscaledRotationError = 27;
+    private static final int KERNEL_dscaledRotationErrorWithGradAndHess = 28;
+    private static final int KERNEL_dscaledRotationErrorWithGradAndHessBrent = 32;
+    private static final int KERNEL_dscaledRotationTransformImageWithBsplineInterpolation = 33;
+    private static final int KERNEL_dscaledRotationSumInLocalMemoryCombined = 30;
+    
+    private static final int KERNEL_faffineError = 14; //KERNEL_rigidBodyError
+    private static final int KERNEL_faffineErrorWithGradAndHess = 15; //KERNEL_rigidBodyErrorWithGradAndHess
+    private static final int KERNEL_faffineSumInLocalMemoryCombined = 18; //KERNEL_sumInLocalMemoryCombined
+    private static final int KERNEL_faffineErrorWithGradAndHessBrent = 19; //KERNEL_rigidBodyErrorWithGradAndHessBrent
+    
+    private static final int KERNEL_daffineError = 27;
+    private static final int KERNEL_daffineErrorWithGradAndHess = 28;
+    private static final int KERNEL_daffineErrorWithGradAndHessBrent = 32;
+    private static final int KERNEL_daffineTransformImageWithBsplineInterpolation = 33;
+    private static final int KERNEL_daffineSumInLocalMemoryCombined = 30;
     
     private static final int maximumSumReductionBlockNr = 64;//a maximum of 64 kernel blocks with a variable width will be started
     private static final int blocksizeMultiplier = 4;//optimal multiple * blocksizeMultiplier = blockSizes if this is less than the maximum number of elements that can be accommodated
@@ -145,6 +166,11 @@ public class HybridPrecisionNGStackReg extends RegistrationAndTransformation
         private double offsetx = 0.0;
         private double offsety = 0.0;
         private double angle = 0.0;
+        private double scale = 1.0;
+        private double a11 = 1.0;
+        private double a12 = 0.0;
+        private double a21 = 0.0;
+        private double a22 = 1.0;
         private double[][] hessian;
         private double[][] pseudoHessian;
         private double[] gradient;
@@ -152,13 +178,13 @@ public class HybridPrecisionNGStackReg extends RegistrationAndTransformation
         
         
         private int blockSizesFPT;
-        private int blockSizesRigidBodyParallel;
+        private int blockSizesParallel;
         private long optimalMultiples[];
         private int maximumElementsForLocalFPTsum;
         private int maximumElementsForLocalFPTcombinedSum;
         
         private int doubleblockSizesFPT;
-        private int doubleblockSizesRigidBodyParallel;
+        private int doubleblockSizesParallel;
         private int doublemaximumElementsForLocalFPTsum;
         private int doublemaximumElementsForLocalFPTcombinedSum;
         
@@ -201,17 +227,53 @@ public class HybridPrecisionNGStackReg extends RegistrationAndTransformation
         @SuppressWarnings("rawtypes")
         private CLBuffer gradient2;
         @SuppressWarnings("rawtypes")
+        private CLBuffer gradient3;
+        @SuppressWarnings("rawtypes")
+        private CLBuffer gradient4;
+        @SuppressWarnings("rawtypes")
+        private CLBuffer gradient5;
+        @SuppressWarnings("rawtypes")
         private CLBuffer hessian00;
         @SuppressWarnings("rawtypes")
         private CLBuffer hessian01;
         @SuppressWarnings("rawtypes")
         private CLBuffer hessian02;
         @SuppressWarnings("rawtypes")
+        private CLBuffer hessian03;
+        @SuppressWarnings("rawtypes")
+        private CLBuffer hessian04;
+        @SuppressWarnings("rawtypes")
+        private CLBuffer hessian05;
+        @SuppressWarnings("rawtypes")
         private CLBuffer hessian11;
         @SuppressWarnings("rawtypes")
         private CLBuffer hessian12;
         @SuppressWarnings("rawtypes")
+        private CLBuffer hessian13;
+        @SuppressWarnings("rawtypes")
+        private CLBuffer hessian14;
+        @SuppressWarnings("rawtypes")
+        private CLBuffer hessian15;
+        @SuppressWarnings("rawtypes")
         private CLBuffer hessian22;
+        @SuppressWarnings("rawtypes")
+        private CLBuffer hessian23;
+        @SuppressWarnings("rawtypes")
+        private CLBuffer hessian24;
+        @SuppressWarnings("rawtypes")
+        private CLBuffer hessian25;
+        @SuppressWarnings("rawtypes")
+        private CLBuffer hessian33;
+        @SuppressWarnings("rawtypes")
+        private CLBuffer hessian34;
+        @SuppressWarnings("rawtypes")
+        private CLBuffer hessian35;
+        @SuppressWarnings("rawtypes")
+        private CLBuffer hessian44;
+        @SuppressWarnings("rawtypes")
+        private CLBuffer hessian45;
+        @SuppressWarnings("rawtypes")
+        private CLBuffer hessian55;
 
         @SuppressWarnings("rawtypes")
         private CLBuffer maskBuffer;
@@ -220,6 +282,7 @@ public class HybridPrecisionNGStackReg extends RegistrationAndTransformation
         private CLKernel deConversionProgramKernel;
 
         private CLProgram uniformBSplineTransformProgram;
+        private CLProgram uniformBSplineTransformProgramDouble;
         private CLKernel uniformBSplineTransformProgramKernels[];
         
         private boolean usesFloat = false;
@@ -240,8 +303,20 @@ public class HybridPrecisionNGStackReg extends RegistrationAndTransformation
                 gradient = new double[] {0.0,0.0};
                 break;
             case RIGIDBODY:
+            	hessian = new double[][] { {0.0,0.0,0.0},{0.0,0.0,0.0},{0.0,0.0,0.0} };
+                pseudoHessian = new double[][] { {0.0,0.0,0.0},{0.0,0.0,0.0},{0.0,0.0,0.0} };
+                gradient = new double[] {0.0,0.0,0.0};
+                break;
             case SCALEDROTATION:
+            	gradient = new double[]{0.0, 0.0, 0.0, 0.0};
+                hessian = new double[][]{{0.0,0.0,0.0,0.0}, {0.0,0.0,0.0,0.0}, {0.0,0.0,0.0,0.0}, {0.0,0.0,0.0,0.0}};
+                pseudoHessian = new double[][]{{0.0,0.0,0.0,0.0}, {0.0,0.0,0.0,0.0}, {0.0,0.0,0.0,0.0}, {0.0,0.0,0.0,0.0}};
+                break;
             case AFFINE:
+            	gradient = new double[]{0.0, 0.0, 0.0, 0.0, 0.0, 0.0};
+                hessian = new double[][]{{0.0,0.0,0.0,0.0,0.0,0.0}, {0.0,0.0,0.0,0.0,0.0,0.0}, {0.0,0.0,0.0,0.0,0.0,0.0}, {0.0,0.0,0.0,0.0,0.0,0.0}, {0.0,0.0,0.0,0.0,0.0,0.0}, {0.0,0.0,0.0,0.0,0.0,0.0}};
+                pseudoHessian = new double[][]{{0.0,0.0,0.0,0.0,0.0,0.0}, {0.0,0.0,0.0,0.0,0.0,0.0}, {0.0,0.0,0.0,0.0,0.0,0.0}, {0.0,0.0,0.0,0.0,0.0,0.0}, {0.0,0.0,0.0,0.0,0.0,0.0}, {0.0,0.0,0.0,0.0,0.0,0.0}};
+                break;
             default:
                 hessian = new double[][] { {0.0,0.0,0.0},{0.0,0.0,0.0},{0.0,0.0,0.0} };
                 pseudoHessian = new double[][] { {0.0,0.0,0.0},{0.0,0.0,0.0},{0.0,0.0,0.0} };
@@ -257,6 +332,425 @@ public class HybridPrecisionNGStackReg extends RegistrationAndTransformation
             enumerateOCLDevicesAndInitialize();
             allocateMemory();
             CompileAndSetupOpenCLKernerls();
+        }
+        
+        private void cleanup()
+        {
+            if(deConversionProgramKernel != null)
+            {
+            	deConversionProgramKernel.release();
+				deConversionProgramKernel = null;
+            }
+            if(conversionProgramKernel != null)
+            {
+            	conversionProgramKernel.release();
+                conversionProgramKernel = null;
+            }
+            if(conversionProgram != null)
+			{
+				conversionProgram.release();
+				conversionProgram = null;
+			}
+            for(int i = 0; i < uniformBSplineTransformProgramKernels.length; i++)
+			{
+				if(uniformBSplineTransformProgramKernels[i] != null)
+				{
+					uniformBSplineTransformProgramKernels[i].release();
+					uniformBSplineTransformProgramKernels[i] = null;
+				}
+			}
+            if(uniformBSplineTransformProgram != null)
+            {
+            	uniformBSplineTransformProgram.release();
+            	uniformBSplineTransformProgram = null;
+            }
+             if(uniformBSplineTransformProgramDouble != null)
+			{
+				uniformBSplineTransformProgramDouble.release();
+				uniformBSplineTransformProgramDouble = null;
+			}
+        	
+            switch(sharedContext.transformationType) {
+            case TRANSLATION:
+            	if(maskBuffer != null)
+            	{
+            		maskBuffer.release();
+					maskBuffer = null;
+            	}
+                if(gradient0 != null)
+				{
+					gradient0.release();
+					gradient0 = null;
+				}
+                if(gradient1 != null)
+                {
+                	gradient1.release();
+                	gradient1 = null;
+                }
+                if(hessian00 != null)
+				{
+					hessian00.release();
+					hessian00 = null;
+				}
+                if(hessian01 != null)
+				{
+					hessian01.release();
+					hessian01 = null;
+				}
+                if(hessian11 != null)
+                {
+                	hessian11.release();
+					hessian11 = null;
+                }
+                break;
+            case RIGIDBODY:
+            	if(maskBuffer != null)
+            	{
+            		maskBuffer.release();
+            		maskBuffer = null;
+            	}
+            	if(gradient0 != null)
+            	{
+            		gradient0.release();
+					gradient0 = null;
+            	}
+            	if(gradient1 != null)
+            	{
+            		gradient1.release();
+            		gradient1 = null;
+            	}
+            	if(gradient2 != null)
+            	{
+            		gradient2.release();
+					gradient2 = null;
+            	}
+            	if(hessian00 != null)
+            	{
+            		hessian00.release();
+            		hessian00 = null;
+            	}
+            	if(hessian01 != null)
+            	{
+            		hessian01.release();
+					hessian01 = null;
+            	}
+            	if(hessian02 != null)
+            	{
+            		hessian02.release();
+            		hessian02 = null;
+            	}
+            	if(hessian11 != null)
+            	{
+            		hessian11.release();
+            		hessian11 = null;
+            	}
+            	if(hessian12 != null)
+            	{
+            		hessian12.release();
+					hessian12 = null;
+            	}
+            	if(hessian22 != null)
+            	{
+            		hessian22.release();
+					hessian22 = null;
+            	}
+                break;
+            case SCALEDROTATION:
+            	if(maskBuffer != null)
+            	{
+            		maskBuffer.release();
+            		maskBuffer = null;
+            	}
+            	if(gradient0 != null)
+            	{
+            		gradient0.release();
+            		gradient0 = null;
+            	}
+            	if(gradient1 != null)
+            	{
+            		gradient1.release();
+					gradient1 = null;
+            	}
+            	if(gradient2 != null)
+            	{
+            		gradient2.release();
+            		gradient2 = null;
+            	}
+            	if(gradient3 != null)
+            	{
+            		gradient3.release();
+            		gradient3 = null;
+            	}
+            	if(hessian00 != null)
+            	{
+            		hessian00.release();
+					hessian00 = null;
+            	}
+            	if(hessian01 != null)
+            	{
+            		hessian01.release();
+            		hessian01 = null;
+            	}
+            	if(hessian02 != null)
+            	{
+            		hessian02.release();
+            		hessian02 = null;
+            	}
+            	if(hessian03 != null)
+            	{
+            		hessian03.release();
+					hessian03 = null;
+            	}
+            	if(hessian11 != null)
+            	{
+            		hessian11.release();
+					hessian11 = null;
+            	}
+            	if(hessian12 != null)
+            	{
+            		hessian12.release();
+            		hessian12 = null;
+            	}
+            	if(hessian13 != null)
+            	{
+            		hessian13.release();
+            		hessian13 = null;
+            	}
+            	if(hessian22 != null)
+            	{
+            		hessian22.release();
+            		hessian22 = null;
+            	}
+            	if(hessian23 != null)
+            	{
+            		hessian23.release();
+					hessian23 = null;
+            	}
+            	if(hessian33 != null)
+            	{
+            		hessian33.release();
+            		hessian33 = null;
+            	}
+                break;
+            case AFFINE:
+            	if(maskBuffer != null)
+            	{
+            		maskBuffer.release();
+					maskBuffer = null;
+            	}
+            	if(gradient0 != null)
+            	{
+            		gradient0.release();
+            		gradient0 = null;
+            	}
+            	if(gradient1 != null)
+            	{
+            		gradient1.release();
+            		gradient1 = null;
+            	}
+            	if(gradient2 != null)
+            	{
+            		gradient2.release();
+					gradient2 = null;
+            	}
+            	if(gradient3 != null)
+            	{
+            		gradient3.release();
+					gradient3 = null;
+            	}
+            	if(gradient4 != null)
+            	{
+            		gradient4.release();
+            		gradient4 = null;
+            	}
+            	if(gradient5 != null)
+            	{
+            		gradient5.release();
+					gradient5 = null;
+            	}
+            	if(hessian00 != null)
+            	{
+            		hessian00.release();
+            		hessian00 = null;
+            	}
+            	if(hessian01 != null)
+            	{
+            		hessian01.release();
+            		hessian01 = null;
+            	}
+            	if(hessian02 != null)
+            	{
+            		hessian02.release();
+					hessian02 = null;
+            	}
+            	if(hessian03 != null)
+            	{
+            		hessian03.release();
+            		hessian03 = null;
+            	}
+            	if(hessian04 != null)
+            	{
+            		hessian04.release();
+					hessian04 = null;
+            	}
+            	if(hessian05 != null)
+            	{
+            		hessian05.release();
+					hessian05 = null;
+            	}
+            	if(hessian11 != null)
+            	{
+            		hessian11.release();
+            		hessian11 = null;
+            	}
+            	if(hessian12 != null)
+            	{
+            		hessian12.release();
+            		hessian12 = null;
+            	}
+            	if(hessian13 != null)
+            	{
+            		hessian13.release();
+            		hessian13 = null;
+            	}
+            	if(hessian14 != null)
+            	{
+            		hessian14.release();
+            		hessian14 = null;
+            	}
+            	if(hessian15 != null)
+            	{
+            		hessian15.release();
+            		hessian15 = null;
+            	}
+            	if(hessian22 != null)
+            	{
+            		hessian22.release();
+					hessian22 = null;
+            	}
+            	if(hessian23 != null)
+            	{
+            		hessian23.release();
+					hessian23 = null;
+            	}
+            	if(hessian24 != null)
+            	{
+            		hessian24.release();
+            		hessian24 = null;
+            	}
+            	if(hessian25 != null)
+            	{
+            		hessian25.release();
+            		hessian25 = null;
+            	}
+            	if(hessian33 != null)
+            	{
+            		hessian33.release();
+					hessian33 = null;
+            	}
+            	if(hessian34 != null)
+            	{
+            		hessian34.release();
+					hessian34 = null;
+            	}
+            	if(hessian35 != null)
+            	{
+            		hessian35.release();
+            		hessian35 = null;
+            	}
+            	if(hessian44 != null)
+            	{
+            		hessian44.release();
+            		hessian44 = null;
+            	}
+            	if(hessian45 != null)
+            	{
+            		hessian45.release();
+            		hessian45 = null;
+            	}
+            	if(hessian55 != null)
+            	{
+            		hessian55.release();
+					hessian55 = null;
+            	}
+                break;
+            }
+            if(parallelSumReductionBuffers != null)
+            {
+	        	for(int l = 0;l < parallelSumReductionBuffers.length;l++)
+	            {
+	        		if(parallelSumReductionBuffers[l] != null)
+	        		{
+	        			parallelSumReductionBuffers[l].release();
+	        			parallelSumReductionBuffers[l] = null;
+	        		}
+	            }
+            }
+            for(int j = 0;j < pyramidDepth; j++)
+            {
+            	if(sourcePyramid[j].Image != null)
+            	{
+            		sourcePyramid[j].Image.release();
+            		sourcePyramid[j].Image = null;
+            	}
+            	if(sourcePyramid[j].xGradient != null)
+            	{
+            		sourcePyramid[j].xGradient.release();
+					sourcePyramid[j].xGradient = null;
+            	}
+            	if(sourcePyramid[j].yGradient != null)
+            	{
+            		sourcePyramid[j].yGradient.release();
+            		sourcePyramid[j].yGradient = null;
+            	}
+            	if(targetPyramid[j].Coefficient != null)
+            	{
+            		targetPyramid[j].Coefficient.release();
+					targetPyramid[j].Coefficient = null;
+            	}
+            }
+            
+            if(fullSizedGPUResidentHelperBuffer != null)
+		    {
+            	fullSizedGPUResidentHelperBuffer.release();
+            	fullSizedGPUResidentHelperBuffer = null;
+		    }
+            if(secondaryGPUResidentHelperBuffer != null)
+            {
+            	secondaryGPUResidentHelperBuffer.release();
+				secondaryGPUResidentHelperBuffer = null;
+            }
+            if(entryImageBuffer != null)
+			{
+				entryImageBuffer.release();
+				entryImageBuffer = null;
+			}
+            if(conversionEntryBuffer != null)
+            {
+            	conversionEntryBuffer.release();
+				conversionEntryBuffer = null;
+            }
+            if(doubleEntryImageBuffer != null)
+            {
+            	doubleEntryImageBuffer.release();
+            	doubleEntryImageBuffer = null;
+            }
+            if(doubleFullSizedGPUResidentHelperBuffer != null)
+			{
+				doubleFullSizedGPUResidentHelperBuffer.release();
+				doubleFullSizedGPUResidentHelperBuffer = null;
+			}
+            
+            if(queue != null)
+			{
+				queue.release();
+				queue = null;
+			}
+            if(asyncQueue != null)
+			{
+				asyncQueue.release();
+				asyncQueue = null;
+			}
         }
         
         private void enumerateOCLDevicesAndInitialize() throws Exception
@@ -302,53 +796,163 @@ public class HybridPrecisionNGStackReg extends RegistrationAndTransformation
                 switch(sharedContext.transformationType) {
                 case TRANSLATION:
                     maskBuffer = context.createDoubleBuffer((int)(width*height), GPURESIDENTRW);
-                    maskBuffer.getCLSize();
+                    //maskBuffer.getCLSize();
                     gradient0 = context.createDoubleBuffer((int) (width*height), GPURESIDENTRW);
-                    gradient0.getCLSize();
+                    //gradient0.getCLSize();
                     gradient1 = context.createDoubleBuffer((int) (width*height), GPURESIDENTRW);
-                    gradient1.getCLSize();
+                    //gradient1.getCLSize();
                     hessian00 = context.createDoubleBuffer((int) (width*height), GPURESIDENTRW);
-                    hessian00.getCLSize();
+                    //hessian00.getCLSize();
                     hessian01 = context.createDoubleBuffer((int) (width*height), GPURESIDENTRW);
-                    hessian01.getCLSize();
+                    //hessian01.getCLSize();
                     hessian11 = context.createDoubleBuffer((int) (width*height), GPURESIDENTRW);
-                    hessian11.getCLSize();
+                    //hessian11.getCLSize();
                     for(int l = 0;l < 2;l++)
                     {
                         parallelSumReductionBuffers[l] = context.createDoubleBuffer(maximumSumReductionBlockNr, GPURESIDENTRW);
-                        parallelSumReductionBuffers[l].getCLSize();
+                        //parallelSumReductionBuffers[l].getCLSize();
                     }
                     break;
                 case RIGIDBODY:
                     maskBuffer = context.createDoubleBuffer((int)(width*height), GPURESIDENTRW);
-                    maskBuffer.getCLSize();
+                    //maskBuffer.getCLSize();
                     gradient0 = context.createDoubleBuffer((int) (width*height), GPURESIDENTRW);
-                    gradient0.getCLSize();
+                    //gradient0.getCLSize();
                     gradient1 = context.createDoubleBuffer((int) (width*height), GPURESIDENTRW);
-                    gradient1.getCLSize();
+                    //gradient1.getCLSize();
                     gradient2 = context.createDoubleBuffer((int) (width*height), GPURESIDENTRW);
-                    gradient2.getCLSize();
+                    //gradient2.getCLSize();
                     hessian00 = context.createDoubleBuffer((int) (width*height), GPURESIDENTRW);
-                    hessian00.getCLSize();
+                    //hessian00.getCLSize();
                     hessian01 = context.createDoubleBuffer((int) (width*height), GPURESIDENTRW);
-                    hessian01.getCLSize();
+                    //hessian01.getCLSize();
                     hessian02 = context.createDoubleBuffer((int) (width*height), GPURESIDENTRW);
-                    hessian02.getCLSize();
+                    //hessian02.getCLSize();
                     hessian11 = context.createDoubleBuffer((int) (width*height), GPURESIDENTRW);
-                    hessian11.getCLSize();
+                    //hessian11.getCLSize();
                     hessian12 = context.createDoubleBuffer((int) (width*height), GPURESIDENTRW);
-                    hessian12.getCLSize();
+                    //hessian12.getCLSize();
                     hessian22 = context.createDoubleBuffer((int) (width*height), GPURESIDENTRW);
-                    hessian22.getCLSize();
+                    //hessian22.getCLSize();
                     for(int l = 0;l < 2;l++)
                     {
                         parallelSumReductionBuffers[l] = context.createDoubleBuffer(maximumSumReductionBlockNr, GPURESIDENTRW);
-                        parallelSumReductionBuffers[l].getCLSize();
+                        //parallelSumReductionBuffers[l].getCLSize();
                     }
                     break;
                 case SCALEDROTATION:
+                	maskBuffer = context.createDoubleBuffer((int)(width*height), GPURESIDENTRW);
+                    //maskBuffer.getCLSize();
+                    gradient0 = context.createDoubleBuffer((int) (width*height), GPURESIDENTRW);
+                    //gradient0.getCLSize();
+                    gradient1 = context.createDoubleBuffer((int) (width*height), GPURESIDENTRW);
+                    //gradient1.getCLSize();
+                    gradient2 = context.createDoubleBuffer((int) (width*height), GPURESIDENTRW);
+                    //gradient2.getCLSize();
+                    gradient3 = context.createDoubleBuffer((int) (width*height), GPURESIDENTRW);
+                    //gradient3.getCLSize();
+                    hessian00 = context.createDoubleBuffer((int) (width*height), GPURESIDENTRW);
+                    //hessian00.getCLSize();
+                    hessian01 = context.createDoubleBuffer((int) (width*height), GPURESIDENTRW);
+                    //hessian01.getCLSize();
+                    hessian02 = context.createDoubleBuffer((int) (width*height), GPURESIDENTRW);
+                    //hessian02.getCLSize();
+                    hessian03 = context.createDoubleBuffer((int) (width*height), GPURESIDENTRW);
+                    //hessian03.getCLSize();
+                    hessian11 = context.createDoubleBuffer((int) (width*height), GPURESIDENTRW);
+                    //hessian11.getCLSize();
+                    hessian12 = context.createDoubleBuffer((int) (width*height), GPURESIDENTRW);
+                    //hessian12.getCLSize();
+                    hessian13 = context.createDoubleBuffer((int) (width*height), GPURESIDENTRW);
+                    //hessian13.getCLSize();
+                    hessian22 = context.createDoubleBuffer((int) (width*height), GPURESIDENTRW);
+                    //hessian22.getCLSize();
+                    hessian23 = context.createDoubleBuffer((int) (width*height), GPURESIDENTRW);
+                    //hessian23.getCLSize();
+                    hessian33 = context.createDoubleBuffer((int) (width*height), GPURESIDENTRW);
+                    //hessian33.getCLSize();
+                    for(int l = 0;l < 2;l++)
+                    {
+                        parallelSumReductionBuffers[l] = context.createDoubleBuffer(maximumSumReductionBlockNr, GPURESIDENTRW);
+                        //parallelSumReductionBuffers[l].getCLSize();
+                    }
                     break;
                 case AFFINE:
+                	maskBuffer = context.createDoubleBuffer((int)(width*height), GPURESIDENTRW);
+                    //maskBuffer.getCLSize();
+                    gradient0 = context.createDoubleBuffer((int) (width*height), GPURESIDENTRW);
+                    //gradient0.getCLSize();
+                	
+                    gradient1 = context.createDoubleBuffer((int) (width*height), GPURESIDENTRW);
+                    //gradient1.getCLSize();
+                    gradient2 = context.createDoubleBuffer((int) (width*height), GPURESIDENTRW);
+                    //gradient2.getCLSize();
+                	
+                    gradient3 = context.createDoubleBuffer((int) (width*height), GPURESIDENTRW);
+                    //gradient3.getCLSize();
+                    gradient4 = context.createDoubleBuffer((int) (width*height), GPURESIDENTRW);
+                    //gradient4.getCLSize();
+                	
+                    gradient5 = context.createDoubleBuffer((int) (width*height), GPURESIDENTRW);
+                    //gradient5.getCLSize();
+                    hessian00 = context.createDoubleBuffer((int) (width*height), GPURESIDENTRW);
+                    //hessian00.getCLSize();
+                	
+                    hessian01 = context.createDoubleBuffer((int) (width*height), GPURESIDENTRW);
+                    //hessian01.getCLSize();
+                    hessian02 = context.createDoubleBuffer((int) (width*height), GPURESIDENTRW);
+                    //hessian02.getCLSize();
+                	
+                    hessian03 = context.createDoubleBuffer((int) (width*height), GPURESIDENTRW);
+                    //hessian03.getCLSize();
+                    hessian04 = context.createDoubleBuffer((int) (width*height), GPURESIDENTRW);
+                    //hessian04.getCLSize();
+                	
+                    hessian05 = context.createDoubleBuffer((int) (width*height), GPURESIDENTRW);
+                    //hessian05.getCLSize();
+                    hessian11 = context.createDoubleBuffer((int) (width*height), GPURESIDENTRW);
+                    //hessian11.getCLSize();
+                	
+                    hessian12 = context.createDoubleBuffer((int) (width*height), GPURESIDENTRW);
+                    //hessian12.getCLSize();
+                    hessian13 = context.createDoubleBuffer((int) (width*height), GPURESIDENTRW);
+                    //hessian13.getCLSize();
+                	
+                    hessian14 = context.createDoubleBuffer((int) (width*height), GPURESIDENTRW);
+                    //hessian14.getCLSize();
+                    hessian15 = context.createDoubleBuffer((int) (width*height), GPURESIDENTRW);
+                    //hessian15.getCLSize();
+                	
+                    hessian22 = context.createDoubleBuffer((int) (width*height), GPURESIDENTRW);
+                    //hessian22.getCLSize();
+                    hessian23 = context.createDoubleBuffer((int) (width*height), GPURESIDENTRW);
+                    //hessian23.getCLSize();
+                	
+                    hessian24 = context.createDoubleBuffer((int) (width*height), GPURESIDENTRW);
+                    //hessian24.getCLSize();
+                    hessian25 = context.createDoubleBuffer((int) (width*height), GPURESIDENTRW);
+                    //hessian25.getCLSize();
+                	
+                    hessian33 = context.createDoubleBuffer((int) (width*height), GPURESIDENTRW);
+                    //hessian33.getCLSize();
+                    hessian34 = context.createDoubleBuffer((int) (width*height), GPURESIDENTRW);
+                    //hessian34.getCLSize();
+                	
+                    hessian35 = context.createDoubleBuffer((int) (width*height), GPURESIDENTRW);
+                    //hessian35.getCLSize();
+                    hessian44 = context.createDoubleBuffer((int) (width*height), GPURESIDENTRW);
+                    //hessian44.getCLSize();
+                	
+                    hessian45 = context.createDoubleBuffer((int) (width*height), GPURESIDENTRW);
+                    //hessian45.getCLSize();
+                    hessian55 = context.createDoubleBuffer((int) (width*height), GPURESIDENTRW);
+                    //hessian55.getCLSize();
+                	
+                    for(int l = 0;l < 2;l++)
+                    {
+                        parallelSumReductionBuffers[l] = context.createDoubleBuffer(maximumSumReductionBlockNr, GPURESIDENTRW);
+                        //parallelSumReductionBuffers[l].getCLSize();
+                    }
                     break;
                 }
             }
@@ -357,53 +961,163 @@ public class HybridPrecisionNGStackReg extends RegistrationAndTransformation
                 switch(sharedContext.transformationType) {
                 case TRANSLATION:
                     maskBuffer = context.createFloatBuffer((int)(width*height), GPURESIDENTRW);
-                    maskBuffer.getCLSize();
+                    //maskBuffer.getCLSize();
                     gradient0 = context.createFloatBuffer((int) (width*height), GPURESIDENTRW);
-                    gradient0.getCLSize();
+                    //gradient0.getCLSize();
                     gradient1 = context.createFloatBuffer((int) (width*height), GPURESIDENTRW);
-                    gradient1.getCLSize();
+                    //gradient1.getCLSize();
                     hessian00 = context.createFloatBuffer((int) (width*height), GPURESIDENTRW);
-                    hessian00.getCLSize();
+                    //hessian00.getCLSize();
                     hessian01 = context.createFloatBuffer((int) (width*height), GPURESIDENTRW);
-                    hessian01.getCLSize();
+                    //hessian01.getCLSize();
                     hessian11 = context.createFloatBuffer((int) (width*height), GPURESIDENTRW);
-                    hessian11.getCLSize();
+                    //hessian11.getCLSize();
                     for(int l = 0;l < 2;l++)
                     {
                         parallelSumReductionBuffers[l] = context.createFloatBuffer(maximumSumReductionBlockNr, GPURESIDENTRW);
-                        parallelSumReductionBuffers[l].getCLSize();
+                        //parallelSumReductionBuffers[l].getCLSize();
                     }
                     break;
                 case RIGIDBODY:
                     maskBuffer = context.createFloatBuffer((int)(width*height), GPURESIDENTRW);
-                    maskBuffer.getCLSize();
+                    //maskBuffer.getCLSize();
                     gradient0 = context.createFloatBuffer((int) (width*height), GPURESIDENTRW);
-                    gradient0.getCLSize();
+                    //gradient0.getCLSize();
                     gradient1 = context.createFloatBuffer((int) (width*height), GPURESIDENTRW);
-                    gradient1.getCLSize();
+                    //gradient1.getCLSize();
                     gradient2 = context.createFloatBuffer((int) (width*height), GPURESIDENTRW);
-                    gradient2.getCLSize();
+                    //gradient2.getCLSize();
                     hessian00 = context.createFloatBuffer((int) (width*height), GPURESIDENTRW);
-                    hessian00.getCLSize();
+                    //hessian00.getCLSize();
                     hessian01 = context.createFloatBuffer((int) (width*height), GPURESIDENTRW);
-                    hessian01.getCLSize();
+                    //hessian01.getCLSize();
                     hessian02 = context.createFloatBuffer((int) (width*height), GPURESIDENTRW);
-                    hessian02.getCLSize();
+                    //hessian02.getCLSize();
                     hessian11 = context.createFloatBuffer((int) (width*height), GPURESIDENTRW);
-                    hessian11.getCLSize();
+                    //hessian11.getCLSize();
                     hessian12 = context.createFloatBuffer((int) (width*height), GPURESIDENTRW);
-                    hessian12.getCLSize();
+                    //hessian12.getCLSize();
                     hessian22 = context.createFloatBuffer((int) (width*height), GPURESIDENTRW);
-                    hessian22.getCLSize();
+                    //hessian22.getCLSize();
                     for(int l = 0;l < 2;l++)
                     {
                         parallelSumReductionBuffers[l] = context.createFloatBuffer(maximumSumReductionBlockNr, GPURESIDENTRW);
-                        parallelSumReductionBuffers[l].getCLSize();
+                        //parallelSumReductionBuffers[l].getCLSize();
                     }
                     break;
                 case SCALEDROTATION:
+                	maskBuffer = context.createFloatBuffer((int)(width*height), GPURESIDENTRW);
+                    //maskBuffer.getCLSize();
+                    gradient0 = context.createFloatBuffer((int) (width*height), GPURESIDENTRW);
+                    //gradient0.getCLSize();
+                    gradient1 = context.createFloatBuffer((int) (width*height), GPURESIDENTRW);
+                    //gradient1.getCLSize();
+                    gradient2 = context.createFloatBuffer((int) (width*height), GPURESIDENTRW);
+                    //gradient2.getCLSize();
+                    gradient3 = context.createFloatBuffer((int) (width*height), GPURESIDENTRW);
+                    //gradient3.getCLSize();
+                    hessian00 = context.createFloatBuffer((int) (width*height), GPURESIDENTRW);
+                    //hessian00.getCLSize();
+                    hessian01 = context.createFloatBuffer((int) (width*height), GPURESIDENTRW);
+                    //hessian01.getCLSize();
+                    hessian02 = context.createFloatBuffer((int) (width*height), GPURESIDENTRW);
+                    //hessian02.getCLSize();
+                    hessian03 = context.createFloatBuffer((int) (width*height), GPURESIDENTRW);
+                    //hessian03.getCLSize();
+                    hessian11 = context.createFloatBuffer((int) (width*height), GPURESIDENTRW);
+                    //hessian11.getCLSize();
+                    hessian12 = context.createFloatBuffer((int) (width*height), GPURESIDENTRW);
+                    //hessian12.getCLSize();
+                    hessian13 = context.createFloatBuffer((int) (width*height), GPURESIDENTRW);
+                    //hessian13.getCLSize();
+                    hessian22 = context.createFloatBuffer((int) (width*height), GPURESIDENTRW);
+                    //hessian22.getCLSize();
+                    hessian23 = context.createFloatBuffer((int) (width*height), GPURESIDENTRW);
+                    //hessian23.getCLSize();
+                    hessian33 = context.createFloatBuffer((int) (width*height), GPURESIDENTRW);
+                    //hessian33.getCLSize();
+                    for(int l = 0;l < 2;l++)
+                    {
+                        parallelSumReductionBuffers[l] = context.createFloatBuffer(maximumSumReductionBlockNr, GPURESIDENTRW);
+                        //parallelSumReductionBuffers[l].getCLSize();
+                    }
                     break;
                 case AFFINE:
+                	maskBuffer = context.createFloatBuffer((int)(width*height), GPURESIDENTRW);
+                    //maskBuffer.getCLSize();
+                    gradient0 = context.createFloatBuffer((int) (width*height), GPURESIDENTRW);
+                    //gradient0.getCLSize();
+                    
+                    gradient1 = context.createFloatBuffer((int) (width*height), GPURESIDENTRW);
+                    //gradient1.getCLSize();
+                    gradient2 = context.createFloatBuffer((int) (width*height), GPURESIDENTRW);
+                    //gradient2.getCLSize();
+                	
+                    gradient3 = context.createFloatBuffer((int) (width*height), GPURESIDENTRW);
+                    //gradient3.getCLSize();
+                    gradient4 = context.createFloatBuffer((int) (width*height), GPURESIDENTRW);
+                    //gradient4.getCLSize();
+                	
+                    gradient5 = context.createFloatBuffer((int) (width*height), GPURESIDENTRW);
+                    //gradient5.getCLSize();
+                    hessian00 = context.createFloatBuffer((int) (width*height), GPURESIDENTRW);
+                    //hessian00.getCLSize();
+                	
+                    hessian01 = context.createFloatBuffer((int) (width*height), GPURESIDENTRW);
+                    //hessian01.getCLSize();
+                    hessian02 = context.createFloatBuffer((int) (width*height), GPURESIDENTRW);
+                    //hessian02.getCLSize();
+                	
+                    hessian03 = context.createFloatBuffer((int) (width*height), GPURESIDENTRW);
+                    //hessian03.getCLSize();
+                    hessian04 = context.createFloatBuffer((int) (width*height), GPURESIDENTRW);
+                    //hessian04.getCLSize();
+                	
+                    hessian05 = context.createFloatBuffer((int) (width*height), GPURESIDENTRW);
+                    //hessian05.getCLSize();
+                    hessian11 = context.createFloatBuffer((int) (width*height), GPURESIDENTRW);
+                    //hessian11.getCLSize();
+                	
+                    hessian12 = context.createFloatBuffer((int) (width*height), GPURESIDENTRW);
+                    //hessian12.getCLSize();
+                    hessian13 = context.createFloatBuffer((int) (width*height), GPURESIDENTRW);
+                    //hessian13.getCLSize();
+                	
+                    hessian14 = context.createFloatBuffer((int) (width*height), GPURESIDENTRW);
+                    //hessian14.getCLSize();
+                    hessian15 = context.createFloatBuffer((int) (width*height), GPURESIDENTRW);
+                    //hessian15.getCLSize();
+                	
+                    hessian22 = context.createFloatBuffer((int) (width*height), GPURESIDENTRW);
+                    //hessian22.getCLSize();
+                    hessian23 = context.createFloatBuffer((int) (width*height), GPURESIDENTRW);
+                    //hessian23.getCLSize();
+                	
+                    hessian24 = context.createFloatBuffer((int) (width*height), GPURESIDENTRW);
+                    //hessian24.getCLSize();
+                    hessian25 = context.createFloatBuffer((int) (width*height), GPURESIDENTRW);
+                    //hessian25.getCLSize();
+                	
+                    hessian33 = context.createFloatBuffer((int) (width*height), GPURESIDENTRW);
+                    //hessian33.getCLSize();
+                    hessian34 = context.createFloatBuffer((int) (width*height), GPURESIDENTRW);
+                    //hessian34.getCLSize();
+                	
+                    hessian35 = context.createFloatBuffer((int) (width*height), GPURESIDENTRW);
+                    //hessian35.getCLSize();
+                    hessian44 = context.createFloatBuffer((int) (width*height), GPURESIDENTRW);
+                    //hessian44.getCLSize();
+                	
+                    hessian45 = context.createFloatBuffer((int) (width*height), GPURESIDENTRW);
+                    //hessian45.getCLSize();
+                    hessian55 = context.createFloatBuffer((int) (width*height), GPURESIDENTRW);
+                    //hessian55.getCLSize();
+                	
+                    for(int l = 0;l < 2;l++)
+                    {
+                        parallelSumReductionBuffers[l] = context.createFloatBuffer(maximumSumReductionBlockNr, GPURESIDENTRW);
+                        //parallelSumReductionBuffers[l].getCLSize();
+                    }
                     break;
                 }
             }
@@ -415,20 +1129,20 @@ public class HybridPrecisionNGStackReg extends RegistrationAndTransformation
                 sourceDoubleSlice.width = width;
                 sourceDoubleSlice.height = height;
                 sourceDoubleSlice.Image = context.createDoubleBuffer((int) (width*height), GPURESIDENTRW);
-                sourceDoubleSlice.Image.getCLSize();
+                //sourceDoubleSlice.Image.getCLSize();
                 sourceDoubleSlice.xGradient = context.createDoubleBuffer((int) (width*height), GPURESIDENTRW);
-                sourceDoubleSlice.xGradient.getCLSize();
+                //sourceDoubleSlice.xGradient.getCLSize();
                 sourceDoubleSlice.yGradient = context.createDoubleBuffer((int) (width*height), GPURESIDENTRW);
-                sourceDoubleSlice.yGradient.getCLSize();
+                //sourceDoubleSlice.yGradient.getCLSize();
                 targetDoubleSlice.width = width;
                 targetDoubleSlice.height = height;
                 targetDoubleSlice.Coefficient = context.createDoubleBuffer((int) (width*height), GPURESIDENTRW);
-                targetDoubleSlice.Coefficient.getCLSize();
+                //targetDoubleSlice.Coefficient.getCLSize();
                 // these are the conversion intermediate buffers
                 doubleEntryImageBuffer = context.createDoubleBuffer((int) (width*height), GPURESIDENTRW);
-                doubleEntryImageBuffer.getCLSize();
+                //doubleEntryImageBuffer.getCLSize();
                 doubleFullSizedGPUResidentHelperBuffer = context.createDoubleBuffer((int) (width*height), GPURESIDENTRW);
-                doubleFullSizedGPUResidentHelperBuffer.getCLSize();
+                //doubleFullSizedGPUResidentHelperBuffer.getCLSize();
             }
             else
             {
@@ -448,13 +1162,13 @@ public class HybridPrecisionNGStackReg extends RegistrationAndTransformation
                 targetPyramid[j].width = width;
                 targetPyramid[j].height = height;   
                 sourcePyramid[j].Image = context.createFloatBuffer((int) (width*height), GPURESIDENTRW);
-                sourcePyramid[j].Image.getCLSize();
+                //ourcePyramid[j].Image.getCLSize();
                 sourcePyramid[j].xGradient = context.createFloatBuffer((int) (width*height), GPURESIDENTRW);
-                sourcePyramid[j].xGradient.getCLSize();
+                //sourcePyramid[j].xGradient.getCLSize();
                 sourcePyramid[j].yGradient= context.createFloatBuffer((int) (width*height), GPURESIDENTRW);
-                sourcePyramid[j].yGradient.getCLSize();
+                //sourcePyramid[j].yGradient.getCLSize();
                 targetPyramid[j].Coefficient = context.createFloatBuffer((int) (width*height), GPURESIDENTRW);
-                targetPyramid[j].Coefficient.getCLSize();
+                //targetPyramid[j].Coefficient.getCLSize();
                 width /= 2;
                 height /= 2;
             }
@@ -482,7 +1196,7 @@ public class HybridPrecisionNGStackReg extends RegistrationAndTransformation
                     // long and double are not allowed for this method
                     throw new RuntimeException("Illegal image type");
                 }
-                conversionEntryBuffer.getCLSize();
+                //conversionEntryBuffer.getCLSize();
             }
             else
             {
@@ -523,11 +1237,11 @@ public class HybridPrecisionNGStackReg extends RegistrationAndTransformation
             }
 
             entryImageBuffer = context.createFloatBuffer((int) (sharedContext.img.dimension(0)*sharedContext.img.dimension(1)), GPURESIDENTRW);
-            entryImageBuffer.getCLSize();
+            //entryImageBuffer.getCLSize();
             fullSizedGPUResidentHelperBuffer = context.createFloatBuffer((int) (sharedContext.img.dimension(0)*sharedContext.img.dimension(1)), GPURESIDENTRW);
-            fullSizedGPUResidentHelperBuffer.getCLSize();
+            //fullSizedGPUResidentHelperBuffer.getCLSize();
             secondaryGPUResidentHelperBuffer = context.createFloatBuffer(((((int)sharedContext.img.dimension(0)))*(((int)sharedContext.img.dimension(1)))), GPURESIDENTRW);
-            secondaryGPUResidentHelperBuffer.getCLSize();
+            //secondaryGPUResidentHelperBuffer.getCLSize();
         }
         
         private void CompileAndSetupOpenCLKernerls() throws IOException
@@ -537,42 +1251,86 @@ public class HybridPrecisionNGStackReg extends RegistrationAndTransformation
             if(usesFloat)
             {
                 // only get the float part
-                uniformBSplineTransformProgram = context.createProgram(getClass().getResourceAsStream("/ch/unibas/biozentrum/imagejplugins/opencl/HybridPrecisionBSplineTransform.cl")).build(device);
+                //uniformBSplineTransformProgram = context.createProgram(getClass().getResourceAsStream("/ch/unibas/biozentrum/imagejplugins/opencl/HybridPrecisionBSplineTransform.cl")).build(device);
+                switch(sharedContext.transformationType) {
+                case TRANSLATION:
+                	uniformBSplineTransformProgram = context.createProgram(getClass().getResourceAsStream("/ch/unibas/biozentrum/imagejplugins/opencl/UniformBSplineTransform.cl")).build("-D HYBRID -D TRANSLATION", device);
+                	break;
+                case RIGIDBODY:
+                	uniformBSplineTransformProgram = context.createProgram(getClass().getResourceAsStream("/ch/unibas/biozentrum/imagejplugins/opencl/UniformBSplineTransform.cl")).build("-D HYBRID -D RIGIDBODY", device);
+                	break;
+                case SCALEDROTATION:
+                	uniformBSplineTransformProgram = context.createProgram(getClass().getResourceAsStream("/ch/unibas/biozentrum/imagejplugins/opencl/UniformBSplineTransform.cl")).build("-D HYBRID -D SCALEDROTATION", device);
+					break;
+                case AFFINE:
+                	uniformBSplineTransformProgram = context.createProgram(getClass().getResourceAsStream("/ch/unibas/biozentrum/imagejplugins/opencl/UniformBSplineTransform.cl")).build("-D HYBRID -D AFFINE", device);
+                	break;
+                }
             }
             else
             {
                 // also compile the double part
-                uniformBSplineTransformProgram = context.createProgram(getClass().getResourceAsStream("/ch/unibas/biozentrum/imagejplugins/opencl/HybridPrecisionBSplineTransform.cl")).build("-D USE_DOUBLE",device);
-                uniformBSplineTransformProgramKernels[KERNEL_ConvertDoubleToFloat] = uniformBSplineTransformProgram.createCLKernel("ConvertDoubleToFloat");
-                uniformBSplineTransformProgramKernels[KERNEL_dCubicBSplinePrefilter2Dpremulhp] = uniformBSplineTransformProgram.createCLKernel("dCubicBSplinePrefilter2Dpremulhp");
-                uniformBSplineTransformProgramKernels[KERNEL_dTargetedCubicBSplinePrefilter2Dpremulhp] = uniformBSplineTransformProgram.createCLKernel("dTargetedCubicBSplinePrefilter2Dpremulhp");
-                uniformBSplineTransformProgramKernels[KERNEL_dCubicBSplinePrefilter2DXhp] = uniformBSplineTransformProgram.createCLKernel("dCubicBSplinePrefilter2DXhp");
-                uniformBSplineTransformProgramKernels[KERNEL_dCubicBSplinePrefilter2DYhp] = uniformBSplineTransformProgram.createCLKernel("dCubicBSplinePrefilter2DYhp");
-                uniformBSplineTransformProgramKernels[KERNEL_dantiSymmetricFirMirrorOffBounds1DX] = uniformBSplineTransformProgram.createCLKernel("dantiSymmetricFirMirrorOffBounds1DX");
-                uniformBSplineTransformProgramKernels[KERNEL_dantiSymmetricFirMirrorOffBounds1DY] = uniformBSplineTransformProgram.createCLKernel("dantiSymmetricFirMirrorOffBounds1DY");
-                uniformBSplineTransformProgramKernels[KERNEL_dsumInLocalMemory] = uniformBSplineTransformProgram.createCLKernel("dsumInLocalMemory");
-                uniformBSplineTransformProgramKernels[KERNEL_dparallelGroupedSumReduction] = uniformBSplineTransformProgram.createCLKernel("dparallelGroupedSumReduction");
+            	//uniformBSplineTransformProgramDouble = context.createProgram(getClass().getResourceAsStream("/ch/unibas/biozentrum/imagejplugins/opencl/HybridPrecisionBSplineTransform.cl")).build("-D USE_DOUBLE",device);
+            	switch(sharedContext.transformationType) {
+                case TRANSLATION:
+                	uniformBSplineTransformProgramDouble = context.createProgram(getClass().getResourceAsStream("/ch/unibas/biozentrum/imagejplugins/opencl/UniformBSplineTransform.cl")).build("-D HYBRID -D TRANSLATION -D USE_DOUBLE", device);
+                	uniformBSplineTransformProgram = context.createProgram(getClass().getResourceAsStream("/ch/unibas/biozentrum/imagejplugins/opencl/UniformBSplineTransform.cl")).build("-D HYBRID -D TRANSLATION", device);
+                	break;
+                case RIGIDBODY:
+                	uniformBSplineTransformProgramDouble = context.createProgram(getClass().getResourceAsStream("/ch/unibas/biozentrum/imagejplugins/opencl/UniformBSplineTransform.cl")).build("-D HYBRID -D RIGIDBODY -D USE_DOUBLE", device);
+                	uniformBSplineTransformProgram = context.createProgram(getClass().getResourceAsStream("/ch/unibas/biozentrum/imagejplugins/opencl/UniformBSplineTransform.cl")).build("-D HYBRID -D RIGIDBODY", device);
+                	break;
+                case SCALEDROTATION:
+                	uniformBSplineTransformProgramDouble = context.createProgram(getClass().getResourceAsStream("/ch/unibas/biozentrum/imagejplugins/opencl/UniformBSplineTransform.cl")).build("-D HYBRID -D SCALEDROTATION -D USE_DOUBLE", device);
+                	uniformBSplineTransformProgram = context.createProgram(getClass().getResourceAsStream("/ch/unibas/biozentrum/imagejplugins/opencl/UniformBSplineTransform.cl")).build("-D HYBRID -D SCALEDROTATION", device);
+					break;
+                case AFFINE:
+                	uniformBSplineTransformProgramDouble = context.createProgram(getClass().getResourceAsStream("/ch/unibas/biozentrum/imagejplugins/opencl/UniformBSplineTransform.cl")).build("-D HYBRID -D AFFINE -D USE_DOUBLE", device);
+                	uniformBSplineTransformProgram = context.createProgram(getClass().getResourceAsStream("/ch/unibas/biozentrum/imagejplugins/opencl/UniformBSplineTransform.cl")).build("-D HYBRID -D AFFINE", device);
+                	break;
+                }
+                uniformBSplineTransformProgramKernels[KERNEL_ConvertDoubleToFloat] = uniformBSplineTransformProgramDouble.createCLKernel("ConvertDoubleToFloat");
+                uniformBSplineTransformProgramKernels[KERNEL_dCubicBSplinePrefilter2Dpremulhp] = uniformBSplineTransformProgramDouble.createCLKernel("CubicBSplinePrefilter2Dpremulhp");
+                uniformBSplineTransformProgramKernels[KERNEL_dTargetedCubicBSplinePrefilter2Dpremulhp] = uniformBSplineTransformProgramDouble.createCLKernel("TargetedCubicBSplinePrefilter2Dpremulhp");
+                uniformBSplineTransformProgramKernels[KERNEL_dCubicBSplinePrefilter2DXhp] = uniformBSplineTransformProgramDouble.createCLKernel("CubicBSplinePrefilter2DXhp");
+                uniformBSplineTransformProgramKernels[KERNEL_dCubicBSplinePrefilter2DYhp] = uniformBSplineTransformProgramDouble.createCLKernel("CubicBSplinePrefilter2DYhp");
+                uniformBSplineTransformProgramKernels[KERNEL_dantiSymmetricFirMirrorOffBounds1DX] = uniformBSplineTransformProgramDouble.createCLKernel("antiSymmetricFirMirrorOffBounds1DX");
+                uniformBSplineTransformProgramKernels[KERNEL_dantiSymmetricFirMirrorOffBounds1DY] = uniformBSplineTransformProgramDouble.createCLKernel("antiSymmetricFirMirrorOffBounds1DY");
+                uniformBSplineTransformProgramKernels[KERNEL_dsumInLocalMemory] = uniformBSplineTransformProgramDouble.createCLKernel("sumInLocalMemory");
+                uniformBSplineTransformProgramKernels[KERNEL_dparallelGroupedSumReduction] = uniformBSplineTransformProgramDouble.createCLKernel("parallelGroupedSumReduction");
                 
                 switch(sharedContext.transformationType) {
                 case TRANSLATION:
-                    uniformBSplineTransformProgramKernels[KERNEL_dtranslationError] = uniformBSplineTransformProgram.createCLKernel("dtranslationError");
-                    uniformBSplineTransformProgramKernels[KERNEL_dtranslationErrorWithGradAndHess] = uniformBSplineTransformProgram.createCLKernel("dtranslationErrorWithGradAndHess");
-                    uniformBSplineTransformProgramKernels[KERNEL_dtranslationSumInLocalMemoryCombined] = uniformBSplineTransformProgram.createCLKernel("dtranslationSumInLocalMemoryCombined");
-                    uniformBSplineTransformProgramKernels[KERNEL_dtranslationErrorWithGradAndHessBrent] = uniformBSplineTransformProgram.createCLKernel("dtranslationErrorWithGradAndHessBrent");
-                    uniformBSplineTransformProgramKernels[KERNEL_dtranslationtransformImageWithBsplineInterpolation] = uniformBSplineTransformProgram.createCLKernel("dtranslationtransformImageWithBsplineInterpolation");
-                    uniformBSplineTransformProgramKernels[KERNEL_dresizingTransformImageWithBsplineInterpolation] = uniformBSplineTransformProgram.createCLKernel("dresizingTranslationTransformImageWithBsplineInterpolation");
+                    uniformBSplineTransformProgramKernels[KERNEL_dtranslationError] = uniformBSplineTransformProgramDouble.createCLKernel("translationError");
+                    uniformBSplineTransformProgramKernels[KERNEL_dtranslationErrorWithGradAndHess] = uniformBSplineTransformProgramDouble.createCLKernel("translationErrorWithGradAndHess");
+                    uniformBSplineTransformProgramKernels[KERNEL_dtranslationSumInLocalMemoryCombined] = uniformBSplineTransformProgramDouble.createCLKernel("translationSumInLocalMemoryCombined");
+                    uniformBSplineTransformProgramKernels[KERNEL_dtranslationErrorWithGradAndHessBrent] = uniformBSplineTransformProgramDouble.createCLKernel("translationErrorWithGradAndHessBrent");
+                    uniformBSplineTransformProgramKernels[KERNEL_dtranslationtransformImageWithBsplineInterpolation] = uniformBSplineTransformProgramDouble.createCLKernel("translationtransformImageWithBsplineInterpolation");
+                    uniformBSplineTransformProgramKernels[KERNEL_dresizingTransformImageWithBsplineInterpolation] = uniformBSplineTransformProgramDouble.createCLKernel("resizingTranslationTransformImageWithBsplineInterpolation");
                     break;
                 case RIGIDBODY:
-                    uniformBSplineTransformProgramKernels[KERNEL_drigidBodyError] = uniformBSplineTransformProgram.createCLKernel("drigidBodyError");
-                    uniformBSplineTransformProgramKernels[KERNEL_drigidBodyErrorWithGradAndHess] = uniformBSplineTransformProgram.createCLKernel("drigidBodyErrorWithGradAndHess");
-                    uniformBSplineTransformProgramKernels[KERNEL_dsumInLocalMemoryCombined] = uniformBSplineTransformProgram.createCLKernel("dsumInLocalMemoryCombined");
-                    uniformBSplineTransformProgramKernels[KERNEL_drigidBodyErrorWithGradAndHessBrent] = uniformBSplineTransformProgram.createCLKernel("drigidBodyErrorWithGradAndHessBrent");
-                    uniformBSplineTransformProgramKernels[KERNEL_dtransformImageWithBsplineInterpolation] = uniformBSplineTransformProgram.createCLKernel("dtransformImageWithBsplineInterpolation");
-                    uniformBSplineTransformProgramKernels[KERNEL_dresizingTransformImageWithBsplineInterpolation] = uniformBSplineTransformProgram.createCLKernel("dresizingTransformImageWithBsplineInterpolation");
+                    uniformBSplineTransformProgramKernels[KERNEL_drigidBodyError] = uniformBSplineTransformProgramDouble.createCLKernel("rigidBodyError");
+                    uniformBSplineTransformProgramKernels[KERNEL_drigidBodyErrorWithGradAndHess] = uniformBSplineTransformProgramDouble.createCLKernel("rigidBodyErrorWithGradAndHess");
+                    uniformBSplineTransformProgramKernels[KERNEL_dsumInLocalMemoryCombined] = uniformBSplineTransformProgramDouble.createCLKernel("sumInLocalMemoryCombined");
+                    uniformBSplineTransformProgramKernels[KERNEL_drigidBodyErrorWithGradAndHessBrent] = uniformBSplineTransformProgramDouble.createCLKernel("rigidBodyErrorWithGradAndHessBrent");
+                    uniformBSplineTransformProgramKernels[KERNEL_dtransformImageWithBsplineInterpolation] = uniformBSplineTransformProgramDouble.createCLKernel("transformImageWithBsplineInterpolation");
+                    uniformBSplineTransformProgramKernels[KERNEL_dresizingTransformImageWithBsplineInterpolation] = uniformBSplineTransformProgramDouble.createCLKernel("resizingTransformImageWithBsplineInterpolation");
                     break;
                 case SCALEDROTATION:
+                	uniformBSplineTransformProgramKernels[KERNEL_dscaledRotationError] = uniformBSplineTransformProgramDouble.createCLKernel("scaledRotationError");
+                    uniformBSplineTransformProgramKernels[KERNEL_dscaledRotationErrorWithGradAndHess] = uniformBSplineTransformProgramDouble.createCLKernel("scaledRotationErrorWithGradAndHess");
+                    uniformBSplineTransformProgramKernels[KERNEL_dscaledRotationSumInLocalMemoryCombined] = uniformBSplineTransformProgramDouble.createCLKernel("sumInLocalMemoryScaledRotationCombined");
+                    uniformBSplineTransformProgramKernels[KERNEL_dscaledRotationErrorWithGradAndHessBrent] = uniformBSplineTransformProgramDouble.createCLKernel("scaledRotationErrorWithGradAndHessBrent");
+                    uniformBSplineTransformProgramKernels[KERNEL_dscaledRotationTransformImageWithBsplineInterpolation] = uniformBSplineTransformProgramDouble.createCLKernel("scaledRotationTransformImageWithBsplineInterpolation");                    
+                    uniformBSplineTransformProgramKernels[KERNEL_dresizingTransformImageWithBsplineInterpolation] = uniformBSplineTransformProgramDouble.createCLKernel("resizingScaledRotationTransformImageWithBsplineInterpolation");
                     break;
                 case AFFINE:
+                	uniformBSplineTransformProgramKernels[KERNEL_daffineError] = uniformBSplineTransformProgramDouble.createCLKernel("affineError");
+                    uniformBSplineTransformProgramKernels[KERNEL_daffineErrorWithGradAndHess] = uniformBSplineTransformProgramDouble.createCLKernel("affineErrorWithGradAndHess");
+                    uniformBSplineTransformProgramKernels[KERNEL_daffineSumInLocalMemoryCombined] = uniformBSplineTransformProgramDouble.createCLKernel("sumInLocalMemoryAffineCombined");
+                    uniformBSplineTransformProgramKernels[KERNEL_daffineErrorWithGradAndHessBrent] = uniformBSplineTransformProgramDouble.createCLKernel("affineErrorWithGradAndHessBrent");
+                    uniformBSplineTransformProgramKernels[KERNEL_daffineTransformImageWithBsplineInterpolation] = uniformBSplineTransformProgramDouble.createCLKernel("affineTransformImageWithBsplineInterpolation");
+                    uniformBSplineTransformProgramKernels[KERNEL_dresizingTransformImageWithBsplineInterpolation] = uniformBSplineTransformProgramDouble.createCLKernel("resizingAffineTransformImageWithBsplineInterpolation");
                     break;
                 }
                 
@@ -596,11 +1354,11 @@ public class HybridPrecisionNGStackReg extends RegistrationAndTransformation
                 	optimalMultiples[KERNEL_dtranslationErrorWithGradAndHessBrent] = uniformBSplineTransformProgramKernels[KERNEL_dtranslationErrorWithGradAndHessBrent].getPreferredWorkGroupSizeMultiple(device);
                 	optimalMultiples[KERNEL_dtranslationtransformImageWithBsplineInterpolation] = uniformBSplineTransformProgramKernels[KERNEL_dtranslationtransformImageWithBsplineInterpolation].getPreferredWorkGroupSizeMultiple(device);
                     
-                    doubleblockSizesRigidBodyParallel = (int)Math.min(Math.min(uniformBSplineTransformProgramKernels[KERNEL_dtranslationErrorWithGradAndHessBrent].getWorkGroupSize(device), (device.getLocalMemSize() - uniformBSplineTransformProgramKernels[KERNEL_dtranslationErrorWithGradAndHessBrent].getLocalMemorySize(device))/((8)*11/*11 buffers are needed*/)), blocksizeMultiplier*optimalMultiples[KERNEL_dtranslationErrorWithGradAndHessBrent]);
-                    doubleblockSizesRigidBodyParallel -= (doubleblockSizesRigidBodyParallel % optimalMultiples[KERNEL_dtranslationErrorWithGradAndHessBrent]);
-                    if(doubleblockSizesRigidBodyParallel == 0)
+                    doubleblockSizesParallel = (int)Math.min(Math.min(uniformBSplineTransformProgramKernels[KERNEL_dtranslationErrorWithGradAndHessBrent].getWorkGroupSize(device), (device.getLocalMemSize() - uniformBSplineTransformProgramKernels[KERNEL_dtranslationErrorWithGradAndHessBrent].getLocalMemorySize(device))/((8)*11/*11 buffers are needed*/)), blocksizeMultiplier*optimalMultiples[KERNEL_dtranslationErrorWithGradAndHessBrent]);
+                    doubleblockSizesParallel -= (doubleblockSizesParallel % optimalMultiples[KERNEL_dtranslationErrorWithGradAndHessBrent]);
+                    if(doubleblockSizesParallel == 0)
                     {
-                        doubleblockSizesRigidBodyParallel = 1;// Fallback solution minimum is 1
+                        doubleblockSizesParallel = 1;// Fallback solution minimum is 1
                     }
                     
                     doublemaximumElementsForLocalFPTcombinedSum = (int) Math.min(uniformBSplineTransformProgramKernels[KERNEL_dtranslationSumInLocalMemoryCombined].getWorkGroupSize(device), (device.getLocalMemSize() - uniformBSplineTransformProgramKernels[KERNEL_dtranslationSumInLocalMemoryCombined].getLocalMemorySize(device))/(8));
@@ -612,18 +1370,46 @@ public class HybridPrecisionNGStackReg extends RegistrationAndTransformation
                 	optimalMultiples[KERNEL_drigidBodyErrorWithGradAndHessBrent] = uniformBSplineTransformProgramKernels[KERNEL_drigidBodyErrorWithGradAndHessBrent].getPreferredWorkGroupSizeMultiple(device);
                 	optimalMultiples[KERNEL_dtransformImageWithBsplineInterpolation] = uniformBSplineTransformProgramKernels[KERNEL_dtransformImageWithBsplineInterpolation].getPreferredWorkGroupSizeMultiple(device);
                 	
-                    doubleblockSizesRigidBodyParallel = (int)Math.min(Math.min(uniformBSplineTransformProgramKernels[KERNEL_drigidBodyErrorWithGradAndHessBrent].getWorkGroupSize(device), (device.getLocalMemSize() - uniformBSplineTransformProgramKernels[KERNEL_drigidBodyErrorWithGradAndHessBrent].getLocalMemorySize(device))/((8)*11/*11 buffers are needed*/)), blocksizeMultiplier*optimalMultiples[KERNEL_drigidBodyErrorWithGradAndHessBrent]);
-                    doubleblockSizesRigidBodyParallel -= (doubleblockSizesRigidBodyParallel % optimalMultiples[KERNEL_drigidBodyErrorWithGradAndHessBrent]);
-                    if(doubleblockSizesRigidBodyParallel == 0)
+                    doubleblockSizesParallel = (int)Math.min(Math.min(uniformBSplineTransformProgramKernels[KERNEL_drigidBodyErrorWithGradAndHessBrent].getWorkGroupSize(device), (device.getLocalMemSize() - uniformBSplineTransformProgramKernels[KERNEL_drigidBodyErrorWithGradAndHessBrent].getLocalMemorySize(device))/((8)*11/*11 buffers are needed*/)), blocksizeMultiplier*optimalMultiples[KERNEL_drigidBodyErrorWithGradAndHessBrent]);
+                    doubleblockSizesParallel -= (doubleblockSizesParallel % optimalMultiples[KERNEL_drigidBodyErrorWithGradAndHessBrent]);
+                    if(doubleblockSizesParallel == 0)
                     {
-                        doubleblockSizesRigidBodyParallel = 1;// Fallback solution minimum is 1
+                        doubleblockSizesParallel = 1;// Fallback solution minimum is 1
                     }
                     
                     doublemaximumElementsForLocalFPTcombinedSum = (int) Math.min(uniformBSplineTransformProgramKernels[KERNEL_dsumInLocalMemoryCombined].getWorkGroupSize(device), (device.getLocalMemSize() - uniformBSplineTransformProgramKernels[KERNEL_dsumInLocalMemoryCombined].getLocalMemorySize(device))/(8));
                     break;
                 case SCALEDROTATION:
+                	optimalMultiples[KERNEL_dscaledRotationError] = uniformBSplineTransformProgramKernels[KERNEL_dscaledRotationError].getPreferredWorkGroupSizeMultiple(device);
+                	optimalMultiples[KERNEL_dscaledRotationErrorWithGradAndHess] = uniformBSplineTransformProgramKernels[KERNEL_dscaledRotationErrorWithGradAndHess].getPreferredWorkGroupSizeMultiple(device);
+                	optimalMultiples[KERNEL_dscaledRotationSumInLocalMemoryCombined] = uniformBSplineTransformProgramKernels[KERNEL_dscaledRotationSumInLocalMemoryCombined].getPreferredWorkGroupSizeMultiple(device);
+                	optimalMultiples[KERNEL_dscaledRotationErrorWithGradAndHessBrent] = uniformBSplineTransformProgramKernels[KERNEL_dscaledRotationErrorWithGradAndHessBrent].getPreferredWorkGroupSizeMultiple(device);
+                	optimalMultiples[KERNEL_dscaledRotationTransformImageWithBsplineInterpolation] = uniformBSplineTransformProgramKernels[KERNEL_dscaledRotationTransformImageWithBsplineInterpolation].getPreferredWorkGroupSizeMultiple(device);
+                    
+                    doubleblockSizesParallel = (int)Math.min(Math.min(uniformBSplineTransformProgramKernels[KERNEL_dscaledRotationErrorWithGradAndHessBrent].getWorkGroupSize(device), (device.getLocalMemSize() - uniformBSplineTransformProgramKernels[KERNEL_dscaledRotationErrorWithGradAndHessBrent].getLocalMemorySize(device))/((8)*16/*16 buffers are needed*/)), blocksizeMultiplier*optimalMultiples[KERNEL_dscaledRotationErrorWithGradAndHessBrent]);
+                    doubleblockSizesParallel -= (doubleblockSizesParallel % optimalMultiples[KERNEL_dscaledRotationErrorWithGradAndHessBrent]);
+                    if(doubleblockSizesParallel == 0)
+                    {
+                        doubleblockSizesParallel = 1;// Fallback solution minimum is 1
+                    }
+                    
+                    doublemaximumElementsForLocalFPTcombinedSum = (int) Math.min(uniformBSplineTransformProgramKernels[KERNEL_dscaledRotationSumInLocalMemoryCombined].getWorkGroupSize(device), (device.getLocalMemSize() - uniformBSplineTransformProgramKernels[KERNEL_dscaledRotationSumInLocalMemoryCombined].getLocalMemorySize(device))/(8));
                     break;
                 case AFFINE:
+                	optimalMultiples[KERNEL_daffineError] = uniformBSplineTransformProgramKernels[KERNEL_daffineError].getPreferredWorkGroupSizeMultiple(device);
+                	optimalMultiples[KERNEL_daffineErrorWithGradAndHess] = uniformBSplineTransformProgramKernels[KERNEL_daffineErrorWithGradAndHess].getPreferredWorkGroupSizeMultiple(device);
+                	optimalMultiples[KERNEL_daffineSumInLocalMemoryCombined] = uniformBSplineTransformProgramKernels[KERNEL_daffineSumInLocalMemoryCombined].getPreferredWorkGroupSizeMultiple(device);
+                	optimalMultiples[KERNEL_daffineErrorWithGradAndHessBrent] = uniformBSplineTransformProgramKernels[KERNEL_daffineErrorWithGradAndHessBrent].getPreferredWorkGroupSizeMultiple(device);
+                	optimalMultiples[KERNEL_daffineTransformImageWithBsplineInterpolation] = uniformBSplineTransformProgramKernels[KERNEL_daffineTransformImageWithBsplineInterpolation].getPreferredWorkGroupSizeMultiple(device);
+                    
+                    doubleblockSizesParallel = (int)Math.min(Math.min(uniformBSplineTransformProgramKernels[KERNEL_daffineErrorWithGradAndHessBrent].getWorkGroupSize(device), (device.getLocalMemSize() - uniformBSplineTransformProgramKernels[KERNEL_daffineErrorWithGradAndHessBrent].getLocalMemorySize(device))/((8)*29/*29 buffers are needed*/)), blocksizeMultiplier*optimalMultiples[KERNEL_daffineErrorWithGradAndHessBrent]);
+                    doubleblockSizesParallel -= (doubleblockSizesParallel % optimalMultiples[KERNEL_daffineErrorWithGradAndHessBrent]);
+                    if(doubleblockSizesParallel == 0)
+                    {
+                        doubleblockSizesParallel = 1;// Fallback solution minimum is 1
+                    }
+                    
+                    doublemaximumElementsForLocalFPTcombinedSum = (int) Math.min(uniformBSplineTransformProgramKernels[KERNEL_daffineSumInLocalMemoryCombined].getWorkGroupSize(device), (device.getLocalMemSize() - uniformBSplineTransformProgramKernels[KERNEL_daffineSumInLocalMemoryCombined].getLocalMemorySize(device))/(8));
                     break;
                 }
                 
@@ -638,37 +1424,45 @@ public class HybridPrecisionNGStackReg extends RegistrationAndTransformation
             // these are all just the float versions
             uniformBSplineTransformProgramKernels[KERNEL_CubicBSplinePrefilter2DXlp] = uniformBSplineTransformProgram.createCLKernel("fCubicBSplinePrefilter2DXlp");
             uniformBSplineTransformProgramKernels[KERNEL_CubicBSplinePrefilter2DYlp] = uniformBSplineTransformProgram.createCLKernel("fCubicBSplinePrefilter2DYlp");
-            uniformBSplineTransformProgramKernels[KERNEL_BasicToCardinal2DXhp] = uniformBSplineTransformProgram.createCLKernel("fBasicToCardinal2DXhp");
-            uniformBSplineTransformProgramKernels[KERNEL_BasicToCardinal2DYhp] = uniformBSplineTransformProgram.createCLKernel("fBasicToCardinal2DYhp");
-            uniformBSplineTransformProgramKernels[KERNEL_CubicBSplinePrefilter2DDeg7premulhp] = uniformBSplineTransformProgram.createCLKernel("fCubicBSplinePrefilter2DDeg7premulhp");
+            uniformBSplineTransformProgramKernels[KERNEL_BasicToCardinal2DXhp] = uniformBSplineTransformProgram.createCLKernel("BasicToCardinal2DXhp");
+            uniformBSplineTransformProgramKernels[KERNEL_BasicToCardinal2DYhp] = uniformBSplineTransformProgram.createCLKernel("BasicToCardinal2DYhp");
+            uniformBSplineTransformProgramKernels[KERNEL_CubicBSplinePrefilter2DDeg7premulhp] = uniformBSplineTransformProgram.createCLKernel("CubicBSplinePrefilter2DDeg7premulhp");
             uniformBSplineTransformProgramKernels[KERNEL_CubicBSplinePrefilter2DXDeg7lp] = uniformBSplineTransformProgram.createCLKernel("fCubicBSplinePrefilter2DXDeg7lp");
             uniformBSplineTransformProgramKernels[KERNEL_CubicBSplinePrefilter2DYDeg7lp] = uniformBSplineTransformProgram.createCLKernel("fCubicBSplinePrefilter2DYDeg7lp");
-            uniformBSplineTransformProgramKernels[KERNEL_BasicToCardinal2DXhpDeg7] = uniformBSplineTransformProgram.createCLKernel("fBasicToCardinal2DXhpDeg7");
-            uniformBSplineTransformProgramKernels[KERNEL_BasicToCardinal2DYhpDeg7] = uniformBSplineTransformProgram.createCLKernel("fBasicToCardinal2DYhpDeg7");
-            uniformBSplineTransformProgramKernels[KERNEL_reduceDual1DX] = uniformBSplineTransformProgram.createCLKernel("freduceDual1DX");
-            uniformBSplineTransformProgramKernels[KERNEL_reduceDual1DY] = uniformBSplineTransformProgram.createCLKernel("freduceDual1DY");
-            uniformBSplineTransformProgramKernels[KERNEL_antiSymmetricFirMirrorOffBounds1DX] = uniformBSplineTransformProgram.createCLKernel("fantiSymmetricFirMirrorOffBounds1DX");
-            uniformBSplineTransformProgramKernels[KERNEL_antiSymmetricFirMirrorOffBounds1DY] = uniformBSplineTransformProgram.createCLKernel("fantiSymmetricFirMirrorOffBounds1DY");
-            uniformBSplineTransformProgramKernels[KERNEL_TargetedCubicBSplinePrefilter2Dpremulhp] = uniformBSplineTransformProgram.createCLKernel("fTargetedCubicBSplinePrefilter2Dpremulhp");
-            uniformBSplineTransformProgramKernels[KERNEL_sumInLocalMemory] = uniformBSplineTransformProgram.createCLKernel("fsumInLocalMemory");
-            uniformBSplineTransformProgramKernels[KERNEL_parallelGroupedSumReduction] = uniformBSplineTransformProgram.createCLKernel("fparallelGroupedSumReduction");
+            uniformBSplineTransformProgramKernels[KERNEL_BasicToCardinal2DXhpDeg7] = uniformBSplineTransformProgram.createCLKernel("BasicToCardinal2DXhpDeg7");
+            uniformBSplineTransformProgramKernels[KERNEL_BasicToCardinal2DYhpDeg7] = uniformBSplineTransformProgram.createCLKernel("BasicToCardinal2DYhpDeg7");
+            uniformBSplineTransformProgramKernels[KERNEL_reduceDual1DX] = uniformBSplineTransformProgram.createCLKernel("reduceDual1DX");
+            uniformBSplineTransformProgramKernels[KERNEL_reduceDual1DY] = uniformBSplineTransformProgram.createCLKernel("reduceDual1DY");
+            uniformBSplineTransformProgramKernels[KERNEL_antiSymmetricFirMirrorOffBounds1DX] = uniformBSplineTransformProgram.createCLKernel("antiSymmetricFirMirrorOffBounds1DX");
+            uniformBSplineTransformProgramKernels[KERNEL_antiSymmetricFirMirrorOffBounds1DY] = uniformBSplineTransformProgram.createCLKernel("antiSymmetricFirMirrorOffBounds1DY");
+            uniformBSplineTransformProgramKernels[KERNEL_TargetedCubicBSplinePrefilter2Dpremulhp] = uniformBSplineTransformProgram.createCLKernel("TargetedCubicBSplinePrefilter2Dpremulhp");
+            uniformBSplineTransformProgramKernels[KERNEL_sumInLocalMemory] = uniformBSplineTransformProgram.createCLKernel("sumInLocalMemory");
+            uniformBSplineTransformProgramKernels[KERNEL_parallelGroupedSumReduction] = uniformBSplineTransformProgram.createCLKernel("parallelGroupedSumReduction");
             
             switch(sharedContext.transformationType) {
             case TRANSLATION:
-                uniformBSplineTransformProgramKernels[KERNEL_ftranslationError] = uniformBSplineTransformProgram.createCLKernel("ftranslationError");
-                uniformBSplineTransformProgramKernels[KERNEL_ftranslationErrorWithGradAndHess] = uniformBSplineTransformProgram.createCLKernel("ftranslationErrorWithGradAndHess");
-                uniformBSplineTransformProgramKernels[KERNEL_ftranslationSumInLocalMemoryCombined] = uniformBSplineTransformProgram.createCLKernel("ftranslationSumInLocalMemoryCombined");
-                uniformBSplineTransformProgramKernels[KERNEL_ftranslationErrorWithGradAndHessBrent] = uniformBSplineTransformProgram.createCLKernel("ftranslationErrorWithGradAndHessBrent");
+                uniformBSplineTransformProgramKernels[KERNEL_ftranslationError] = uniformBSplineTransformProgram.createCLKernel("translationError");
+                uniformBSplineTransformProgramKernels[KERNEL_ftranslationErrorWithGradAndHess] = uniformBSplineTransformProgram.createCLKernel("translationErrorWithGradAndHess");
+                uniformBSplineTransformProgramKernels[KERNEL_ftranslationSumInLocalMemoryCombined] = uniformBSplineTransformProgram.createCLKernel("translationSumInLocalMemoryCombined");
+                uniformBSplineTransformProgramKernels[KERNEL_ftranslationErrorWithGradAndHessBrent] = uniformBSplineTransformProgram.createCLKernel("translationErrorWithGradAndHessBrent");
                 break;
             case RIGIDBODY:
-                uniformBSplineTransformProgramKernels[KERNEL_rigidBodyError] = uniformBSplineTransformProgram.createCLKernel("frigidBodyError");
-                uniformBSplineTransformProgramKernels[KERNEL_rigidBodyErrorWithGradAndHess] = uniformBSplineTransformProgram.createCLKernel("frigidBodyErrorWithGradAndHess");
-                uniformBSplineTransformProgramKernels[KERNEL_sumInLocalMemoryCombined] = uniformBSplineTransformProgram.createCLKernel("fsumInLocalMemoryCombined");
-                uniformBSplineTransformProgramKernels[KERNEL_rigidBodyErrorWithGradAndHessBrent] = uniformBSplineTransformProgram.createCLKernel("frigidBodyErrorWithGradAndHessBrent");
+                uniformBSplineTransformProgramKernels[KERNEL_rigidBodyError] = uniformBSplineTransformProgram.createCLKernel("rigidBodyError");
+                uniformBSplineTransformProgramKernels[KERNEL_rigidBodyErrorWithGradAndHess] = uniformBSplineTransformProgram.createCLKernel("rigidBodyErrorWithGradAndHess");
+                uniformBSplineTransformProgramKernels[KERNEL_sumInLocalMemoryCombined] = uniformBSplineTransformProgram.createCLKernel("sumInLocalMemoryCombined");
+                uniformBSplineTransformProgramKernels[KERNEL_rigidBodyErrorWithGradAndHessBrent] = uniformBSplineTransformProgram.createCLKernel("rigidBodyErrorWithGradAndHessBrent");
                 break;
             case SCALEDROTATION:
+            	uniformBSplineTransformProgramKernels[KERNEL_fscaledRotationError] = uniformBSplineTransformProgram.createCLKernel("scaledRotationError");
+                uniformBSplineTransformProgramKernels[KERNEL_fscaledRotationErrorWithGradAndHess] = uniformBSplineTransformProgram.createCLKernel("scaledRotationErrorWithGradAndHess");
+                uniformBSplineTransformProgramKernels[KERNEL_fscaledRotationSumInLocalMemoryCombined] = uniformBSplineTransformProgram.createCLKernel("sumInLocalMemoryScaledRotationCombined");
+                uniformBSplineTransformProgramKernels[KERNEL_fscaledRotationErrorWithGradAndHessBrent] = uniformBSplineTransformProgram.createCLKernel("scaledRotationErrorWithGradAndHessBrent");
                 break;
             case AFFINE:
+            	uniformBSplineTransformProgramKernels[KERNEL_faffineError] = uniformBSplineTransformProgram.createCLKernel("affineError");
+                uniformBSplineTransformProgramKernels[KERNEL_faffineErrorWithGradAndHess] = uniformBSplineTransformProgram.createCLKernel("affineErrorWithGradAndHess");
+                uniformBSplineTransformProgramKernels[KERNEL_faffineSumInLocalMemoryCombined] = uniformBSplineTransformProgram.createCLKernel("sumInLocalMemoryAffineCombined");
+                uniformBSplineTransformProgramKernels[KERNEL_faffineErrorWithGradAndHessBrent] = uniformBSplineTransformProgram.createCLKernel("affineErrorWithGradAndHessBrent");
                 break;
             }
 
@@ -703,11 +1497,11 @@ public class HybridPrecisionNGStackReg extends RegistrationAndTransformation
             	optimalMultiples[KERNEL_ftranslationSumInLocalMemoryCombined] = uniformBSplineTransformProgramKernels[KERNEL_ftranslationSumInLocalMemoryCombined].getPreferredWorkGroupSizeMultiple(device);
             	optimalMultiples[KERNEL_ftranslationErrorWithGradAndHessBrent] = uniformBSplineTransformProgramKernels[KERNEL_ftranslationErrorWithGradAndHessBrent].getPreferredWorkGroupSizeMultiple(device);
                 
-                blockSizesRigidBodyParallel = (int)Math.min(Math.min(uniformBSplineTransformProgramKernels[KERNEL_ftranslationErrorWithGradAndHessBrent].getWorkGroupSize(device), (device.getLocalMemSize() - uniformBSplineTransformProgramKernels[KERNEL_ftranslationErrorWithGradAndHessBrent].getLocalMemorySize(device))/((4)*7/*we need 7 buffers*/)), blocksizeMultiplier*optimalMultiples[KERNEL_ftranslationErrorWithGradAndHessBrent]);
-                blockSizesRigidBodyParallel -= (blockSizesRigidBodyParallel % optimalMultiples[KERNEL_ftranslationErrorWithGradAndHessBrent]);
-                if(blockSizesRigidBodyParallel == 0)
+                blockSizesParallel = (int)Math.min(Math.min(uniformBSplineTransformProgramKernels[KERNEL_ftranslationErrorWithGradAndHessBrent].getWorkGroupSize(device), (device.getLocalMemSize() - uniformBSplineTransformProgramKernels[KERNEL_ftranslationErrorWithGradAndHessBrent].getLocalMemorySize(device))/((4)*7/*we need 7 buffers*/)), blocksizeMultiplier*optimalMultiples[KERNEL_ftranslationErrorWithGradAndHessBrent]);
+                blockSizesParallel -= (blockSizesParallel % optimalMultiples[KERNEL_ftranslationErrorWithGradAndHessBrent]);
+                if(blockSizesParallel == 0)
                 {
-                    blockSizesRigidBodyParallel = 1;// Fallback solution minimum is 1
+                    blockSizesParallel = 1;// Fallback solution minimum is 1
                 }
                 
                 maximumElementsForLocalFPTcombinedSum = (int) Math.min(uniformBSplineTransformProgramKernels[KERNEL_ftranslationSumInLocalMemoryCombined].getWorkGroupSize(device), (device.getLocalMemSize() - uniformBSplineTransformProgramKernels[KERNEL_ftranslationSumInLocalMemoryCombined].getLocalMemorySize(device))/(4));
@@ -718,18 +1512,44 @@ public class HybridPrecisionNGStackReg extends RegistrationAndTransformation
             	optimalMultiples[KERNEL_sumInLocalMemoryCombined] = uniformBSplineTransformProgramKernels[KERNEL_sumInLocalMemoryCombined].getPreferredWorkGroupSizeMultiple(device);
             	optimalMultiples[KERNEL_rigidBodyErrorWithGradAndHessBrent] = uniformBSplineTransformProgramKernels[KERNEL_rigidBodyErrorWithGradAndHessBrent].getPreferredWorkGroupSizeMultiple(device);
                 
-                blockSizesRigidBodyParallel = (int)Math.min(Math.min(uniformBSplineTransformProgramKernels[KERNEL_rigidBodyErrorWithGradAndHessBrent].getWorkGroupSize(device), (device.getLocalMemSize() - uniformBSplineTransformProgramKernels[KERNEL_rigidBodyErrorWithGradAndHessBrent].getLocalMemorySize(device))/((4)*11/*we need 11 buffers*/)), blocksizeMultiplier*optimalMultiples[KERNEL_rigidBodyErrorWithGradAndHessBrent]);
-                blockSizesRigidBodyParallel -= (blockSizesRigidBodyParallel % optimalMultiples[KERNEL_rigidBodyErrorWithGradAndHessBrent]);
-                if(blockSizesRigidBodyParallel == 0)
+                blockSizesParallel = (int)Math.min(Math.min(uniformBSplineTransformProgramKernels[KERNEL_rigidBodyErrorWithGradAndHessBrent].getWorkGroupSize(device), (device.getLocalMemSize() - uniformBSplineTransformProgramKernels[KERNEL_rigidBodyErrorWithGradAndHessBrent].getLocalMemorySize(device))/((4)*11/*we need 11 buffers*/)), blocksizeMultiplier*optimalMultiples[KERNEL_rigidBodyErrorWithGradAndHessBrent]);
+                blockSizesParallel -= (blockSizesParallel % optimalMultiples[KERNEL_rigidBodyErrorWithGradAndHessBrent]);
+                if(blockSizesParallel == 0)
                 {
-                    blockSizesRigidBodyParallel = 1;// Fallback solution minimum is 1
+                    blockSizesParallel = 1;// Fallback solution minimum is 1
                 }
                 
                 maximumElementsForLocalFPTcombinedSum = (int) Math.min(uniformBSplineTransformProgramKernels[KERNEL_sumInLocalMemoryCombined].getWorkGroupSize(device), (device.getLocalMemSize() - uniformBSplineTransformProgramKernels[KERNEL_sumInLocalMemoryCombined].getLocalMemorySize(device))/(4));
                 break;
             case SCALEDROTATION:
+            	optimalMultiples[KERNEL_fscaledRotationError] = uniformBSplineTransformProgramKernels[KERNEL_fscaledRotationError].getPreferredWorkGroupSizeMultiple(device);
+            	optimalMultiples[KERNEL_fscaledRotationErrorWithGradAndHess] = uniformBSplineTransformProgramKernels[KERNEL_fscaledRotationErrorWithGradAndHess].getPreferredWorkGroupSizeMultiple(device);
+            	optimalMultiples[KERNEL_fscaledRotationSumInLocalMemoryCombined] = uniformBSplineTransformProgramKernels[KERNEL_fscaledRotationSumInLocalMemoryCombined].getPreferredWorkGroupSizeMultiple(device);
+            	optimalMultiples[KERNEL_fscaledRotationErrorWithGradAndHessBrent] = uniformBSplineTransformProgramKernels[KERNEL_fscaledRotationErrorWithGradAndHessBrent].getPreferredWorkGroupSizeMultiple(device);
+                
+                blockSizesParallel = (int)Math.min(Math.min(uniformBSplineTransformProgramKernels[KERNEL_fscaledRotationErrorWithGradAndHessBrent].getWorkGroupSize(device), (device.getLocalMemSize() - uniformBSplineTransformProgramKernels[KERNEL_fscaledRotationErrorWithGradAndHessBrent].getLocalMemorySize(device))/((4)*16/*we need 16 buffers*/)), blocksizeMultiplier*optimalMultiples[KERNEL_fscaledRotationErrorWithGradAndHessBrent]);
+                blockSizesParallel -= (blockSizesParallel % optimalMultiples[KERNEL_fscaledRotationErrorWithGradAndHessBrent]);
+                if(blockSizesParallel == 0)
+                {
+                    blockSizesParallel = 1;// Fallback solution minimum is 1
+                }
+                
+                maximumElementsForLocalFPTcombinedSum = (int) Math.min(uniformBSplineTransformProgramKernels[KERNEL_fscaledRotationSumInLocalMemoryCombined].getWorkGroupSize(device), (device.getLocalMemSize() - uniformBSplineTransformProgramKernels[KERNEL_fscaledRotationSumInLocalMemoryCombined].getLocalMemorySize(device))/(4));
                 break;
             case AFFINE:
+            	optimalMultiples[KERNEL_faffineError] = uniformBSplineTransformProgramKernels[KERNEL_faffineError].getPreferredWorkGroupSizeMultiple(device);
+            	optimalMultiples[KERNEL_faffineErrorWithGradAndHess] = uniformBSplineTransformProgramKernels[KERNEL_faffineErrorWithGradAndHess].getPreferredWorkGroupSizeMultiple(device);
+            	optimalMultiples[KERNEL_faffineSumInLocalMemoryCombined] = uniformBSplineTransformProgramKernels[KERNEL_faffineSumInLocalMemoryCombined].getPreferredWorkGroupSizeMultiple(device);
+            	optimalMultiples[KERNEL_faffineErrorWithGradAndHessBrent] = uniformBSplineTransformProgramKernels[KERNEL_faffineErrorWithGradAndHessBrent].getPreferredWorkGroupSizeMultiple(device);
+                
+                blockSizesParallel = (int)Math.min(Math.min(uniformBSplineTransformProgramKernels[KERNEL_faffineErrorWithGradAndHessBrent].getWorkGroupSize(device), (device.getLocalMemSize() - uniformBSplineTransformProgramKernels[KERNEL_faffineErrorWithGradAndHessBrent].getLocalMemorySize(device))/((4)*29/*we need 29 buffers*/)), blocksizeMultiplier*optimalMultiples[KERNEL_faffineErrorWithGradAndHessBrent]);
+                blockSizesParallel -= (blockSizesParallel % optimalMultiples[KERNEL_faffineErrorWithGradAndHessBrent]);
+                if(blockSizesParallel == 0)
+                {
+                    blockSizesParallel = 1;// Fallback solution minimum is 1
+                }
+                
+                maximumElementsForLocalFPTcombinedSum = (int) Math.min(uniformBSplineTransformProgramKernels[KERNEL_faffineSumInLocalMemoryCombined].getWorkGroupSize(device), (device.getLocalMemSize() - uniformBSplineTransformProgramKernels[KERNEL_faffineSumInLocalMemoryCombined].getLocalMemorySize(device))/(4));
                 break;
             }
 
@@ -810,52 +1630,163 @@ public class HybridPrecisionNGStackReg extends RegistrationAndTransformation
         	switch(sharedContext.transformationType) {
             case TRANSLATION:
             	maskBuffer.release();
-                gradient0.release();;
+                maskBuffer = null;
+                gradient0.release();
+                gradient0 = null;
                 gradient1.release();
+                gradient1 = null;
                 hessian00.release();
+                hessian00 = null;
                 hessian01.release();
+                hessian01 = null;
                 hessian11.release();
-                for(int l = 0;l < 2;l++)
-                {
-                    parallelSumReductionBuffers[l].release();
-                }
+                hessian11 = null;
+                
                 break;
             case RIGIDBODY:
-                maskBuffer.release();
+            	maskBuffer.release();
+                maskBuffer = null;
                 gradient0.release();
+                gradient0 = null;
                 gradient1.release();
+                gradient1 = null;
                 gradient2.release();
+                gradient2 = null;
                 hessian00.release();
+                hessian00 = null;
                 hessian01.release();
+                hessian01 = null;
                 hessian02.release();
+                hessian02 = null;
                 hessian11.release();
+                hessian11 = null;
                 hessian12.release();
+                hessian12 = null;
                 hessian22.release();
-                for(int l = 0;l < 2;l++)
-                {
-                    parallelSumReductionBuffers[l].release();
-                }
+                hessian22 = null;
                 break;
             case SCALEDROTATION:
+            	maskBuffer.release();
+                maskBuffer = null;
+                gradient0.release();
+                gradient0 = null;
+                gradient1.release();
+                gradient1 = null;
+                gradient2.release();
+                gradient2 = null;
+                gradient3.release();
+                gradient3 = null;
+                hessian00.release();
+                hessian00 = null;
+                hessian01.release();
+                hessian01 = null;
+                hessian02.release();
+                hessian02 = null;
+                hessian03.release();
+                hessian03 = null;
+                hessian11.release();
+                hessian11 = null;
+                hessian12.release();
+                hessian12 = null;
+                hessian13.release();
+                hessian13 = null;
+                hessian22.release();
+                hessian22 = null;
+                hessian23.release();
+                hessian23 = null;
+                hessian33.release();
+                hessian33 = null;
                 break;
             case AFFINE:
+            	maskBuffer.release();
+                maskBuffer = null;
+                gradient0.release();
+                gradient0 = null;
+                gradient1.release();
+                gradient1 = null;
+                gradient2.release();
+                gradient2 = null;
+                gradient3.release();
+                gradient3 = null;
+                gradient4.release();
+                gradient4 = null;
+                gradient5.release();
+                gradient5 = null;
+                hessian00.release();
+                hessian00 = null;
+                hessian01.release();
+                hessian01 = null;
+                hessian02.release();
+                hessian02 = null;
+                hessian03.release();
+                hessian03 = null;
+                hessian04.release();
+                hessian04 = null;
+                hessian05.release();
+                hessian05 = null;
+                hessian11.release();
+                hessian11 = null;
+                hessian12.release();
+                hessian12 = null;
+                hessian13.release();
+                hessian13 = null;
+                hessian14.release();
+                hessian14 = null;
+                hessian15.release();
+                hessian15 = null;
+                hessian22.release();
+                hessian22 = null;
+                hessian23.release();
+                hessian23 = null;
+                hessian24.release();
+                hessian24 = null;
+                hessian25.release();
+                hessian25 = null;
+                hessian33.release();
+                hessian33 = null;
+                hessian34.release();
+                hessian34 = null;
+                hessian35.release();
+                hessian35 = null;
+                hessian44.release();
+                hessian44 = null;
+                hessian45.release();
+                hessian45 = null;
+                hessian55.release();
+                hessian55 = null;
                 break;
             }
+        	for(int l = 0;l < parallelSumReductionBuffers.length;l++)
+            {
+                parallelSumReductionBuffers[l].release();
+                parallelSumReductionBuffers[l] = null;
+            }
+        	parallelSumReductionBuffers = null;
         	for(int j = 0;j < pyramidDepth; j++)
             {
                 sourcePyramid[j].Image.release();
+                sourcePyramid[j].Image = null;
                 sourcePyramid[j].xGradient.release();
+                sourcePyramid[j].xGradient = null;
                 sourcePyramid[j].yGradient.release();
+                sourcePyramid[j].yGradient = null;
                 targetPyramid[j].Coefficient.release();
+                targetPyramid[j].Coefficient = null;
             }
             if(!usesFloat)
             {
                 sourceDoubleSlice.Image.release();
+                sourceDoubleSlice.Image = null;
                 sourceDoubleSlice.xGradient.release();
+                sourceDoubleSlice.xGradient = null;
                 sourceDoubleSlice.yGradient.release();
+                sourceDoubleSlice.yGradient = null;
                 targetDoubleSlice.Coefficient.release();
+                targetDoubleSlice.Coefficient = null;
                 // these are the conversion intermediate buffers
                 // no need to resize this buffer doubleEntryImageBuffer = context.createDoubleBuffer((int) (width*height), GPURESIDENTRW);
+                doubleFullSizedGPUResidentHelperBuffer.release();
+                doubleFullSizedGPUResidentHelperBuffer = null;
                 doubleFullSizedGPUResidentHelperBuffer = context.createDoubleBuffer((int) (sharedContext.resizedTargetImage.dimension(0)*sharedContext.resizedTargetImage.dimension(1)), GPURESIDENTRW);
             }
             else
@@ -900,8 +1831,11 @@ public class HybridPrecisionNGStackReg extends RegistrationAndTransformation
             }
 
             entryImageBuffer.release();
+            entryImageBuffer = null;
             fullSizedGPUResidentHelperBuffer.release();
+            fullSizedGPUResidentHelperBuffer = null;
             secondaryGPUResidentHelperBuffer.release();
+            secondaryGPUResidentHelperBuffer = null;
             
             //TODO: shorten
             if(!usesFloat)
@@ -978,22 +1912,42 @@ public class HybridPrecisionNGStackReg extends RegistrationAndTransformation
                     case TRANSLATION:
                         ((TranslationTransformation)scat.transformation).offsetx = offsetx;
                         ((TranslationTransformation)scat.transformation).offsety = offsety;
+                        offsetx = 0.0;
+                        offsety = 0.0;
                         break;
                     case RIGIDBODY:
                         ((RigidBodyTransformation)scat.transformation).angle = angle;
                         ((RigidBodyTransformation)scat.transformation).offsetx = offsetx;
                         ((RigidBodyTransformation)scat.transformation).offsety = offsety;
+                        offsetx = 0.0;
+                        offsety = 0.0;
+                        angle = 0.0;
                         break;
                     case SCALEDROTATION:
+                    	((ScaledRotationTransformation)scat.transformation).angle = angle;
+                        ((ScaledRotationTransformation)scat.transformation).scale = scale;
+                        ((ScaledRotationTransformation)scat.transformation).offsetx = offsetx;
+                        ((ScaledRotationTransformation)scat.transformation).offsety = offsety;
+                        // reset the transformation values for the next image
+                        offsetx = 0.0;
+                        offsety = 0.0;
+                        angle = 0.0;
+                        scale = 1.0;
                         break;
                     case AFFINE:
+                    	((AffineTransformation)scat.transformation).a11 = a11;
+                        ((AffineTransformation)scat.transformation).a12 = a12;
+                        ((AffineTransformation)scat.transformation).a21 = a21;
+                        ((AffineTransformation)scat.transformation).a22 = a22;
+                        ((AffineTransformation)scat.transformation).offsetx = offsetx;
+                        ((AffineTransformation)scat.transformation).offsety = offsety;
+                        // reset the transformation values for the next image
+                        offsetx = 0.0;
+                        offsety = 0.0;
+                        a11 = a22 = 1.0;
+                        a12 = a21 = 0.0;
                         break;
                 }
-                
-                // reset the transformation values for the next image
-                offsetx = 0.0;
-                offsety = 0.0;
-                angle = 0.0;
                 queue.finish();
             }
             try {
@@ -1023,22 +1977,42 @@ public class HybridPrecisionNGStackReg extends RegistrationAndTransformation
                         case TRANSLATION:
                             ((TranslationTransformation)scat.transformation).offsetx = offsetx;
                             ((TranslationTransformation)scat.transformation).offsety = offsety;
+                            offsetx = 0.0;
+                            offsety = 0.0;
                             break;
                         case RIGIDBODY:
                             ((RigidBodyTransformation)scat.transformation).angle = angle;
                             ((RigidBodyTransformation)scat.transformation).offsetx = offsetx;
                             ((RigidBodyTransformation)scat.transformation).offsety = offsety;
+                            offsetx = 0.0;
+                            offsety = 0.0;
+                            angle = 0.0;
                             break;
                         case SCALEDROTATION:
+                        	((ScaledRotationTransformation)scat.transformation).angle = angle;
+                            ((ScaledRotationTransformation)scat.transformation).scale = scale;
+                            ((ScaledRotationTransformation)scat.transformation).offsetx = offsetx;
+                            ((ScaledRotationTransformation)scat.transformation).offsety = offsety;
+                            // reset the transformation values for the next image
+                            offsetx = 0.0;
+                            offsety = 0.0;
+                            angle = 0.0;
+                            scale = 1.0;
                             break;
                         case AFFINE:
+                        	((AffineTransformation)scat.transformation).a11 = a11;
+                            ((AffineTransformation)scat.transformation).a12 = a12;
+                            ((AffineTransformation)scat.transformation).a21 = a21;
+                            ((AffineTransformation)scat.transformation).a22 = a22;
+                            ((AffineTransformation)scat.transformation).offsetx = offsetx;
+                            ((AffineTransformation)scat.transformation).offsety = offsety;
+                            // reset the transformation values for the next image
+                            offsetx = 0.0;
+                            offsety = 0.0;
+                            a11 = a22 = 1.0;
+                            a12 = a21 = 0.0;
                             break;
                     }
-                    
-                    // reset the transformation values for the next image
-                    offsetx = 0.0;
-                    offsety = 0.0;
-                    angle = 0.0;
                     queue.finish();
                 }
                 try {
@@ -1077,12 +2051,16 @@ public class HybridPrecisionNGStackReg extends RegistrationAndTransformation
                         transformImageRigidBody();
                         break;
                     case SCALEDROTATION:
+                    	transformImageScaledRotation();
                         break;
                     case AFFINE:
+                    	transformImageAffine();
                         break;
                 }
                 queue.finish();
             }
+            
+            cleanup();
         }
         
         private void convertToBSplineCoeff(final int width, final int height, int localWorkSize, int globalWorkSize)
@@ -1289,6 +2267,291 @@ public class HybridPrecisionNGStackReg extends RegistrationAndTransformation
             }
         }
         
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        private void transformImageScaledRotation()
+        {
+            int width = (int)sharedContext.img.dimension(0);
+            int height = (int)sharedContext.img.dimension(1);
+            // This has to be done from the double buffers
+            if(!usesFloat)
+            {
+            	// GPU
+            	int localWorkSize = (int)uniformBSplineTransformProgramKernels[KERNEL_dCubicBSplinePrefilter2Dpremulhp].getWorkGroupSize(device);  // Local work size dimensions
+                int globalWorkSize = StaticUtility.roundUp(localWorkSize, optimalMultiples[KERNEL_dCubicBSplinePrefilter2Dpremulhp], width*height);   // rounded up to the nearest multiple of the localWorkSize
+                convertToBSplineCoeff(width, height, localWorkSize, globalWorkSize);
+            	if(sharedContext.getResizeAfterRegistration())
+            	{
+            		int targetwidth = (int)sharedContext.resizedTargetImage.dimension(0);
+                	int targetheight = (int)sharedContext.resizedTargetImage.dimension(1);
+	                /*
+	                Now that the B-spline coefficients are in the doubleEntryImageBuffer,
+	                the image needs to be transformed, rescaled back and then 
+	                converted back to the original image format.
+	                */
+	                localWorkSize = (int)uniformBSplineTransformProgramKernels[KERNEL_dresizingTransformImageWithBsplineInterpolation].getWorkGroupSize(device);  // Local work size dimensions
+	                globalWorkSize = StaticUtility.roundUp(localWorkSize, optimalMultiples[KERNEL_dresizingTransformImageWithBsplineInterpolation], targetwidth*targetheight);   // rounded up to the nearest multiple of the localWorkSize
+	                uniformBSplineTransformProgramKernels[KERNEL_dresizingTransformImageWithBsplineInterpolation]
+	                        .putArg(doubleEntryImageBuffer)
+	                        .putArg(doubleFullSizedGPUResidentHelperBuffer)
+	                        .putArg(width)
+	                        .putArg(height)
+	                        .putArg(width * 2)
+	                        .putArg(height * 2)
+                            .putArg(targetwidth)
+                            .putArg(targetheight)
+                            .putArg(((ScaledRotationTransformation)scat.transformation).offsetx)
+                            .putArg(((ScaledRotationTransformation)scat.transformation).offsety)
+                            .putArg(Math.cos(((ScaledRotationTransformation)scat.transformation).angle))
+                            .putArg(-Math.sin(((ScaledRotationTransformation)scat.transformation).angle))
+                            .putArg(((ScaledRotationTransformation)scat.transformation).scale);
+	                queue.put1DRangeKernel(uniformBSplineTransformProgramKernels[KERNEL_dresizingTransformImageWithBsplineInterpolation],0,globalWorkSize,localWorkSize);
+	                uniformBSplineTransformProgramKernels[KERNEL_dresizingTransformImageWithBsplineInterpolation].rewind();
+            	}
+            	else
+            	{
+	                /*
+	                Now that the B-spline coefficients are in the doubleEntryImageBuffer,
+	                the image needs to be transformed, rescaled back and then 
+	                converted back to the original image format.
+	                */
+	                localWorkSize = (int)uniformBSplineTransformProgramKernels[KERNEL_dscaledRotationTransformImageWithBsplineInterpolation].getWorkGroupSize(device);  // Local work size dimensions
+	                globalWorkSize = StaticUtility.roundUp(localWorkSize, optimalMultiples[KERNEL_dscaledRotationTransformImageWithBsplineInterpolation], width*height);   // rounded up to the nearest multiple of the localWorkSize
+	                uniformBSplineTransformProgramKernels[KERNEL_dscaledRotationTransformImageWithBsplineInterpolation]
+	                        .putArg(doubleEntryImageBuffer)
+	                        .putArg(doubleFullSizedGPUResidentHelperBuffer)
+	                        .putArg(width)
+	                        .putArg(height)
+	                        .putArg(width * 2)
+	                        .putArg(height * 2)
+	                        .putArg(((ScaledRotationTransformation)scat.transformation).offsetx)
+                            .putArg(((ScaledRotationTransformation)scat.transformation).offsety)
+                            .putArg(Math.cos(((ScaledRotationTransformation)scat.transformation).angle))
+                            .putArg(-Math.sin(((ScaledRotationTransformation)scat.transformation).angle))
+                            .putArg(((ScaledRotationTransformation)scat.transformation).scale);
+	                queue.put1DRangeKernel(uniformBSplineTransformProgramKernels[KERNEL_dscaledRotationTransformImageWithBsplineInterpolation],0,globalWorkSize,localWorkSize);
+	                uniformBSplineTransformProgramKernels[KERNEL_dscaledRotationTransformImageWithBsplineInterpolation].rewind();
+            	}
+            	// Transformed and converted back to an image at the same time
+                // now convert it back to the original format
+                fetchTransformedImage();
+            }
+            else
+            {
+                // CPU
+            	convertToBSplineCoeffCPU(width, height);
+
+            	if(!sharedContext.getResizeAfterRegistration())
+            	{
+            		scaledRotationTransformImageWithBsplineInterpolation(width,height, ((ScaledRotationTransformation)scat.transformation).offsetx, ((ScaledRotationTransformation)scat.transformation).offsety, ((ScaledRotationTransformation)scat.transformation).angle, ((ScaledRotationTransformation)scat.transformation).scale);
+            		converter.deConvertTo(CPUentryImageBuffer,scat.targetArray);
+            	}
+            	else
+            	{
+            		int targetwidth = (int)sharedContext.resizedTargetImage.dimension(0);
+                	int targetheight = (int)sharedContext.resizedTargetImage.dimension(1);
+            		resizingScaledRotationTransformImageWithBsplineInterpolation(width, height, targetwidth, targetheight, ((ScaledRotationTransformation)scat.transformation).offsetx, ((ScaledRotationTransformation)scat.transformation).offsety, ((ScaledRotationTransformation)scat.transformation).angle, ((ScaledRotationTransformation)scat.transformation).scale);
+            		converter.deConvertTo(CPUentryImageBuffer,scat.sourceArray);
+            	}
+            }
+        }
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        private void transformImageAffine()
+        {
+            int width = (int)sharedContext.img.dimension(0);
+            int height = (int)sharedContext.img.dimension(1);
+            // This has to be done from the double buffers
+            if(!usesFloat)
+            {
+            	// GPU
+            	int localWorkSize = (int)uniformBSplineTransformProgramKernels[KERNEL_dCubicBSplinePrefilter2Dpremulhp].getWorkGroupSize(device);  // Local work size dimensions
+                int globalWorkSize = StaticUtility.roundUp(localWorkSize, optimalMultiples[KERNEL_dCubicBSplinePrefilter2Dpremulhp], width*height);   // rounded up to the nearest multiple of the localWorkSize
+                convertToBSplineCoeff(width, height, localWorkSize, globalWorkSize);
+            	if(sharedContext.getResizeAfterRegistration())
+            	{
+            		int targetwidth = (int)sharedContext.resizedTargetImage.dimension(0);
+                	int targetheight = (int)sharedContext.resizedTargetImage.dimension(1);
+	                /*
+	                Now that the B-spline coefficients are in the doubleEntryImageBuffer,
+	                the image needs to be transformed, rescaled back and then 
+	                converted back to the original image format.
+	                */
+	                localWorkSize = (int)uniformBSplineTransformProgramKernels[KERNEL_dresizingTransformImageWithBsplineInterpolation].getWorkGroupSize(device);  // Local work size dimensions
+	                globalWorkSize = StaticUtility.roundUp(localWorkSize, optimalMultiples[KERNEL_dresizingTransformImageWithBsplineInterpolation], targetwidth*targetheight);   // rounded up to the nearest multiple of the localWorkSize
+	                uniformBSplineTransformProgramKernels[KERNEL_dresizingTransformImageWithBsplineInterpolation]
+	                        .putArg(doubleEntryImageBuffer)
+	                        .putArg(doubleFullSizedGPUResidentHelperBuffer)
+	                        .putArg(width)
+	                        .putArg(height)
+	                        .putArg(width * 2)
+	                        .putArg(height * 2)
+                            .putArg(targetwidth)
+                            .putArg(targetheight)
+                            .putArg(((AffineTransformation)scat.transformation).offsetx)
+                            .putArg(((AffineTransformation)scat.transformation).offsety)
+                            .putArg(((AffineTransformation)scat.transformation).a11)
+                            .putArg(((AffineTransformation)scat.transformation).a12)
+                            .putArg(((AffineTransformation)scat.transformation).a21)
+                            .putArg(((AffineTransformation)scat.transformation).a22);
+	                queue.put1DRangeKernel(uniformBSplineTransformProgramKernels[KERNEL_dresizingTransformImageWithBsplineInterpolation],0,globalWorkSize,localWorkSize);
+	                uniformBSplineTransformProgramKernels[KERNEL_dresizingTransformImageWithBsplineInterpolation].rewind();
+            	}
+            	else
+            	{
+	                /*
+	                Now that the B-spline coefficients are in the doubleEntryImageBuffer,
+	                the image needs to be transformed, rescaled back and then 
+	                converted back to the original image format.
+	                */
+	                localWorkSize = (int)uniformBSplineTransformProgramKernels[KERNEL_daffineTransformImageWithBsplineInterpolation].getWorkGroupSize(device);  // Local work size dimensions
+	                globalWorkSize = StaticUtility.roundUp(localWorkSize, optimalMultiples[KERNEL_daffineTransformImageWithBsplineInterpolation], width*height);   // rounded up to the nearest multiple of the localWorkSize
+	                uniformBSplineTransformProgramKernels[KERNEL_daffineTransformImageWithBsplineInterpolation]
+	                        .putArg(doubleEntryImageBuffer)
+	                        .putArg(doubleFullSizedGPUResidentHelperBuffer)
+	                        .putArg(width)
+	                        .putArg(height)
+	                        .putArg(width * 2)
+	                        .putArg(height * 2)
+	                        .putArg(((AffineTransformation)scat.transformation).offsetx)
+                            .putArg(((AffineTransformation)scat.transformation).offsety)
+                            .putArg(((AffineTransformation)scat.transformation).a11)
+                            .putArg(((AffineTransformation)scat.transformation).a12)
+                            .putArg(((AffineTransformation)scat.transformation).a21)
+                            .putArg(((AffineTransformation)scat.transformation).a22);
+	                queue.put1DRangeKernel(uniformBSplineTransformProgramKernels[KERNEL_daffineTransformImageWithBsplineInterpolation],0,globalWorkSize,localWorkSize);
+	                uniformBSplineTransformProgramKernels[KERNEL_daffineTransformImageWithBsplineInterpolation].rewind();
+            	}
+            	// Transformed and converted back to an image at the same time
+                // now convert it back to the original format
+                fetchTransformedImage();
+            }
+            else
+            {
+                // CPU
+            	convertToBSplineCoeffCPU(width, height);
+
+            	if(!sharedContext.getResizeAfterRegistration())
+            	{
+            		affineTransformImageWithBsplineInterpolation(width,height, ((AffineTransformation)scat.transformation).offsetx, ((AffineTransformation)scat.transformation).offsety, ((AffineTransformation)scat.transformation).a11, ((AffineTransformation)scat.transformation).a12, ((AffineTransformation)scat.transformation).a21, ((AffineTransformation)scat.transformation).a22);
+            		converter.deConvertTo(CPUentryImageBuffer,scat.targetArray);
+            	}
+            	else
+            	{
+            		int targetwidth = (int)sharedContext.resizedTargetImage.dimension(0);
+                	int targetheight = (int)sharedContext.resizedTargetImage.dimension(1);
+            		resizingAffineTransformImageWithBsplineInterpolation(width, height, targetwidth, targetheight, ((AffineTransformation)scat.transformation).offsetx, ((AffineTransformation)scat.transformation).offsety, ((AffineTransformation)scat.transformation).a11, ((AffineTransformation)scat.transformation).a12, ((AffineTransformation)scat.transformation).a21, ((AffineTransformation)scat.transformation).a22);
+            		converter.deConvertTo(CPUentryImageBuffer,scat.sourceArray);
+            	}
+            }
+        }
+
+        private void translationTransformImageWithBsplineInterpolation(final int width, final int height, double currentoffsetx, double currentoffsety)
+        {
+            /*
+            Requires the coefficients to be in entryImageBuffers and the output
+            will be in fullSizedHelperBuffer
+            */
+            int doubleWidth = width*2;
+            int doubleHeight = height*2;
+            int nIndex = 0;
+            double coordx;
+            double coordy;
+            int mskx;
+            int msky;
+            for(int i = 0;i < height;i++)
+            {
+                // First walk along the Y-vector direction and reset the X-position (otherwise the
+                // y position is initially correct and then lagging behind by one all the time)
+                coordx = currentoffsetx;
+                coordy = currentoffsety + ((double)i);
+                for(int n = 0;n < width;n++,nIndex++)
+                {
+                    mskx = (int)Math.round(coordx);
+                    msky = (int)Math.round(coordy);
+                    if((mskx >= 0)&&(mskx < width)&&(msky >= 0)&&(msky < height))
+                    {
+                    	PlainJavaCPUAligner.computeXInterpolationIndices(coordx, doubleWidth, width, xInterpolationIndices);
+                    	PlainJavaCPUAligner.computeYInterpolationIndices(coordy, doubleHeight, height, width, yInterpolationIndices);
+                        
+                    	CPUentryImageBuffer[nIndex] = PlainJavaCPUAligner.interpolateCubicBSpline(PlainJavaCPUAligner.getFractional(coordx), PlainJavaCPUAligner.getFractional(coordy), xInterpolationIndices, yInterpolationIndices, targetCoefficientDoubleSlice);
+                    }
+                    else
+                    {
+                    	CPUentryImageBuffer[nIndex] = 0.0;
+                    }
+                    // walk along the X-vector direction
+                    coordx += 1.0;
+                }
+            }
+        }
+
+        private void resizingTranslationTransformImageWithBsplineInterpolation(final int width, final int height, final int targetwidth, final int targetheight, double currentoffsetx, double currentoffsety)
+        {
+            /*
+            Requires the coefficients to be in entryImageBuffers and the output
+            will be in fullSizedHelperBuffer
+            */
+            int doubleWidth = width*2;
+            int doubleHeight = height*2;
+            int nIndex = 0;
+            double coordx;
+            double coordy;
+            int mskx;
+            int msky;
+            for(int i = 0;i < targetheight;i++)
+            {
+                // First walk along the Y-vector direction and reset the X-position (otherwise the
+                // y position is initially correct and then lagging behind by one all the time)
+                coordx = currentoffsetx;
+                coordy = currentoffsety + ((double)i);
+                for(int n = 0;n < targetwidth;n++,nIndex++)
+                {
+                    mskx = (int)Math.round(coordx);
+                    msky = (int)Math.round(coordy);
+                    if((mskx >= 0)&&(mskx < width)&&(msky >= 0)&&(msky < height))
+                    {
+                    	PlainJavaCPUAligner.computeXInterpolationIndices(coordx, doubleWidth, width, xInterpolationIndices);
+                    	PlainJavaCPUAligner.computeYInterpolationIndices(coordy, doubleHeight, height, width, yInterpolationIndices);
+                        
+                    	CPUentryImageBuffer[nIndex] = PlainJavaCPUAligner.interpolateCubicBSpline(PlainJavaCPUAligner.getFractional(coordx), PlainJavaCPUAligner.getFractional(coordy), xInterpolationIndices, yInterpolationIndices, targetCoefficientDoubleSlice);
+                    }
+                    else
+                    {
+                    	CPUentryImageBuffer[nIndex] = 0.0;
+                    }
+                    // walk along the X-vector direction
+                    coordx += 1.0;
+                }
+            }
+        }
+        
         private void transformImageWithBsplineInterpolation(final int width, final int height, double currentoffsetx, double currentoffsety, double currentangle)
         {
             /*
@@ -1298,23 +2561,17 @@ public class HybridPrecisionNGStackReg extends RegistrationAndTransformation
             int doubleWidth = width*2;
             int doubleHeight = height*2;
             int nIndex = 0;
-            int p;
-            int q;
-            int tmpindex;
-            double s;
             double xvecx = Math.cos(currentangle);
             double xvecy = -Math.sin(currentangle);
             double yvecx = -xvecy;
             double yvecy = xvecx;
             double coordx;
-            double rescoordx;
             double coordy;
-            double rescoordy;
             int mskx;
             int msky;
             for(int i = 0;i < height;i++)
             {
-            	// First walk along the Y-vector direction and reset the X-position (otherwise the
+                // First walk along the Y-vector direction and reset the X-position (otherwise the
                 // y position is initially correct and then lagging behind by one all the time)
                 coordx = currentoffsetx + ((double)i) * yvecx;
                 coordy = currentoffsety + ((double)i) * yvecy;
@@ -1324,63 +2581,14 @@ public class HybridPrecisionNGStackReg extends RegistrationAndTransformation
                     msky = (int)Math.round(coordy);
                     if((mskx >= 0)&&(mskx < width)&&(msky >= 0)&&(msky < height))
                     {
-                        // Calculate X-interpolation indices
-                        p = (coordx >= 0) ? (((int)coordx) + 2) : (((int)coordx) + 1);
-                        for(int c = 0;c < 4;c++,p--)
-                        {
-                            q = (p < 0) ? (-1 - p) : p;
-                            if(q >= doubleWidth)
-                            {
-                                q -= (doubleWidth) * (q / (doubleWidth)); // this is an integer division it doesn't yield q
-                            }
-                            xInterpolationIndices[c] = q >= width ? (doubleWidth - 1 - q) : q;
-                        }
-                        // calculate Y-interpolation indices
-                        p = (coordy >= 0) ? (((int)coordy) + 2) : (((int)coordy) + 1);
-                        for(int c = 0;c < 4;c++,p--)
-                        {
-                            q = (p < 0) ? (-1 - p) : p;
-                            if(q >= doubleHeight)
-                            {
-                                q -= (doubleHeight) * (q / (doubleHeight)); // this is an integer division it doesn't yield q
-                            }
-                            yInterpolationIndices[c] = q >= height ? (doubleHeight - 1 - q) * width : q * width;// calculate linearized coordinates of the coefficient array
-                        }
-                        // get the residuals of the coordinates
-                        rescoordx = coordx - (coordx >= 0.0 ? ((double)((int)coordx)) : ((double)(((int)coordx) - 1)));
-                        rescoordy = coordy - (coordy >= 0.0 ? ((double)((int)coordy)) : ((double)(((int)coordy) - 1)));
-                        // calculate the X-weights
-                        s = 1.0 - rescoordx;
-                        xWeights[3] = Math.pow(s, 3.0) / 6.0;
-                        s = rescoordx * rescoordx;
-                        xWeights[2] = (2.0 / 3.0) - 0.5 * s * (2.0 - rescoordx);
-                        xWeights[0] = s * rescoordx / 6.0;
-                        xWeights[1] = 1.0 - xWeights[0] - xWeights[2] - xWeights[3];
-                        // calculate the Y-weights
-                        s = 1.0 - rescoordy;
-                        yWeights[3] = Math.pow(s, 3.0) / 6.0;
-                        s = rescoordy * rescoordy;
-                        yWeights[2] = (2.0 / 3.0) - 0.5 * s * (2.0 - rescoordy);
-                        yWeights[0] = s * rescoordy / 6.0;
-                        yWeights[1] = 1.0 - yWeights[0] - yWeights[2] - yWeights[3];
-
-                        // calculate the interpolated value from the target coefficients
-                        s = 0.0;
-                        for(int y = 0;y < 4;y++)
-                        {
-                            rescoordx = 0.0;// To avoid using too many variables this one will be repurposed
-                            tmpindex = yInterpolationIndices[y];
-                            for(int x = 0;x < 4; x++)
-                            {
-                                rescoordx += xWeights[x] * targetCoefficientDoubleSlice[tmpindex + xInterpolationIndices[x]];
-                            }
-                            s += yWeights[y] * rescoordx;
-                        }
-                        CPUentryImageBuffer[nIndex] = s;
+                        PlainJavaCPUAligner.computeXInterpolationIndices(coordx, doubleWidth, width, xInterpolationIndices);
+                        PlainJavaCPUAligner.computeYInterpolationIndices(coordy, doubleHeight, height, width, yInterpolationIndices);
+                        
+                        CPUentryImageBuffer[nIndex] = PlainJavaCPUAligner.interpolateCubicBSpline(PlainJavaCPUAligner.getFractional(coordx), PlainJavaCPUAligner.getFractional(coordy), xInterpolationIndices, yInterpolationIndices, targetCoefficientDoubleSlice);
                     }
                     else
                     {
-                        CPUentryImageBuffer[nIndex] = 0.0;
+                    	CPUentryImageBuffer[nIndex] = 0.0;
                     }
                     // walk along the X-vector direction
                     coordx += xvecx;
@@ -1398,23 +2606,17 @@ public class HybridPrecisionNGStackReg extends RegistrationAndTransformation
             int doubleWidth = width*2;
             int doubleHeight = height*2;
             int nIndex = 0;
-            int p;
-            int q;
-            int tmpindex;
-            double s;
             double xvecx = Math.cos(currentangle);
             double xvecy = -Math.sin(currentangle);
             double yvecx = -xvecy;
             double yvecy = xvecx;
             double coordx;
-            double rescoordx;
             double coordy;
-            double rescoordy;
             int mskx;
             int msky;
             for(int i = 0;i < targetheight;i++)
             {
-            	// First walk along the Y-vector direction and reset the X-position (otherwise the
+                // First walk along the Y-vector direction and reset the X-position (otherwise the
                 // y position is initially correct and then lagging behind by one all the time)
                 coordx = currentoffsetx + ((double)i) * yvecx;
                 coordy = currentoffsety + ((double)i) * yvecy;
@@ -1424,63 +2626,59 @@ public class HybridPrecisionNGStackReg extends RegistrationAndTransformation
                     msky = (int)Math.round(coordy);
                     if((mskx >= 0)&&(mskx < width)&&(msky >= 0)&&(msky < height))
                     {
-                        // Calculate X-interpolation indices
-                        p = (coordx >= 0) ? (((int)coordx) + 2) : (((int)coordx) + 1);
-                        for(int c = 0;c < 4;c++,p--)
-                        {
-                            q = (p < 0) ? (-1 - p) : p;
-                            if(q >= doubleWidth)
-                            {
-                                q -= (doubleWidth) * (q / (doubleWidth)); // this is an integer division it doesn't yield q
-                            }
-                            xInterpolationIndices[c] = q >= width ? (doubleWidth - 1 - q) : q;
-                        }
-                        // calculate Y-interpolation indices
-                        p = (coordy >= 0) ? (((int)coordy) + 2) : (((int)coordy) + 1);
-                        for(int c = 0;c < 4;c++,p--)
-                        {
-                            q = (p < 0) ? (-1 - p) : p;
-                            if(q >= doubleHeight)
-                            {
-                                q -= (doubleHeight) * (q / (doubleHeight)); // this is an integer division it doesn't yield q
-                            }
-                            yInterpolationIndices[c] = q >= height ? (doubleHeight - 1 - q) * width : q * width;// calculate linearized coordinates of the coefficient array
-                        }
-                        // get the residuals of the coordinates
-                        rescoordx = coordx - (coordx >= 0.0 ? ((double)((int)coordx)) : ((double)(((int)coordx) - 1)));
-                        rescoordy = coordy - (coordy >= 0.0 ? ((double)((int)coordy)) : ((double)(((int)coordy) - 1)));
-                        // calculate the X-weights
-                        s = 1.0 - rescoordx;
-                        xWeights[3] = Math.pow(s, 3.0) / 6.0;
-                        s = rescoordx * rescoordx;
-                        xWeights[2] = (2.0 / 3.0) - 0.5 * s * (2.0 - rescoordx);
-                        xWeights[0] = s * rescoordx / 6.0;
-                        xWeights[1] = 1.0 - xWeights[0] - xWeights[2] - xWeights[3];
-                        // calculate the Y-weights
-                        s = 1.0 - rescoordy;
-                        yWeights[3] = Math.pow(s, 3.0) / 6.0;
-                        s = rescoordy * rescoordy;
-                        yWeights[2] = (2.0 / 3.0) - 0.5 * s * (2.0 - rescoordy);
-                        yWeights[0] = s * rescoordy / 6.0;
-                        yWeights[1] = 1.0 - yWeights[0] - yWeights[2] - yWeights[3];
-
-                        // calculate the interpolated value from the target coefficients
-                        s = 0.0;
-                        for(int y = 0;y < 4;y++)
-                        {
-                            rescoordx = 0.0;// To avoid using too many variables this one will be repurposed
-                            tmpindex = yInterpolationIndices[y];
-                            for(int x = 0;x < 4; x++)
-                            {
-                                rescoordx += xWeights[x] * targetCoefficientDoubleSlice[tmpindex + xInterpolationIndices[x]];
-                            }
-                            s += yWeights[y] * rescoordx;
-                        }
-                        CPUentryImageBuffer[nIndex] = s;
+                    	PlainJavaCPUAligner.computeXInterpolationIndices(coordx, doubleWidth, width, xInterpolationIndices);
+                    	PlainJavaCPUAligner.computeYInterpolationIndices(coordy, doubleHeight, height, width, yInterpolationIndices);
+                        
+                    	CPUentryImageBuffer[nIndex] = PlainJavaCPUAligner.interpolateCubicBSpline(PlainJavaCPUAligner.getFractional(coordx), PlainJavaCPUAligner.getFractional(coordy), xInterpolationIndices, yInterpolationIndices, targetCoefficientDoubleSlice);
                     }
                     else
                     {
-                        CPUentryImageBuffer[nIndex] = 0.0;
+                    	CPUentryImageBuffer[nIndex] = 0.0;
+                    }
+                    // walk along the X-vector direction
+                    coordx += xvecx;
+                    coordy += xvecy;
+                }
+            }
+        }
+
+        private void scaledRotationTransformImageWithBsplineInterpolation(final int width, final int height, double currentoffsetx, double currentoffsety, double currentangle, double currentscale)
+        {
+            /*
+            Requires the coefficients to be in entryImageBuffers and the output
+            will be in fullSizedHelperBuffer
+            */
+            int doubleWidth = width*2;
+            int doubleHeight = height*2;
+            int nIndex = 0;
+            double xvecx = Math.cos(currentangle) * currentscale;
+            double xvecy = -Math.sin(currentangle) * currentscale;
+            double yvecx = -xvecy;
+            double yvecy = xvecx;
+            double coordx;
+            double coordy;
+            int mskx;
+            int msky;
+            for(int i = 0;i < height;i++)
+            {
+                // First walk along the Y-vector direction and reset the X-position (otherwise the
+                // y position is initially correct and then lagging behind by one all the time)
+                coordx = currentoffsetx + ((double)i) * yvecx;
+                coordy = currentoffsety + ((double)i) * yvecy;
+                for(int n = 0;n < width;n++,nIndex++)
+                {
+                    mskx = (int)Math.round(coordx);
+                    msky = (int)Math.round(coordy);
+                    if((mskx >= 0)&&(mskx < width)&&(msky >= 0)&&(msky < height))
+                    {
+                    	PlainJavaCPUAligner.computeXInterpolationIndices(coordx, doubleWidth, width, xInterpolationIndices);
+                    	PlainJavaCPUAligner.computeYInterpolationIndices(coordy, doubleHeight, height, width, yInterpolationIndices);
+                        
+                    	CPUentryImageBuffer[nIndex] = PlainJavaCPUAligner.interpolateCubicBSpline(PlainJavaCPUAligner.getFractional(coordx), PlainJavaCPUAligner.getFractional(coordy), xInterpolationIndices, yInterpolationIndices, targetCoefficientDoubleSlice);
+                    }
+                    else
+                    {
+                    	CPUentryImageBuffer[nIndex] = 0.0;
                     }
                     // walk along the X-vector direction
                     coordx += xvecx;
@@ -1489,7 +2687,7 @@ public class HybridPrecisionNGStackReg extends RegistrationAndTransformation
             }
         }
         
-        private void translationTransformImageWithBsplineInterpolation(final int width, final int height, double currentoffsetx, double currentoffsety)
+        private void resizingScaledRotationTransformImageWithBsplineInterpolation(final int width, final int height, final int targetwidth, final int targetheight, double currentoffsetx, double currentoffsety, double currentangle, double currentscale)
         {
             /*
             Requires the coefficients to be in entryImageBuffers and the output
@@ -1498,187 +2696,132 @@ public class HybridPrecisionNGStackReg extends RegistrationAndTransformation
             int doubleWidth = width*2;
             int doubleHeight = height*2;
             int nIndex = 0;
-            int p;
-            int q;
-            int tmpindex;
-            double s;
+            double xvecx = Math.cos(currentangle) * currentscale;
+            double xvecy = -Math.sin(currentangle) * currentscale;
+            double yvecx = -xvecy;
+            double yvecy = xvecx;
             double coordx;
-            double rescoordx;
             double coordy;
-            double rescoordy;
-            int mskx;
-            int msky;
-            for(int i = 0;i < height;i++)
-            {
-            	// First walk along the Y-vector direction and reset the X-position (otherwise the
-                // y position is initially correct and then lagging behind by one all the time)
-                coordx = currentoffsetx;
-                coordy = currentoffsety + ((double)i);
-                for(int n = 0;n < width;n++,nIndex++)
-                {
-                    mskx = (int)Math.round(coordx);
-                    msky = (int)Math.round(coordy);
-                    if((mskx >= 0)&&(mskx < width)&&(msky >= 0)&&(msky < height))
-                    {
-                        // Calculate X-interpolation indices
-                        p = (coordx >= 0) ? (((int)coordx) + 2) : (((int)coordx) + 1);
-                        for(int c = 0;c < 4;c++,p--)
-                        {
-                            q = (p < 0) ? (-1 - p) : p;
-                            if(q >= doubleWidth)
-                            {
-                                q -= (doubleWidth) * (q / (doubleWidth)); // Warning this is an integer division it doesn't yield q
-                            }
-                            xInterpolationIndices[c] = q >= width ? (doubleWidth - 1 - q) : q;
-                        }
-                        // calculate Y-interpolation indices
-                        p = (coordy >= 0) ? (((int)coordy) + 2) : (((int)coordy) + 1);
-                        for(int c = 0;c < 4;c++,p--)
-                        {
-                            q = (p < 0) ? (-1 - p) : p;
-                            if(q >= doubleHeight)
-                            {
-                                q -= (doubleHeight) * (q / (doubleHeight)); // Warning this is an integer division it doesn't yield q
-                            }
-                            yInterpolationIndices[c] = q >= height ? (doubleHeight - 1 - q) * width : q * width;// calculate linearized coordinates of the coefficient array
-                        }
-                        // get the residuals of the coordinates
-                        rescoordx = coordx - (coordx >= 0.0 ? ((double)((int)coordx)) : ((double)(((int)coordx) - 1)));
-                        rescoordy = coordy - (coordy >= 0.0 ? ((double)((int)coordy)) : ((double)(((int)coordy) - 1)));
-                        // calculate the X-weights
-                        s = 1.0 - rescoordx;
-                        xWeights[3] = Math.pow(s, 3.0) / 6.0;
-                        s = rescoordx * rescoordx;
-                        xWeights[2] = (2.0 / 3.0) - 0.5 * s * (2.0 - rescoordx);
-                        xWeights[0] = s * rescoordx / 6.0;
-                        xWeights[1] = 1.0 - xWeights[0] - xWeights[2] - xWeights[3];
-                        // calculate the Y-weights
-                        s = 1.0 - rescoordy;
-                        yWeights[3] = Math.pow(s, 3.0) / 6.0;
-                        s = rescoordy * rescoordy;
-                        yWeights[2] = (2.0 / 3.0) - 0.5 * s * (2.0 - rescoordy);
-                        yWeights[0] = s * rescoordy / 6.0;
-                        yWeights[1] = 1.0 - yWeights[0] - yWeights[2] - yWeights[3];
-
-                        // calculate the interpolated value from the target coefficients
-                        s = 0.0;
-                        for(int y = 0;y < 4;y++)
-                        {
-                            rescoordx = 0.0;// To avoid using too many variables this one will be repurposed
-                            tmpindex = yInterpolationIndices[y];
-                            for(int x = 0;x < 4; x++)
-                            {
-                                rescoordx += xWeights[x] * targetCoefficientDoubleSlice[tmpindex + xInterpolationIndices[x]];
-                            }
-                            s += yWeights[y] * rescoordx;
-                        }
-                        CPUentryImageBuffer[nIndex] = s;
-                    }
-                    else
-                    {
-                        CPUentryImageBuffer[nIndex] = 0.0;
-                    }
-                    // walk along the X-vector direction
-                    coordx += 1.0;
-                }
-            }
-        }
-        
-        private void resizingTranslationTransformImageWithBsplineInterpolation(final int width, final int height, final int targetwidth, final int targetheight, double currentoffsetx, double currentoffsety)
-        {
-            /*
-            Requires the coefficients to be in entryImageBuffers and the output
-            will be in fullSizedHelperBuffer
-            */
-            int doubleWidth = width*2;
-            int doubleHeight = height*2;
-            int nIndex = 0;
-            int p;
-            int q;
-            int tmpindex;
-            double s;
-            double coordx;
-            double rescoordx;
-            double coordy;
-            double rescoordy;
             int mskx;
             int msky;
             for(int i = 0;i < targetheight;i++)
             {
-            	// First walk along the Y-vector direction and reset the X-position (otherwise the
+                // First walk along the Y-vector direction and reset the X-position (otherwise the
                 // y position is initially correct and then lagging behind by one all the time)
-                coordx = currentoffsetx;
-                coordy = currentoffsety + ((double)i);
+                coordx = currentoffsetx + ((double)i) * yvecx;
+                coordy = currentoffsety + ((double)i) * yvecy;
                 for(int n = 0;n < targetwidth;n++,nIndex++)
                 {
                     mskx = (int)Math.round(coordx);
                     msky = (int)Math.round(coordy);
                     if((mskx >= 0)&&(mskx < width)&&(msky >= 0)&&(msky < height))
                     {
-                        // Calculate X-interpolation indices
-                        p = (coordx >= 0) ? (((int)coordx) + 2) : (((int)coordx) + 1);
-                        for(int c = 0;c < 4;c++,p--)
-                        {
-                            q = (p < 0) ? (-1 - p) : p;
-                            if(q >= doubleWidth)
-                            {
-                                q -= (doubleWidth) * (q / (doubleWidth)); // Warning this is an integer division it doesn't yield q
-                            }
-                            xInterpolationIndices[c] = q >= width ? (doubleWidth - 1 - q) : q;
-                        }
-                        // calculate Y-interpolation indices
-                        p = (coordy >= 0) ? (((int)coordy) + 2) : (((int)coordy) + 1);
-                        for(int c = 0;c < 4;c++,p--)
-                        {
-                            q = (p < 0) ? (-1 - p) : p;
-                            if(q >= doubleHeight)
-                            {
-                                q -= (doubleHeight) * (q / (doubleHeight)); // Warning this is an integer division it doesn't yield q
-                            }
-                            yInterpolationIndices[c] = q >= height ? (doubleHeight - 1 - q) * width : q * width;// calculate linearized coordinates of the coefficient array
-                        }
-                        // get the residuals of the coordinates
-                        rescoordx = coordx - (coordx >= 0.0 ? ((double)((int)coordx)) : ((double)(((int)coordx) - 1)));
-                        rescoordy = coordy - (coordy >= 0.0 ? ((double)((int)coordy)) : ((double)(((int)coordy) - 1)));
-                        // calculate the X-weights
-                        s = 1.0 - rescoordx;
-                        xWeights[3] = Math.pow(s, 3.0) / 6.0;
-                        s = rescoordx * rescoordx;
-                        xWeights[2] = (2.0 / 3.0) - 0.5 * s * (2.0 - rescoordx);
-                        xWeights[0] = s * rescoordx / 6.0;
-                        xWeights[1] = 1.0 - xWeights[0] - xWeights[2] - xWeights[3];
-                        // calculate the Y-weights
-                        s = 1.0 - rescoordy;
-                        yWeights[3] = Math.pow(s, 3.0) / 6.0;
-                        s = rescoordy * rescoordy;
-                        yWeights[2] = (2.0 / 3.0) - 0.5 * s * (2.0 - rescoordy);
-                        yWeights[0] = s * rescoordy / 6.0;
-                        yWeights[1] = 1.0 - yWeights[0] - yWeights[2] - yWeights[3];
-
-                        // calculate the interpolated value from the target coefficients
-                        s = 0.0;
-                        for(int y = 0;y < 4;y++)
-                        {
-                            rescoordx = 0.0;// To avoid using too many variables this one will be repurposed
-                            tmpindex = yInterpolationIndices[y];
-                            for(int x = 0;x < 4; x++)
-                            {
-                                rescoordx += xWeights[x] * targetCoefficientDoubleSlice[tmpindex + xInterpolationIndices[x]];
-                            }
-                            s += yWeights[y] * rescoordx;
-                        }
-                        CPUentryImageBuffer[nIndex] = s;
+                    	PlainJavaCPUAligner.computeXInterpolationIndices(coordx, doubleWidth, width, xInterpolationIndices);
+                    	PlainJavaCPUAligner.computeYInterpolationIndices(coordy, doubleHeight, height, width, yInterpolationIndices);
+                        
+                    	CPUentryImageBuffer[nIndex] = PlainJavaCPUAligner.interpolateCubicBSpline(PlainJavaCPUAligner.getFractional(coordx), PlainJavaCPUAligner.getFractional(coordy), xInterpolationIndices, yInterpolationIndices, targetCoefficientDoubleSlice);
                     }
                     else
                     {
-                        CPUentryImageBuffer[nIndex] = 0.0;
+                    	CPUentryImageBuffer[nIndex] = 0.0;
                     }
                     // walk along the X-vector direction
-                    coordx += 1.0;
+                    coordx += xvecx;
+                    coordy += xvecy;
                 }
             }
         }
-        
+
+        private void affineTransformImageWithBsplineInterpolation(final int width, final int height, double currentoffsetx, double currentoffsety, double currenta11, double currenta12, double currenta21, double currenta22)
+        {
+            /*
+            Requires the coefficients to be in entryImageBuffers and the output
+            will be in fullSizedHelperBuffer
+            */
+            int doubleWidth = width*2;
+            int doubleHeight = height*2;
+            int nIndex = 0;
+            double xvecx = currenta11;
+            double xvecy = currenta21;
+            double yvecx = currenta12;
+            double yvecy = currenta22;
+            double coordx;
+            double coordy;
+            int mskx;
+            int msky;
+            for(int i = 0;i < height;i++)
+            {
+                // First walk along the Y-vector direction and reset the X-position (otherwise the
+                // y position is initially correct and then lagging behind by one all the time)
+                coordx = currentoffsetx + ((double)i) * yvecx;
+                coordy = currentoffsety + ((double)i) * yvecy;
+                for(int n = 0;n < width;n++,nIndex++)
+                {
+                    mskx = (int)Math.round(coordx);
+                    msky = (int)Math.round(coordy);
+                    if((mskx >= 0)&&(mskx < width)&&(msky >= 0)&&(msky < height))
+                    {
+                    	PlainJavaCPUAligner.computeXInterpolationIndices(coordx, doubleWidth, width, xInterpolationIndices);
+                    	PlainJavaCPUAligner.computeYInterpolationIndices(coordy, doubleHeight, height, width, yInterpolationIndices);
+                        
+                    	CPUentryImageBuffer[nIndex] = PlainJavaCPUAligner.interpolateCubicBSpline(PlainJavaCPUAligner.getFractional(coordx), PlainJavaCPUAligner.getFractional(coordy), xInterpolationIndices, yInterpolationIndices, targetCoefficientDoubleSlice);
+                    }
+                    else
+                    {
+                    	CPUentryImageBuffer[nIndex] = 0.0;
+                    }
+                    // walk along the X-vector direction
+                    coordx += xvecx;
+                    coordy += xvecy;
+                }
+            }
+        }
+
+        private void resizingAffineTransformImageWithBsplineInterpolation(final int width, final int height, final int targetwidth, final int targetheight, double currentoffsetx, double currentoffsety, double currenta11, double currenta12, double currenta21, double currenta22)
+        {
+            /*
+            Requires the coefficients to be in entryImageBuffers and the output
+            will be in fullSizedHelperBuffer
+            */
+            int doubleWidth = width*2;
+            int doubleHeight = height*2;
+            int nIndex = 0;
+            double xvecx = currenta11;
+            double xvecy = currenta21;
+            double yvecx = currenta12;
+            double yvecy = currenta22;
+            double coordx;
+            double coordy;
+            int mskx;
+            int msky;
+            for(int i = 0;i < targetheight;i++)
+            {
+                // First walk along the Y-vector direction and reset the X-position (otherwise the
+                // y position is initially correct and then lagging behind by one all the time)
+                coordx = currentoffsetx + ((double)i) * yvecx;
+                coordy = currentoffsety + ((double)i) * yvecy;
+                for(int n = 0;n < targetwidth;n++,nIndex++)
+                {
+                    mskx = (int)Math.round(coordx);
+                    msky = (int)Math.round(coordy);
+                    if((mskx >= 0)&&(mskx < width)&&(msky >= 0)&&(msky < height))
+                    {
+                    	PlainJavaCPUAligner.computeXInterpolationIndices(coordx, doubleWidth, width, xInterpolationIndices);
+                    	PlainJavaCPUAligner.computeYInterpolationIndices(coordy, doubleHeight, height, width, yInterpolationIndices);
+                        
+                    	CPUentryImageBuffer[nIndex] = PlainJavaCPUAligner.interpolateCubicBSpline(PlainJavaCPUAligner.getFractional(coordx), PlainJavaCPUAligner.getFractional(coordy), xInterpolationIndices, yInterpolationIndices, targetCoefficientDoubleSlice);
+                    }
+                    else
+                    {
+                    	CPUentryImageBuffer[nIndex] = 0.0;
+                    }
+                    // walk along the X-vector direction
+                    coordx += xvecx;
+                    coordy += xvecy;
+                }
+            }
+        }
+
         private void fetchTransformedImage()
         {
             // This function is only called from the GPU code so one can assume !usesFloat == true
@@ -1741,7 +2884,6 @@ public class HybridPrecisionNGStackReg extends RegistrationAndTransformation
         	}
         }
         
-        
         private void doRegistration()
         {
             iterationPower = (int)Math.pow(2.0, (double)pyramidDepth);
@@ -1778,9 +2920,86 @@ public class HybridPrecisionNGStackReg extends RegistrationAndTransformation
                 doubleInverseMarquardtLevenbergRigidBodyOptimization();
                 break;
             case SCALEDROTATION:
+            	for(int i = pyramidDepth - 1;i > 0;i--)
+                {
+                    iterationPower /= 2;
+                    inverseMarquardtLevenbergScaledRotationOptimization(i);
+                    // scale up (but the rotation is not scale dependent so simply scale up the translation)
+                    offsetx *= 2.0;
+                    offsety *= 2.0;
+                }
+                iterationPower /= 2;
+                inverseMarquardtLevenbergScaledRotationOptimization(0);
+                
+                // With the perfect initial guess of the parameters run one last round at double precision
+                doubleInverseMarquardtLevenbergScaledRotationOptimization();
                 break;
             case AFFINE:
+            	for(int i = pyramidDepth - 1;i > 0;i--)
+                {
+                    iterationPower /= 2;
+                    inverseMarquardtLevenbergAffineOptimization(i);
+                    // scale up (but the rotation is not scale dependent so simply scale up the translation)
+                    offsetx *= 2.0;
+                    offsety *= 2.0;
+                }
+                iterationPower /= 2;
+                inverseMarquardtLevenbergAffineOptimization(0);
+                
+                // With the perfect initial guess of the parameters run one last round at double precision
+                doubleInverseMarquardtLevenbergAffineOptimization();
                 break;
+            }
+        }
+        
+        private void inverseMarquardtLevenbergTranslationOptimization(int pyramidIndex)
+        {
+            double[] update = {0.0,0.0};
+            double bestMeanSquares = 0.0;
+            double meanSquares = 0.0;
+            double lambda = 1.0;
+            double displacement;
+            int iteration = 0;
+            double c;
+            double s;
+            // first initialize the matrix with the current transformation (upscaling between the steps)
+            double currentoffsetx;
+            double currentoffsety;
+            bestMeanSquares = getTranslationMeanSquares(pyramidIndex,offsetx,offsety);
+            iteration++;
+            do {
+                // calculate the pseudo hessian from the hessian
+                for (int k = 0; (k < 2); k++) {
+                	Arrays.fill(pseudoHessian[k], 0.0);
+                    pseudoHessian[k][k] = (1.0 + lambda) * hessian[k][k];
+                }
+                StaticUtility.invertGauss(pseudoHessian);
+                update = StaticUtility.matrixMultiply(pseudoHessian, gradient);
+                displacement = Math.sqrt(update[0] * update[0] + update[1] * update[1]);
+                currentoffsetx = offsetx + update[0];
+                currentoffsety = offsety + update[1];
+                meanSquares = getTranslationMeanSquares(pyramidIndex,currentoffsetx,currentoffsety);
+
+                iteration++;
+                if (meanSquares < bestMeanSquares) {
+                    bestMeanSquares = meanSquares;
+                    lambda /= 4.0;
+                    offsetx = currentoffsetx;
+                    offsety = currentoffsety;
+                }
+                else {
+                    lambda *= 4.0;
+                }
+            } while ((iteration < (10 * iterationPower - 1)) && (0.001 <= displacement));
+            StaticUtility.invertGauss(hessian);
+            update = StaticUtility.matrixMultiply(hessian, gradient);
+            currentoffsetx = offsetx + update[0];
+            currentoffsety = offsety + update[1];
+            meanSquares = getTranslationMeanSquaresWithoutHessian(pyramidIndex,currentoffsetx,currentoffsety);
+            iteration++;
+            if (meanSquares < bestMeanSquares) {
+                offsetx = currentoffsetx;
+                offsety = currentoffsety;
             }
         }
 
@@ -1803,7 +3022,8 @@ public class HybridPrecisionNGStackReg extends RegistrationAndTransformation
             do {
                 // calculate the pseudo hessian from the hessian
                 for (int k = 0; (k < 3); k++) {
-                        pseudoHessian[k][k] = (1.0 + lambda) * hessian[k][k];
+                	Arrays.fill(pseudoHessian[k], 0.0);
+                    pseudoHessian[k][k] = (1.0 + lambda) * hessian[k][k];
                 }
                 StaticUtility.invertGauss(pseudoHessian);
                 update = StaticUtility.matrixMultiply(pseudoHessian, gradient);
@@ -1817,14 +3037,14 @@ public class HybridPrecisionNGStackReg extends RegistrationAndTransformation
 
                 iteration++;
                 if (meanSquares < bestMeanSquares) {
-                        bestMeanSquares = meanSquares;
-                        lambda /= 4.0;
-                        offsetx = currentoffsetx;
-                        offsety = currentoffsety;
-                        this.angle = currentangle;
+                    bestMeanSquares = meanSquares;
+                    lambda /= 4.0;
+                    offsetx = currentoffsetx;
+                    offsety = currentoffsety;
+                    this.angle = currentangle;
                 }
                 else {
-                        lambda *= 4.0;
+                    lambda *= 4.0;
                 }
             } while ((iteration < (10 * iterationPower - 1)) && (0.001 <= displacement));
             StaticUtility.invertGauss(hessian);
@@ -1843,8 +3063,286 @@ public class HybridPrecisionNGStackReg extends RegistrationAndTransformation
             }
         }
         
+        private void inverseMarquardtLevenbergScaledRotationOptimization(int pyramidIndex)
+        {
+            double[] update = {0.0,0.0,0.0,0.0};
+            double bestMeanSquares = 0.0;
+            double meanSquares = 0.0;
+            double lambda = 1.0;
+            double displacement;
+            int iteration = 0;
+            double c;
+            double s;
+            // first initialize the matrix with the current transformation (upscaling between the steps)
+            double currentoffsetx;
+            double currentoffsety;
+            double currentangle;
+            double currentscale;
+            bestMeanSquares = getScaledRotationMeanSquares(pyramidIndex,offsetx,offsety,this.angle,this.scale);
+            iteration++;
+            do {
+                // calculate the pseudo hessian from the hessian
+                for (int k = 0; (k < 4); k++) {
+                	Arrays.fill(pseudoHessian[k], 0.0);
+                    pseudoHessian[k][k] = (1.0 + lambda) * hessian[k][k];
+                }
+                StaticUtility.invertGauss(pseudoHessian);
+                update = StaticUtility.matrixMultiply(pseudoHessian, gradient);
+                currentscale = this.scale + update[0];
+                currentangle = this.angle - update[1];
+                displacement = Math.sqrt(update[2] * update[2] + update[3] * update[3]) + 0.25 * Math.sqrt((double)(targetPyramid[pyramidIndex].width * targetPyramid[pyramidIndex].width) + (double)(targetPyramid[pyramidIndex].height * targetPyramid[pyramidIndex].height)) * (Math.abs(update[0]) + Math.abs(update[1]));
+                c = Math.cos(update[1]);
+                s = Math.sin(update[1]);
+                currentoffsetx = ((offsetx + update[2]) * c - (offsety + update[3]) * s) * (1.0 + update[0]);
+                currentoffsety = ((offsetx + update[2]) * s + (offsety + update[3]) * c) * (1.0 + update[0]);
+                meanSquares = getScaledRotationMeanSquares(pyramidIndex,currentoffsetx,currentoffsety,currentangle,currentscale);
+
+                iteration++;
+                if (meanSquares < bestMeanSquares) {
+                    bestMeanSquares = meanSquares;
+                    lambda /= 4.0;
+                    offsetx = currentoffsetx;
+                    offsety = currentoffsety;
+                    this.angle = currentangle;
+                    this.scale = currentscale;
+                }
+                else {
+                    lambda *= 4.0;
+                }
+            } while ((iteration < (10 * iterationPower - 1)) && (0.001 <= displacement));
+            StaticUtility.invertGauss(hessian);
+            update = StaticUtility.matrixMultiply(hessian, gradient);
+            currentscale = this.scale + update[0];
+            currentangle = this.angle - update[1];
+            c = Math.cos(update[1]);
+            s = Math.sin(update[1]);
+            currentoffsetx = ((offsetx + update[2]) * c - (offsety + update[3]) * s) * (1.0 + update[0]);
+            currentoffsety = ((offsetx + update[2]) * s + (offsety + update[3]) * c) * (1.0 + update[0]);
+            meanSquares = getScaledRotationMeanSquaresWithoutHessian(pyramidIndex,currentoffsetx,currentoffsety,currentangle,currentscale);
+            iteration++;
+            if (meanSquares < bestMeanSquares) {
+                offsetx = currentoffsetx;
+                offsety = currentoffsety;
+                this.angle = currentangle;
+                this.scale = currentscale;
+            }
+        }
         
-        private void inverseMarquardtLevenbergTranslationOptimization(int pyramidIndex)
+        /*
+         * ========================================================================================
+         * inverseMarquardtLevenbergAffineOptimization
+         * ========================================================================================
+         *
+         * Paper reference: Thévenaz et al., "A Pyramid Approach to Subpixel Registration Based
+         * on Intensity," IEEE TIP 1998, Section III-A.
+         *
+         * This implements the modified Levenberg-Marquardt optimizer for affine registration.
+         *
+         * The affine transformation maps output pixel (n, i) to source coordinates:
+         *   x' = a11*n + a12*i + tx
+         *   y' = a21*n + a22*i + ty
+         *
+         * Parameter vector: p = (a11, a12, a21, a22, tx, ty), dimension = 6.
+         *
+         * At identity: a11=1, a12=0, a21=0, a22=1, tx=0, ty=0.
+         *
+         * The optimization minimizes E(p) = (1/|Ω|) Σ [f(x) - g(T_p(x))]²
+         * using the "inverse" approach where the Jacobian is built from the SOURCE image
+         * gradients ∇f, which remain constant across iterations. This avoids recomputing
+         * the Hessian when the parameters change, as described in Section III-A of the paper.
+         *
+         * LM damping: The pseudoHessian is constructed by copying ONLY the diagonal of the
+         * Gauss-Newton Hessian H, scaled by (1+λ):
+         *   pseudoH[k][k] = (1+λ) * H[k][k]
+         * with all off-diagonal entries left at zero. This reduces the damped step to:
+         *   δp_k = g_k / ((1+λ) * H_kk)
+         * which is an independent damped gradient descent along each parameter axis.
+         * This is a deliberate simplification inherited from the original TurboReg design:
+         * - Computationally cheaper: O(n) diagonal inversion instead of O(n³) full inversion.
+         * - More numerically stable: avoids ill-conditioning from off-diagonal coupling.
+         * - For large λ (far from optimum), LM reduces to gradient descent anyway.
+         * The full Hessian (with off-diagonals) is inverted only for the FINAL undamped
+         * Gauss-Newton step after the LM loop converges.
+         *
+         * Update signs: For affine, ALL parameters live in a vector space (unlike the SE(2)
+         * group for rigid body). The update is purely additive with POSITIVE sign:
+         *   a11_new = a11 + δa11
+         *   a12_new = a12 + δa12
+         *   ...
+         *   tx_new  = tx  + δtx
+         *   ty_new  = ty  + δty
+         *
+         * This is correct because:
+         * - The gradient g_k = Σ r_i * (∂f/∂p_k) points in the direction that increases
+         *   the dot product of residual with the Jacobian column.
+         * - The Gauss-Newton step δp = H⁻¹ g directly gives the parameter increment
+         *   that reduces the least-squares error.
+         * - Unlike rigid body (where the angle update requires a MINUS sign due to the
+         *   inverse/compositional convention and subsequent SE(2) group composition),
+         *   affine parameters are simply linear coefficients with no such group structure.
+         *
+         * Contrast with rigid body:
+         * - Rigid body: angle update is SUBTRACTED (currentangle = angle - update[0])
+         *   because the angle parameterizes a rotation group, and the "inverse" Jacobian
+         *   convention means the gradient points opposite to the forward rotation direction.
+         *   The offsets are then COMPOSED through the incremental rotation matrix.
+         * - Affine: all 6 parameters are ADDED directly. No group composition is needed.
+         *   The affine matrix entries (a11, a12, a21, a22) are dimensionless linear
+         *   coefficients, and (tx, ty) are translations — all updated additively.
+         *
+         * Displacement convergence criterion:
+         *   displacement = sqrt(δtx² + δty²)
+         *                + 0.25 * diagonal * (|δa11| + |δa12| + |δa21| + |δa22|)
+         * The matrix element updates are converted to approximate pixel displacements
+         * by multiplying by 0.25 × the image diagonal. This heuristic estimates the
+         * maximum pixel displacement caused by a small change in a matrix coefficient
+         * (analogous to the 0.25*diagonal*|δθ| term in rigid body).
+         */
+        private void inverseMarquardtLevenbergAffineOptimization(int pyramidIndex)
+        {
+            double[] update = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0};
+            double bestMeanSquares = 0.0;
+            double meanSquares = 0.0;
+            double lambda = 1.0;
+            double displacement;
+            int iteration = 0;
+
+            // Trial parameters for each LM step
+            double currenta11;
+            double currenta12;
+            double currenta21;
+            double currenta22;
+            double currentoffsetx;
+            double currentoffsety;
+
+            /*
+             * Initial evaluation: compute E(p₀), gradient g, and Hessian H
+             * at the current parameter values. The gradient and Hessian are
+             * stored in the class fields gradient[] and hessian[][].
+             */
+            bestMeanSquares = getAffineMeanSquares(pyramidIndex, offsetx, offsety, a11, a12, a21, a22);
+            iteration++;
+
+            do {
+                /*
+                 * Construct the LM-damped pseudoHessian.
+                 * Only the diagonal is set: pseudoH[k][k] = (1+λ) * H[k][k].
+                 * Off-diagonals remain zero (the pseudoHessian arrays are reused
+                 * and the off-diagonals were never set to non-zero values).
+                 * Inverting this diagonal matrix and multiplying by the gradient
+                 * yields: δp_k = g_k / ((1+λ) * H_kk).
+                 */
+                for (int k = 0; (k < 6); k++) {
+                	Arrays.fill(pseudoHessian[k], 0.0);
+                    pseudoHessian[k][k] = (1.0 + lambda) * hessian[k][k];
+                }
+                StaticUtility.invertGauss(pseudoHessian);
+                update = StaticUtility.matrixMultiply(pseudoHessian, gradient);
+
+                /*
+                 * Compute the displacement for convergence testing.
+                 * The translational displacement is the Euclidean norm of (δtx, δty).
+                 * The matrix-element displacement is heuristically converted to pixels
+                 * by multiplying by 0.25 × image diagonal, analogous to the rigid body
+                 * angle-to-pixel conversion.
+                 */
+                /*double diag = Math.sqrt((double)(targetPyramid[pyramidIndex].width * targetPyramid[pyramidIndex].width)
+                                      + (double)(targetPyramid[pyramidIndex].height * targetPyramid[pyramidIndex].height));
+                displacement = Math.sqrt(update[4] * update[4] + update[5] * update[5])
+                             + 0.25 * diag * (Math.abs(update[0]) + Math.abs(update[1]) + Math.abs(update[2]) + Math.abs(update[3]));*/
+                
+                /*
+                 * A change δa11 causes a displacement of approximately |δa11| * |x| at pixel position x. 
+                 * The maximum |x| is approximately width/2 (measuring from center). 
+                 * Similarly, δa12 causes |δa12| * |y| where max |y| ≈ height/2. 
+                 * So a tighter heuristic would be:
+                 */
+                displacement = Math.sqrt(update[4] * update[4] + update[5] * update[5])
+                        + 0.5 * (double)targetPyramid[pyramidIndex].width
+                          * (Math.abs(update[0]) + Math.abs(update[2]))
+                        + 0.5 * (double)targetPyramid[pyramidIndex].height
+                          * (Math.abs(update[1]) + Math.abs(update[3]));
+
+                /*
+                 * Affine parameter update: purely additive, positive sign.
+                 * Unlike rigid body where angle is SUBTRACTED and offsets are COMPOSED
+                 * through a rotation matrix, affine parameters form a vector space
+                 * and are simply incremented.
+                 */
+                currenta11    = this.a11    + update[0];
+                currenta12    = this.a12    + update[1];
+                currenta21    = this.a21    + update[2];
+                currenta22    = this.a22    + update[3];
+                currentoffsetx = this.offsetx + update[4];
+                currentoffsety = this.offsety + update[5];
+
+                /*
+                 * Evaluate the MSE at the trial point. This also recomputes gradient
+                 * and Hessian for the next iteration (the "accelerated" variant from
+                 * the paper always recomputes, since the source gradients are constant
+                 * but the B-spline interpolation coordinates change).
+                 */
+                meanSquares = getAffineMeanSquares(pyramidIndex, currentoffsetx, currentoffsety,
+                                                   currenta11, currenta12, currenta21, currenta22);
+
+                iteration++;
+                if (meanSquares < bestMeanSquares) {
+                    /*
+                     * Accept the step: the MSE decreased.
+                     * Reduce λ (shift toward Gauss-Newton / larger steps).
+                     */
+                    bestMeanSquares = meanSquares;
+                    lambda /= 4.0;
+                    this.a11    = currenta11;
+                    this.a12    = currenta12;
+                    this.a21    = currenta21;
+                    this.a22    = currenta22;
+                    this.offsetx = currentoffsetx;
+                    this.offsety = currentoffsety;
+                }
+                else {
+                    /*
+                     * Reject the step: the MSE did not decrease.
+                     * Increase λ (shift toward gradient descent / smaller steps).
+                     * The gradient and Hessian from the PREVIOUS accepted point
+                     * are still valid (they were overwritten by getAffineMeanSquares
+                     * but will be recomputed at the accepted point on the next
+                     * iteration if the step is accepted).
+                     */
+                    lambda *= 4.0;
+                }
+            } while ((iteration < (10 * iterationPower - 1)) && (0.001 <= displacement));
+
+            /*
+             * Final undamped Gauss-Newton step: invert the FULL Hessian (with
+             * off-diagonals) and apply one pure quadratic step. This gives the
+             * best local quadratic approximation without LM damping.
+             * Accept only if it improves the MSE.
+             */
+            StaticUtility.invertGauss(hessian);
+            update = StaticUtility.matrixMultiply(hessian, gradient);
+
+            currenta11     = this.a11     + update[0];
+            currenta12     = this.a12     + update[1];
+            currenta21     = this.a21     + update[2];
+            currenta22     = this.a22     + update[3];
+            currentoffsetx = this.offsetx + update[4];
+            currentoffsety = this.offsety + update[5];
+
+            meanSquares = getAffineMeanSquaresWithoutHessian(pyramidIndex, currentoffsetx, currentoffsety,
+                                                              currenta11, currenta12, currenta21, currenta22);
+            iteration++;
+            if (meanSquares < bestMeanSquares) {
+                this.a11     = currenta11;
+                this.a12     = currenta12;
+                this.a21     = currenta21;
+                this.a22     = currenta22;
+                this.offsetx = currentoffsetx;
+                this.offsety = currentoffsety;
+            }
+        }
+        
+        private void doubleInverseMarquardtLevenbergTranslationOptimization()
         {
             double[] update = {0.0,0.0};
             double bestMeanSquares = 0.0;
@@ -1857,43 +3355,43 @@ public class HybridPrecisionNGStackReg extends RegistrationAndTransformation
             // first initialize the matrix with the current transformation (upscaling between the steps)
             double currentoffsetx;
             double currentoffsety;
-            bestMeanSquares = getTranslationMeanSquares(pyramidIndex,offsetx,offsety);
+            bestMeanSquares = doubleGetTranslationMeanSquares(offsetx,offsety);
             iteration++;
             do {
                 // calculate the pseudo hessian from the hessian
                 for (int k = 0; (k < 2); k++) {
-                        pseudoHessian[k][k] = (1.0 + lambda) * hessian[k][k];
+                	Arrays.fill(pseudoHessian[k], 0.0);
+                    pseudoHessian[k][k] = (1.0 + lambda) * hessian[k][k];
                 }
                 StaticUtility.invertGauss(pseudoHessian);
                 update = StaticUtility.matrixMultiply(pseudoHessian, gradient);
                 displacement = Math.sqrt(update[0] * update[0] + update[1] * update[1]);
                 currentoffsetx = offsetx + update[0];
                 currentoffsety = offsety + update[1];
-                meanSquares = getTranslationMeanSquares(pyramidIndex,currentoffsetx,currentoffsety);
+                meanSquares = doubleGetTranslationMeanSquares(currentoffsetx,currentoffsety);
 
                 iteration++;
                 if (meanSquares < bestMeanSquares) {
-                        bestMeanSquares = meanSquares;
-                        lambda /= 4.0;
-                        offsetx = currentoffsetx;
-                        offsety = currentoffsety;
+                    bestMeanSquares = meanSquares;
+                    lambda /= 4.0;
+                    offsetx = currentoffsetx;
+                    offsety = currentoffsety;
                 }
                 else {
-                        lambda *= 4.0;
+                    lambda *= 4.0;
                 }
             } while ((iteration < (10 * iterationPower - 1)) && (0.001 <= displacement));
             StaticUtility.invertGauss(hessian);
             update = StaticUtility.matrixMultiply(hessian, gradient);
             currentoffsetx = offsetx + update[0];
             currentoffsety = offsety + update[1];
-            meanSquares = getTranslationMeanSquaresWithoutHessian(pyramidIndex,currentoffsetx,currentoffsety);
+            meanSquares = doubleGetTranslationMeanSquaresWithoutHessian(currentoffsetx,currentoffsety);
             iteration++;
             if (meanSquares < bestMeanSquares) {
                 offsetx = currentoffsetx;
                 offsety = currentoffsety;
             }
         }
-        
         
         private void doubleInverseMarquardtLevenbergRigidBodyOptimization()
         {
@@ -1914,7 +3412,8 @@ public class HybridPrecisionNGStackReg extends RegistrationAndTransformation
             do {
                 // calculate the pseudo hessian from the hessian
                 for (int k = 0; (k < 3); k++) {
-                        pseudoHessian[k][k] = (1.0 + lambda) * hessian[k][k];
+                	Arrays.fill(pseudoHessian[k], 0.0);
+                    pseudoHessian[k][k] = (1.0 + lambda) * hessian[k][k];
                 }
                 StaticUtility.invertGauss(pseudoHessian);
                 update = StaticUtility.matrixMultiply(pseudoHessian, gradient);
@@ -1928,14 +3427,14 @@ public class HybridPrecisionNGStackReg extends RegistrationAndTransformation
 
                 iteration++;
                 if (meanSquares < bestMeanSquares) {
-                        bestMeanSquares = meanSquares;
-                        lambda /= 4.0;
-                        offsetx = currentoffsetx;
-                        offsety = currentoffsety;
-                        this.angle = currentangle;
+                    bestMeanSquares = meanSquares;
+                    lambda /= 4.0;
+                    offsetx = currentoffsetx;
+                    offsety = currentoffsety;
+                    this.angle = currentangle;
                 }
                 else {
-                        lambda *= 4.0;
+                    lambda *= 4.0;
                 }
             } while ((iteration < (10 * iterationPower - 1)) && (0.001 <= displacement));
             StaticUtility.invertGauss(hessian);
@@ -1953,11 +3452,10 @@ public class HybridPrecisionNGStackReg extends RegistrationAndTransformation
                 this.angle = currentangle;
             }
         }
-        
-        
-        private void doubleInverseMarquardtLevenbergTranslationOptimization()
+
+        private void doubleInverseMarquardtLevenbergScaledRotationOptimization()
         {
-            double[] update = {0.0,0.0};
+            double[] update = {0.0,0.0,0.0,0.0};
             double bestMeanSquares = 0.0;
             double meanSquares = 0.0;
             double lambda = 1.0;
@@ -1968,45 +3466,477 @@ public class HybridPrecisionNGStackReg extends RegistrationAndTransformation
             // first initialize the matrix with the current transformation (upscaling between the steps)
             double currentoffsetx;
             double currentoffsety;
-            bestMeanSquares = doubleGetTranslationMeanSquares(offsetx,offsety);
+            double currentangle;
+            double currentscale;
+            bestMeanSquares = doubleGetScaledRotationMeanSquares(offsetx,offsety,this.angle,this.scale);
             iteration++;
             do {
                 // calculate the pseudo hessian from the hessian
-                for (int k = 0; (k < 2); k++) {
-                        pseudoHessian[k][k] = (1.0 + lambda) * hessian[k][k];
+                for (int k = 0; (k < 4); k++) {
+                	Arrays.fill(pseudoHessian[k], 0.0);
+                    pseudoHessian[k][k] = (1.0 + lambda) * hessian[k][k];
                 }
                 StaticUtility.invertGauss(pseudoHessian);
                 update = StaticUtility.matrixMultiply(pseudoHessian, gradient);
-                displacement = Math.sqrt(update[0] * update[0] + update[1] * update[1]);
-                currentoffsetx = offsetx + update[0];
-                currentoffsety = offsety + update[1];
-                meanSquares = doubleGetTranslationMeanSquares(currentoffsetx,currentoffsety);
+                currentscale = this.scale + update[0];
+                currentangle = this.angle - update[1];
+                displacement = Math.sqrt(update[2] * update[2] + update[3] * update[3]) + 0.25 * Math.sqrt((double)(targetPyramid[0].width * targetPyramid[0].width) + (double)(targetPyramid[0].height * targetPyramid[0].height)) * (Math.abs(update[0]) + Math.abs(update[1]));
+                c = Math.cos(update[1]);
+                s = Math.sin(update[1]);
+                currentoffsetx = ((offsetx + update[2]) * c - (offsety + update[3]) * s) * (1.0 + update[0]);
+                currentoffsety = ((offsetx + update[2]) * s + (offsety + update[3]) * c) * (1.0 + update[0]);
+                meanSquares = doubleGetScaledRotationMeanSquares(currentoffsetx,currentoffsety,currentangle,currentscale);
 
                 iteration++;
                 if (meanSquares < bestMeanSquares) {
-                        bestMeanSquares = meanSquares;
-                        lambda /= 4.0;
-                        offsetx = currentoffsetx;
-                        offsety = currentoffsety;
+                    bestMeanSquares = meanSquares;
+                    lambda /= 4.0;
+                    offsetx = currentoffsetx;
+                    offsety = currentoffsety;
+                    this.angle = currentangle;
+                    this.scale = currentscale;
                 }
                 else {
-                        lambda *= 4.0;
+                    lambda *= 4.0;
                 }
             } while ((iteration < (10 * iterationPower - 1)) && (0.001 <= displacement));
             StaticUtility.invertGauss(hessian);
             update = StaticUtility.matrixMultiply(hessian, gradient);
-            currentoffsetx = offsetx + update[0];
-            currentoffsety = offsety + update[1];
-            meanSquares = doubleGetTranslationMeanSquaresWithoutHessian(currentoffsetx,currentoffsety);
+            currentscale = this.scale + update[0];
+            currentangle = this.angle - update[1];
+            c = Math.cos(update[1]);
+            s = Math.sin(update[1]);
+            currentoffsetx = ((offsetx + update[2]) * c - (offsety + update[3]) * s) * (1.0 + update[0]);
+            currentoffsety = ((offsetx + update[2]) * s + (offsety + update[3]) * c) * (1.0 + update[0]);
+            meanSquares = doubleGetScaledRotationMeanSquaresWithoutHessian(currentoffsetx,currentoffsety,currentangle,currentscale);
             iteration++;
             if (meanSquares < bestMeanSquares) {
                 offsetx = currentoffsetx;
                 offsety = currentoffsety;
+                this.angle = currentangle;
+                this.scale = currentscale;
             }
+        }
+        
+        /*
+         * ========================================================================================
+         * inverseMarquardtLevenbergAffineOptimization
+         * ========================================================================================
+         *
+         * Paper reference: Thévenaz et al., "A Pyramid Approach to Subpixel Registration Based
+         * on Intensity," IEEE TIP 1998, Section III-A.
+         *
+         * This implements the modified Levenberg-Marquardt optimizer for affine registration.
+         *
+         * The affine transformation maps output pixel (n, i) to source coordinates:
+         *   x' = a11*n + a12*i + tx
+         *   y' = a21*n + a22*i + ty
+         *
+         * Parameter vector: p = (a11, a12, a21, a22, tx, ty), dimension = 6.
+         *
+         * At identity: a11=1, a12=0, a21=0, a22=1, tx=0, ty=0.
+         *
+         * The optimization minimizes E(p) = (1/|Ω|) Σ [f(x) - g(T_p(x))]²
+         * using the "inverse" approach where the Jacobian is built from the SOURCE image
+         * gradients ∇f, which remain constant across iterations. This avoids recomputing
+         * the Hessian when the parameters change, as described in Section III-A of the paper.
+         *
+         * LM damping: The pseudoHessian is constructed by copying ONLY the diagonal of the
+         * Gauss-Newton Hessian H, scaled by (1+λ):
+         *   pseudoH[k][k] = (1+λ) * H[k][k]
+         * with all off-diagonal entries left at zero. This reduces the damped step to:
+         *   δp_k = g_k / ((1+λ) * H_kk)
+         * which is an independent damped gradient descent along each parameter axis.
+         * This is a deliberate simplification inherited from the original TurboReg design:
+         * - Computationally cheaper: O(n) diagonal inversion instead of O(n³) full inversion.
+         * - More numerically stable: avoids ill-conditioning from off-diagonal coupling.
+         * - For large λ (far from optimum), LM reduces to gradient descent anyway.
+         * The full Hessian (with off-diagonals) is inverted only for the FINAL undamped
+         * Gauss-Newton step after the LM loop converges.
+         *
+         * Update signs: For affine, ALL parameters live in a vector space (unlike the SE(2)
+         * group for rigid body). The update is purely additive with POSITIVE sign:
+         *   a11_new = a11 + δa11
+         *   a12_new = a12 + δa12
+         *   ...
+         *   tx_new  = tx  + δtx
+         *   ty_new  = ty  + δty
+         *
+         * This is correct because:
+         * - The gradient g_k = Σ r_i * (∂f/∂p_k) points in the direction that increases
+         *   the dot product of residual with the Jacobian column.
+         * - The Gauss-Newton step δp = H⁻¹ g directly gives the parameter increment
+         *   that reduces the least-squares error.
+         * - Unlike rigid body (where the angle update requires a MINUS sign due to the
+         *   inverse/compositional convention and subsequent SE(2) group composition),
+         *   affine parameters are simply linear coefficients with no such group structure.
+         *
+         * Contrast with rigid body:
+         * - Rigid body: angle update is SUBTRACTED (currentangle = angle - update[0])
+         *   because the angle parameterizes a rotation group, and the "inverse" Jacobian
+         *   convention means the gradient points opposite to the forward rotation direction.
+         *   The offsets are then COMPOSED through the incremental rotation matrix.
+         * - Affine: all 6 parameters are ADDED directly. No group composition is needed.
+         *   The affine matrix entries (a11, a12, a21, a22) are dimensionless linear
+         *   coefficients, and (tx, ty) are translations — all updated additively.
+         *
+         * Displacement convergence criterion:
+         *   displacement = sqrt(δtx² + δty²)
+         *                + 0.25 * diagonal * (|δa11| + |δa12| + |δa21| + |δa22|)
+         * The matrix element updates are converted to approximate pixel displacements
+         * by multiplying by 0.25 × the image diagonal. This heuristic estimates the
+         * maximum pixel displacement caused by a small change in a matrix coefficient
+         * (analogous to the 0.25*diagonal*|δθ| term in rigid body).
+         */
+        private void doubleInverseMarquardtLevenbergAffineOptimization()
+        {
+            double[] update = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0};
+            double bestMeanSquares = 0.0;
+            double meanSquares = 0.0;
+            double lambda = 1.0;
+            double displacement;
+            int iteration = 0;
+
+            // Trial parameters for each LM step
+            double currenta11;
+            double currenta12;
+            double currenta21;
+            double currenta22;
+            double currentoffsetx;
+            double currentoffsety;
+
+            /*
+             * Initial evaluation: compute E(p₀), gradient g, and Hessian H
+             * at the current parameter values. The gradient and Hessian are
+             * stored in the class fields gradient[] and hessian[][].
+             */
+            bestMeanSquares = doubleGetAffineMeanSquares(offsetx, offsety, a11, a12, a21, a22);
+            iteration++;
+
+            do {
+                /*
+                 * Construct the LM-damped pseudoHessian.
+                 * Only the diagonal is set: pseudoH[k][k] = (1+λ) * H[k][k].
+                 * Off-diagonals remain zero (the pseudoHessian arrays are reused
+                 * and the off-diagonals were never set to non-zero values).
+                 * Inverting this diagonal matrix and multiplying by the gradient
+                 * yields: δp_k = g_k / ((1+λ) * H_kk).
+                 */
+                for (int k = 0; (k < 6); k++) {
+                	Arrays.fill(pseudoHessian[k], 0.0);
+                    pseudoHessian[k][k] = (1.0 + lambda) * hessian[k][k];
+                }
+                StaticUtility.invertGauss(pseudoHessian);
+                update = StaticUtility.matrixMultiply(pseudoHessian, gradient);
+
+                /*
+                 * Compute the displacement for convergence testing.
+                 * The translational displacement is the Euclidean norm of (δtx, δty).
+                 * The matrix-element displacement is heuristically converted to pixels
+                 * by multiplying by 0.25 × image diagonal, analogous to the rigid body
+                 * angle-to-pixel conversion.
+                 */
+                /*double diag = Math.sqrt((double)(targetPyramid[pyramidIndex].width * targetPyramid[pyramidIndex].width)
+                                      + (double)(targetPyramid[pyramidIndex].height * targetPyramid[pyramidIndex].height));
+                displacement = Math.sqrt(update[4] * update[4] + update[5] * update[5])
+                             + 0.25 * diag * (Math.abs(update[0]) + Math.abs(update[1]) + Math.abs(update[2]) + Math.abs(update[3]));*/
+                
+                /*
+                 * A change δa11 causes a displacement of approximately |δa11| * |x| at pixel position x. 
+                 * The maximum |x| is approximately width/2 (measuring from center). 
+                 * Similarly, δa12 causes |δa12| * |y| where max |y| ≈ height/2. 
+                 * So a tighter heuristic would be:
+                 */
+                displacement = Math.sqrt(update[4] * update[4] + update[5] * update[5])
+                        + 0.5 * (double)targetPyramid[0].width
+                          * (Math.abs(update[0]) + Math.abs(update[2]))
+                        + 0.5 * (double)targetPyramid[0].height
+                          * (Math.abs(update[1]) + Math.abs(update[3]));
+
+                /*
+                 * Affine parameter update: purely additive, positive sign.
+                 * Unlike rigid body where angle is SUBTRACTED and offsets are COMPOSED
+                 * through a rotation matrix, affine parameters form a vector space
+                 * and are simply incremented.
+                 */
+                currenta11    = this.a11    + update[0];
+                currenta12    = this.a12    + update[1];
+                currenta21    = this.a21    + update[2];
+                currenta22    = this.a22    + update[3];
+                currentoffsetx = this.offsetx + update[4];
+                currentoffsety = this.offsety + update[5];
+
+                /*
+                 * Evaluate the MSE at the trial point. This also recomputes gradient
+                 * and Hessian for the next iteration (the "accelerated" variant from
+                 * the paper always recomputes, since the source gradients are constant
+                 * but the B-spline interpolation coordinates change).
+                 */
+                meanSquares = doubleGetAffineMeanSquares(currentoffsetx, currentoffsety,
+                                                   currenta11, currenta12, currenta21, currenta22);
+
+                iteration++;
+                if (meanSquares < bestMeanSquares) {
+                    /*
+                     * Accept the step: the MSE decreased.
+                     * Reduce λ (shift toward Gauss-Newton / larger steps).
+                     */
+                    bestMeanSquares = meanSquares;
+                    lambda /= 4.0;
+                    this.a11    = currenta11;
+                    this.a12    = currenta12;
+                    this.a21    = currenta21;
+                    this.a22    = currenta22;
+                    this.offsetx = currentoffsetx;
+                    this.offsety = currentoffsety;
+                }
+                else {
+                    /*
+                     * Reject the step: the MSE did not decrease.
+                     * Increase λ (shift toward gradient descent / smaller steps).
+                     * The gradient and Hessian from the PREVIOUS accepted point
+                     * are still valid (they were overwritten by getAffineMeanSquares
+                     * but will be recomputed at the accepted point on the next
+                     * iteration if the step is accepted).
+                     */
+                    lambda *= 4.0;
+                }
+            } while ((iteration < (10 * iterationPower - 1)) && (0.001 <= displacement));
+
+            /*
+             * Final undamped Gauss-Newton step: invert the FULL Hessian (with
+             * off-diagonals) and apply one pure quadratic step. This gives the
+             * best local quadratic approximation without LM damping.
+             * Accept only if it improves the MSE.
+             */
+            StaticUtility.invertGauss(hessian);
+            update = StaticUtility.matrixMultiply(hessian, gradient);
+
+            currenta11     = this.a11     + update[0];
+            currenta12     = this.a12     + update[1];
+            currenta21     = this.a21     + update[2];
+            currenta22     = this.a22     + update[3];
+            currentoffsetx = this.offsetx + update[4];
+            currentoffsety = this.offsety + update[5];
+
+            meanSquares = doubleGetAffineMeanSquaresWithoutHessian(currentoffsetx, currentoffsety,
+                                                              currenta11, currenta12, currenta21, currenta22);
+            iteration++;
+            if (meanSquares < bestMeanSquares) {
+                this.a11     = currenta11;
+                this.a12     = currenta12;
+                this.a21     = currenta21;
+                this.a22     = currenta22;
+                this.offsetx = currentoffsetx;
+                this.offsety = currentoffsety;
+            }
+        }
+        
+        private double getTranslationMeanSquares(int pyramidIndex, double currentoffsetx, double curentoffsety)
+        {
+        	// First reset the global values which will not be reset in the loop
+            Arrays.fill(gradient, 0.0);
+            for (int i = 0; (i < 2); i++) {
+                Arrays.fill(hessian[i], 0.0);
+            }
+            
+            // now we have the diffs let's calculate all the derived elements
+            int halfReductionSize = (int) (((sourcePyramid[pyramidIndex].width * sourcePyramid[pyramidIndex].height)+((sourcePyramid[pyramidIndex].width * sourcePyramid[pyramidIndex].height)%2))/2);
+            ByteBuffer buffer;
+            double area;
+            // calculate the MSE row-wise
+            double mse;
+            if(halfReductionSize <= maximumElementsForLocalFPTcombinedSum)
+            {                
+                uniformBSplineTransformProgramKernels[KERNEL_ftranslationErrorWithGradAndHess]
+                        .putArg(sourcePyramid[pyramidIndex].Image)
+                        .putArg(targetPyramid[pyramidIndex].Coefficient)
+                        .putArg(sourcePyramid[pyramidIndex].xGradient)
+                        .putArg(sourcePyramid[pyramidIndex].yGradient)
+                        .putArg(gradient0)
+                        .putArg(gradient1)
+                        .putArg(hessian00)
+                        .putArg(hessian01)
+                        .putArg(hessian11)
+                        .putArg(entryImageBuffer)
+                        .putArg(maskBuffer)
+                        .putArg((int)sourcePyramid[pyramidIndex].width)
+                        .putArg((int)sourcePyramid[pyramidIndex].height)
+                        .putArg((int)targetPyramid[pyramidIndex].width)
+                        .putArg((int)targetPyramid[pyramidIndex].height)
+                        .putArg((int)targetPyramid[pyramidIndex].width * 2)
+                        .putArg((int)targetPyramid[pyramidIndex].height * 2)
+                        .putArg((float)currentoffsetx)
+                        .putArg((float)curentoffsety);
+
+                int localWorkSize = (int)Math.min(uniformBSplineTransformProgramKernels[KERNEL_ftranslationErrorWithGradAndHess].getWorkGroupSize(device),blocksizeMultiplier*optimalMultiples[KERNEL_ftranslationErrorWithGradAndHess]);  // Local work size dimensions
+                int globalWorkSize = StaticUtility.roundUp(localWorkSize, optimalMultiples[KERNEL_ftranslationErrorWithGradAndHess], (int)(sourcePyramid[pyramidIndex].width*sourcePyramid[pyramidIndex].height));
+                queue.put1DRangeKernel(uniformBSplineTransformProgramKernels[KERNEL_ftranslationErrorWithGradAndHess],0,globalWorkSize,localWorkSize);
+                uniformBSplineTransformProgramKernels[KERNEL_ftranslationErrorWithGradAndHess].rewind();
+                
+                /*
+                Because each of the following kernels is synchronized by barriers on the GPU they can only be executed on a single compute device.
+                Therefore using an async queue may increase the speed by allowing multiple kernels to execute in parallel (if local memory permits)
+                */
+                localWorkSize = halfReductionSize % optimalMultiples[KERNEL_ftranslationSumInLocalMemoryCombined] == 0 ? halfReductionSize : (int)Math.min(halfReductionSize + (optimalMultiples[KERNEL_ftranslationSumInLocalMemoryCombined] - (halfReductionSize % optimalMultiples[KERNEL_ftranslationSumInLocalMemoryCombined])), maximumElementsForLocalFPTcombinedSum);
+                globalWorkSize = localWorkSize;
+                uniformBSplineTransformProgramKernels[KERNEL_ftranslationSumInLocalMemoryCombined]
+                        .putArg(maskBuffer)
+                        .putArg(entryImageBuffer)
+                        .putArg(gradient0)
+                        .putArg(gradient1)
+                        .putArg(hessian00)
+                        .putArg(hessian01)
+                        .putArg(hessian11)
+                        .putNullArg(localWorkSize*4 /*size in bytes of local mem allocation*/)
+                        .putArg((int)(sourcePyramid[pyramidIndex].width * sourcePyramid[pyramidIndex].height));
+                queue.put1DRangeKernel(uniformBSplineTransformProgramKernels[KERNEL_ftranslationSumInLocalMemoryCombined],0,globalWorkSize,localWorkSize);
+                uniformBSplineTransformProgramKernels[KERNEL_sumInLocalMemoryCombined].rewind();
+                
+                buffer = queue.putMapBuffer(maskBuffer, CLMemory.Map.READ, 0, 4, true);
+                buffer.rewind();
+                area = (double)buffer.asFloatBuffer().get();
+                queue.putUnmapMemory(maskBuffer, buffer);
+                buffer = queue.putMapBuffer(entryImageBuffer, CLMemory.Map.READ, 0, 4, true);
+                buffer.rewind();
+                mse = (double)buffer.asFloatBuffer().get();
+                queue.putUnmapMemory(entryImageBuffer, buffer);
+                buffer = queue.putMapBuffer(gradient0, CLMemory.Map.READ, 0, 4, true);
+                buffer.rewind();
+                gradient[0] = (double)buffer.asFloatBuffer().get();
+                queue.putUnmapMemory(gradient0, buffer);
+                buffer = queue.putMapBuffer(gradient1, CLMemory.Map.READ, 0, 4, true);
+                buffer.rewind();
+                gradient[1] = (double)buffer.asFloatBuffer().get();
+                queue.putUnmapMemory(gradient1, buffer);
+                buffer = queue.putMapBuffer(hessian00, CLMemory.Map.READ, 0, 4, true);
+                buffer.rewind();
+                hessian[0][0] = (double)buffer.asFloatBuffer().get();
+                queue.putUnmapMemory(hessian00, buffer);
+                buffer = queue.putMapBuffer(hessian01, CLMemory.Map.READ, 0, 4, true);
+                buffer.rewind();
+                hessian[0][1] = (double)buffer.asFloatBuffer().get();
+                queue.putUnmapMemory(hessian01, buffer);
+                buffer = queue.putMapBuffer(hessian11, CLMemory.Map.READ, 0, 4, true);
+                buffer.rewind();
+                hessian[1][1] = (double)buffer.asFloatBuffer().get();
+                queue.putUnmapMemory(hessian11, buffer);
+            }
+            else
+            {
+                
+                int nrOfBlocks = ((int)(sourcePyramid[pyramidIndex].width * sourcePyramid[pyramidIndex].height))%blockSizesParallel;
+                nrOfBlocks = nrOfBlocks == 0 ? (int)Math.min(((int)(sourcePyramid[pyramidIndex].width * sourcePyramid[pyramidIndex].height))/blockSizesParallel,maximumSumReductionBlockNr) : (int)Math.min((((int)(sourcePyramid[pyramidIndex].width * sourcePyramid[pyramidIndex].height))+(blockSizesParallel-nrOfBlocks))/blockSizesParallel,maximumSumReductionBlockNr);
+                
+                int globalWorkSize = nrOfBlocks * blockSizesParallel;
+                uniformBSplineTransformProgramKernels[KERNEL_ftranslationErrorWithGradAndHessBrent]
+                        .putArg(sourcePyramid[pyramidIndex].Image)
+                        .putArg(targetPyramid[pyramidIndex].Coefficient)
+                        .putArg(sourcePyramid[pyramidIndex].xGradient)
+                        .putArg(sourcePyramid[pyramidIndex].yGradient)
+                        .putArg(gradient0)
+                        .putArg(gradient1)
+                        .putArg(hessian00)
+                        .putArg(hessian01)
+                        .putArg(hessian11)
+                        .putArg(entryImageBuffer)
+                        .putArg(maskBuffer);
+                
+                uniformBSplineTransformProgramKernels[KERNEL_ftranslationErrorWithGradAndHessBrent]
+                        .putNullArg(blockSizesParallel*4 /*size in bytes of local mem allocation*/)
+                        .putNullArg(blockSizesParallel*4 /*size in bytes of local mem allocation*/)
+                        .putNullArg(blockSizesParallel*4 /*size in bytes of local mem allocation*/)
+                        .putNullArg(blockSizesParallel*4 /*size in bytes of local mem allocation*/)
+                        .putNullArg(blockSizesParallel*4 /*size in bytes of local mem allocation*/)
+                        .putNullArg(blockSizesParallel*4 /*size in bytes of local mem allocation*/)
+                        .putNullArg(blockSizesParallel*4 /*size in bytes of local mem allocation*/);
+                
+                uniformBSplineTransformProgramKernels[KERNEL_ftranslationErrorWithGradAndHessBrent]
+                        .putArg((int)sourcePyramid[pyramidIndex].width)
+                        .putArg((int)sourcePyramid[pyramidIndex].height)
+                        .putArg((int)targetPyramid[pyramidIndex].width)
+                        .putArg((int)targetPyramid[pyramidIndex].height);
+
+                uniformBSplineTransformProgramKernels[KERNEL_ftranslationErrorWithGradAndHessBrent]
+                        .putArg((float)currentoffsetx)
+                        .putArg((float)curentoffsety);
+               
+                uniformBSplineTransformProgramKernels[KERNEL_ftranslationErrorWithGradAndHessBrent]
+                        .putArg((int)targetPyramid[pyramidIndex].width*2)
+                        .putArg((int)targetPyramid[pyramidIndex].height*2);
+                
+                queue.put1DRangeKernel(uniformBSplineTransformProgramKernels[KERNEL_ftranslationErrorWithGradAndHessBrent],0,globalWorkSize,blockSizesParallel);
+                uniformBSplineTransformProgramKernels[KERNEL_ftranslationErrorWithGradAndHessBrent].rewind();
+                
+                //now use the in memory summations (also async) each with its own buffer to do the final reduction)
+                halfReductionSize = (int) ((nrOfBlocks+(nrOfBlocks%2))/2);
+                int localWorkSize = halfReductionSize % optimalMultiples[KERNEL_ftranslationSumInLocalMemoryCombined] == 0 ? halfReductionSize : (int)Math.min(halfReductionSize + (optimalMultiples[KERNEL_ftranslationSumInLocalMemoryCombined] - (halfReductionSize % optimalMultiples[KERNEL_ftranslationSumInLocalMemoryCombined])), maximumElementsForLocalFPTcombinedSum);
+                globalWorkSize = localWorkSize;
+                uniformBSplineTransformProgramKernels[KERNEL_ftranslationSumInLocalMemoryCombined]
+                        .putArg(gradient0)
+                        .putArg(gradient1)
+                        .putArg(hessian00)
+                        .putArg(hessian01)
+                        .putArg(hessian11)
+                        .putArg(entryImageBuffer)
+                        .putArg(maskBuffer)
+                        .putNullArg(halfReductionSize*4 /*size in bytes of local mem allocation*/)
+                        .putArg((int)(nrOfBlocks));
+                queue.put1DRangeKernel(uniformBSplineTransformProgramKernels[KERNEL_ftranslationSumInLocalMemoryCombined],0,globalWorkSize,localWorkSize);
+                uniformBSplineTransformProgramKernels[KERNEL_ftranslationSumInLocalMemoryCombined].rewind();
+                
+                buffer = queue.putMapBuffer(maskBuffer, CLMemory.Map.READ, 0, 4, true);
+                buffer.rewind();
+                area = (double)buffer.asFloatBuffer().get();
+                queue.putUnmapMemory(maskBuffer, buffer);
+                
+                buffer = queue.putMapBuffer(entryImageBuffer, CLMemory.Map.READ, 0, 4, true);
+                buffer.rewind();
+                mse = (double)buffer.asFloatBuffer().get();
+                queue.putUnmapMemory(entryImageBuffer, buffer);
+                        
+                buffer = queue.putMapBuffer(gradient0, CLMemory.Map.READ, 0, 4, true);
+                buffer.rewind();
+                gradient[0] = (double)buffer.asFloatBuffer().get();
+                queue.putUnmapMemory(gradient0, buffer);
+                        
+                buffer = queue.putMapBuffer(gradient1, CLMemory.Map.READ, 0, 4, true);
+                buffer.rewind();
+                gradient[1] = (double)buffer.asFloatBuffer().get();
+                queue.putUnmapMemory(gradient1, buffer);
+                        
+                buffer = queue.putMapBuffer(hessian00, CLMemory.Map.READ, 0, 4, true);
+                buffer.rewind();
+                hessian[0][0] = (double)buffer.asFloatBuffer().get();
+                queue.putUnmapMemory(hessian00, buffer);
+                        
+                buffer = queue.putMapBuffer(hessian01, CLMemory.Map.READ, 0, 4, true);
+                buffer.rewind();
+                hessian[0][1] = (double)buffer.asFloatBuffer().get();
+                queue.putUnmapMemory(hessian01, buffer);
+                        
+                buffer = queue.putMapBuffer(hessian11, CLMemory.Map.READ, 0, 4, true);
+                buffer.rewind();
+                hessian[1][1] = (double)buffer.asFloatBuffer().get();
+                queue.putUnmapMemory(hessian11, buffer);
+            }
+            //symmetrize hessian
+            for (int i = 1; (i < 2); i++) {
+                for (int j = 0; (j < i); j++) {
+                        hessian[i][j] = hessian[j][i];
+                }
+            }
+            return mse/area;
         }
         
         private double getRigidBodyMeanSquares(int pyramidIndex, double currentoffsetx, double curentoffsety, double currentangle)
         {
+        	// First reset the global values which will not be reset in the loop
+            Arrays.fill(gradient, 0.0);
+            for (int i = 0; (i < 3); i++) {
+                Arrays.fill(hessian[i], 0.0);
+            }
+        	
             // now we have the diffs let's calculate all the derived elements
             int halfReductionSize = (int) (((sourcePyramid[pyramidIndex].width * sourcePyramid[pyramidIndex].height)+((sourcePyramid[pyramidIndex].width * sourcePyramid[pyramidIndex].height)%2))/2);
             ByteBuffer buffer;
@@ -2118,10 +4048,10 @@ public class HybridPrecisionNGStackReg extends RegistrationAndTransformation
             else
             {
                 
-                int nrOfBlocks = ((int)(sourcePyramid[pyramidIndex].width * sourcePyramid[pyramidIndex].height))%blockSizesRigidBodyParallel;
-                nrOfBlocks = nrOfBlocks == 0 ? (int)Math.min(((int)(sourcePyramid[pyramidIndex].width * sourcePyramid[pyramidIndex].height))/blockSizesRigidBodyParallel,maximumSumReductionBlockNr) : (int)Math.min((((int)(sourcePyramid[pyramidIndex].width * sourcePyramid[pyramidIndex].height))+(blockSizesRigidBodyParallel-nrOfBlocks))/blockSizesRigidBodyParallel,maximumSumReductionBlockNr);
+                int nrOfBlocks = ((int)(sourcePyramid[pyramidIndex].width * sourcePyramid[pyramidIndex].height))%blockSizesParallel;
+                nrOfBlocks = nrOfBlocks == 0 ? (int)Math.min(((int)(sourcePyramid[pyramidIndex].width * sourcePyramid[pyramidIndex].height))/blockSizesParallel,maximumSumReductionBlockNr) : (int)Math.min((((int)(sourcePyramid[pyramidIndex].width * sourcePyramid[pyramidIndex].height))+(blockSizesParallel-nrOfBlocks))/blockSizesParallel,maximumSumReductionBlockNr);
                 
-                int globalWorkSize = nrOfBlocks * blockSizesRigidBodyParallel;
+                int globalWorkSize = nrOfBlocks * blockSizesParallel;
                 uniformBSplineTransformProgramKernels[KERNEL_rigidBodyErrorWithGradAndHessBrent]
                         .putArg(sourcePyramid[pyramidIndex].Image)
                         .putArg(targetPyramid[pyramidIndex].Coefficient)
@@ -2140,17 +4070,17 @@ public class HybridPrecisionNGStackReg extends RegistrationAndTransformation
                         .putArg(maskBuffer);
                 
                 uniformBSplineTransformProgramKernels[KERNEL_rigidBodyErrorWithGradAndHessBrent]
-                        .putNullArg(blockSizesRigidBodyParallel*4 /*size in bytes of local mem allocation*/)
-                        .putNullArg(blockSizesRigidBodyParallel*4 /*size in bytes of local mem allocation*/)
-                        .putNullArg(blockSizesRigidBodyParallel*4 /*size in bytes of local mem allocation*/)
-                        .putNullArg(blockSizesRigidBodyParallel*4 /*size in bytes of local mem allocation*/)
-                        .putNullArg(blockSizesRigidBodyParallel*4 /*size in bytes of local mem allocation*/)
-                        .putNullArg(blockSizesRigidBodyParallel*4 /*size in bytes of local mem allocation*/)
-                        .putNullArg(blockSizesRigidBodyParallel*4 /*size in bytes of local mem allocation*/)
-                        .putNullArg(blockSizesRigidBodyParallel*4 /*size in bytes of local mem allocation*/)
-                        .putNullArg(blockSizesRigidBodyParallel*4 /*size in bytes of local mem allocation*/)
-                        .putNullArg(blockSizesRigidBodyParallel*4 /*size in bytes of local mem allocation*/)
-                        .putNullArg(blockSizesRigidBodyParallel*4 /*size in bytes of local mem allocation*/);
+                        .putNullArg(blockSizesParallel*4 /*size in bytes of local mem allocation*/)
+                        .putNullArg(blockSizesParallel*4 /*size in bytes of local mem allocation*/)
+                        .putNullArg(blockSizesParallel*4 /*size in bytes of local mem allocation*/)
+                        .putNullArg(blockSizesParallel*4 /*size in bytes of local mem allocation*/)
+                        .putNullArg(blockSizesParallel*4 /*size in bytes of local mem allocation*/)
+                        .putNullArg(blockSizesParallel*4 /*size in bytes of local mem allocation*/)
+                        .putNullArg(blockSizesParallel*4 /*size in bytes of local mem allocation*/)
+                        .putNullArg(blockSizesParallel*4 /*size in bytes of local mem allocation*/)
+                        .putNullArg(blockSizesParallel*4 /*size in bytes of local mem allocation*/)
+                        .putNullArg(blockSizesParallel*4 /*size in bytes of local mem allocation*/)
+                        .putNullArg(blockSizesParallel*4 /*size in bytes of local mem allocation*/);
                 
                 uniformBSplineTransformProgramKernels[KERNEL_rigidBodyErrorWithGradAndHessBrent]
                         .putArg((int)sourcePyramid[pyramidIndex].width)
@@ -2168,7 +4098,7 @@ public class HybridPrecisionNGStackReg extends RegistrationAndTransformation
                         .putArg((int)targetPyramid[pyramidIndex].width*2)
                         .putArg((int)targetPyramid[pyramidIndex].height*2);
                 
-                queue.put1DRangeKernel(uniformBSplineTransformProgramKernels[KERNEL_rigidBodyErrorWithGradAndHessBrent],0,globalWorkSize,blockSizesRigidBodyParallel);
+                queue.put1DRangeKernel(uniformBSplineTransformProgramKernels[KERNEL_rigidBodyErrorWithGradAndHessBrent],0,globalWorkSize,blockSizesParallel);
                 uniformBSplineTransformProgramKernels[KERNEL_rigidBodyErrorWithGradAndHessBrent].rewind();
                 
                 // use in-memory summations (also async) each with its own buffer to do the final reduction)
@@ -2256,8 +4186,14 @@ public class HybridPrecisionNGStackReg extends RegistrationAndTransformation
             return mse/area;
         }
         
-        private double getTranslationMeanSquares(int pyramidIndex, double currentoffsetx, double curentoffsety)
+        private double getScaledRotationMeanSquares(int pyramidIndex, double currentoffsetx, double curentoffsety, double currentangle, double currentscale)
         {
+        	// First reset the global values which will not be reset in the loop
+            Arrays.fill(gradient, 0.0);
+            for (int i = 0; (i < 4); i++) {
+                Arrays.fill(hessian[i], 0.0);
+            }
+            
             // now we have the diffs let's calculate all the derived elements
             int halfReductionSize = (int) (((sourcePyramid[pyramidIndex].width * sourcePyramid[pyramidIndex].height)+((sourcePyramid[pyramidIndex].width * sourcePyramid[pyramidIndex].height)%2))/2);
             ByteBuffer buffer;
@@ -2266,16 +4202,25 @@ public class HybridPrecisionNGStackReg extends RegistrationAndTransformation
             double mse;
             if(halfReductionSize <= maximumElementsForLocalFPTcombinedSum)
             {                
-                uniformBSplineTransformProgramKernels[KERNEL_ftranslationErrorWithGradAndHess]
+                uniformBSplineTransformProgramKernels[KERNEL_fscaledRotationErrorWithGradAndHess]
                         .putArg(sourcePyramid[pyramidIndex].Image)
                         .putArg(targetPyramid[pyramidIndex].Coefficient)
                         .putArg(sourcePyramid[pyramidIndex].xGradient)
                         .putArg(sourcePyramid[pyramidIndex].yGradient)
                         .putArg(gradient0)
                         .putArg(gradient1)
+                        .putArg(gradient2)
+                        .putArg(gradient3)
                         .putArg(hessian00)
                         .putArg(hessian01)
+                        .putArg(hessian02)
+                        .putArg(hessian03)
                         .putArg(hessian11)
+                        .putArg(hessian12)
+                        .putArg(hessian13)
+                        .putArg(hessian22)
+                        .putArg(hessian23)
+                        .putArg(hessian33)
                         .putArg(entryImageBuffer)
                         .putArg(maskBuffer)
                         .putArg((int)sourcePyramid[pyramidIndex].width)
@@ -2285,31 +4230,43 @@ public class HybridPrecisionNGStackReg extends RegistrationAndTransformation
                         .putArg((int)targetPyramid[pyramidIndex].width * 2)
                         .putArg((int)targetPyramid[pyramidIndex].height * 2)
                         .putArg((float)currentoffsetx)
-                        .putArg((float)curentoffsety);
+                        .putArg((float)curentoffsety)
+                        .putArg((float)Math.cos(currentangle))
+                        .putArg((float)-Math.sin(currentangle))
+                        .putArg((float)currentscale);
 
-                int localWorkSize = (int)Math.min(uniformBSplineTransformProgramKernels[KERNEL_ftranslationErrorWithGradAndHess].getWorkGroupSize(device),blocksizeMultiplier*optimalMultiples[KERNEL_ftranslationErrorWithGradAndHess]);  // Local work size dimensions
-                int globalWorkSize = StaticUtility.roundUp(localWorkSize, optimalMultiples[KERNEL_ftranslationErrorWithGradAndHess], (int)(sourcePyramid[pyramidIndex].width*sourcePyramid[pyramidIndex].height));
-                queue.put1DRangeKernel(uniformBSplineTransformProgramKernels[KERNEL_ftranslationErrorWithGradAndHess],0,globalWorkSize,localWorkSize);
-                uniformBSplineTransformProgramKernels[KERNEL_ftranslationErrorWithGradAndHess].rewind();
+                int localWorkSize = (int)Math.min(uniformBSplineTransformProgramKernels[KERNEL_fscaledRotationErrorWithGradAndHess].getWorkGroupSize(device),blocksizeMultiplier*optimalMultiples[KERNEL_fscaledRotationErrorWithGradAndHess]);  // Local work size dimensions
+                int globalWorkSize = StaticUtility.roundUp(localWorkSize, optimalMultiples[KERNEL_fscaledRotationErrorWithGradAndHess], (int)(sourcePyramid[pyramidIndex].width*sourcePyramid[pyramidIndex].height));
+                queue.put1DRangeKernel(uniformBSplineTransformProgramKernels[KERNEL_fscaledRotationErrorWithGradAndHess],0,globalWorkSize,localWorkSize);
+                uniformBSplineTransformProgramKernels[KERNEL_fscaledRotationErrorWithGradAndHess].rewind();
                 
                 /*
                 Because each of the following kernels is synchronized by barriers on the GPU they can only be executed on a single compute device.
-                Therefore using an async queue may increase the speed by allowing multiple kernels to execute in parallel (if local memory permits)
+                Therefore, using an async queue may increase the speed by allowing multiple kernels to execute in parallel (if local memory permits)
                 */
-                localWorkSize = halfReductionSize % optimalMultiples[KERNEL_ftranslationSumInLocalMemoryCombined] == 0 ? halfReductionSize : (int)Math.min(halfReductionSize + (optimalMultiples[KERNEL_ftranslationSumInLocalMemoryCombined] - (halfReductionSize % optimalMultiples[KERNEL_ftranslationSumInLocalMemoryCombined])), maximumElementsForLocalFPTcombinedSum);
+                localWorkSize = halfReductionSize % optimalMultiples[KERNEL_fscaledRotationSumInLocalMemoryCombined] == 0 ? halfReductionSize : (int)Math.min(halfReductionSize + (optimalMultiples[KERNEL_fscaledRotationSumInLocalMemoryCombined] - (halfReductionSize % optimalMultiples[KERNEL_fscaledRotationSumInLocalMemoryCombined])), maximumElementsForLocalFPTcombinedSum);
                 globalWorkSize = localWorkSize;
-                uniformBSplineTransformProgramKernels[KERNEL_ftranslationSumInLocalMemoryCombined]
+                uniformBSplineTransformProgramKernels[KERNEL_fscaledRotationSumInLocalMemoryCombined]
                         .putArg(maskBuffer)
                         .putArg(entryImageBuffer)
                         .putArg(gradient0)
                         .putArg(gradient1)
+                        .putArg(gradient2)
+                        .putArg(gradient3)
                         .putArg(hessian00)
                         .putArg(hessian01)
+                        .putArg(hessian02)
+                        .putArg(hessian03)
                         .putArg(hessian11)
+                        .putArg(hessian12)
+                        .putArg(hessian13)
+                        .putArg(hessian22)
+                        .putArg(hessian23)
+                        .putArg(hessian33)
                         .putNullArg(localWorkSize*4 /*size in bytes of local mem allocation*/)
                         .putArg((int)(sourcePyramid[pyramidIndex].width * sourcePyramid[pyramidIndex].height));
-                queue.put1DRangeKernel(uniformBSplineTransformProgramKernels[KERNEL_ftranslationSumInLocalMemoryCombined],0,globalWorkSize,localWorkSize);
-                uniformBSplineTransformProgramKernels[KERNEL_sumInLocalMemoryCombined].rewind();
+                queue.put1DRangeKernel(uniformBSplineTransformProgramKernels[KERNEL_fscaledRotationSumInLocalMemoryCombined],0,globalWorkSize,localWorkSize);
+                uniformBSplineTransformProgramKernels[KERNEL_fscaledRotationSumInLocalMemoryCombined].rewind();
                 
                 buffer = queue.putMapBuffer(maskBuffer, CLMemory.Map.READ, 0, 4, true);
                 buffer.rewind();
@@ -2327,6 +4284,14 @@ public class HybridPrecisionNGStackReg extends RegistrationAndTransformation
                 buffer.rewind();
                 gradient[1] = (double)buffer.asFloatBuffer().get();
                 queue.putUnmapMemory(gradient1, buffer);
+                buffer = queue.putMapBuffer(gradient2, CLMemory.Map.READ, 0, 4, true);
+                buffer.rewind();
+                gradient[2] = (double)buffer.asFloatBuffer().get();
+                queue.putUnmapMemory(gradient2, buffer);
+                buffer = queue.putMapBuffer(gradient3, CLMemory.Map.READ, 0, 4, true);
+                buffer.rewind();
+                gradient[3] = (double)buffer.asFloatBuffer().get();
+                queue.putUnmapMemory(gradient3, buffer);
                 buffer = queue.putMapBuffer(hessian00, CLMemory.Map.READ, 0, 4, true);
                 buffer.rewind();
                 hessian[0][0] = (double)buffer.asFloatBuffer().get();
@@ -2335,73 +4300,126 @@ public class HybridPrecisionNGStackReg extends RegistrationAndTransformation
                 buffer.rewind();
                 hessian[0][1] = (double)buffer.asFloatBuffer().get();
                 queue.putUnmapMemory(hessian01, buffer);
+                buffer = queue.putMapBuffer(hessian02, CLMemory.Map.READ, 0, 4, true);
+                buffer.rewind();
+                hessian[0][2] = (double)buffer.asFloatBuffer().get();
+                queue.putUnmapMemory(hessian02, buffer);
+                buffer = queue.putMapBuffer(hessian03, CLMemory.Map.READ, 0, 4, true);
+                buffer.rewind();
+                hessian[0][3] = (double)buffer.asFloatBuffer().get();
+                queue.putUnmapMemory(hessian03, buffer);
                 buffer = queue.putMapBuffer(hessian11, CLMemory.Map.READ, 0, 4, true);
                 buffer.rewind();
                 hessian[1][1] = (double)buffer.asFloatBuffer().get();
                 queue.putUnmapMemory(hessian11, buffer);
+                buffer = queue.putMapBuffer(hessian12, CLMemory.Map.READ, 0, 4, true);
+                buffer.rewind();
+                hessian[1][2] = (double)buffer.asFloatBuffer().get();
+                queue.putUnmapMemory(hessian12, buffer);
+                buffer = queue.putMapBuffer(hessian13, CLMemory.Map.READ, 0, 4, true);
+                buffer.rewind();
+                hessian[1][3] = (double)buffer.asFloatBuffer().get();
+                queue.putUnmapMemory(hessian13, buffer);
+                buffer = queue.putMapBuffer(hessian22, CLMemory.Map.READ, 0, 4, true);
+                buffer.rewind();
+                hessian[2][2] = (double)buffer.asFloatBuffer().get();
+                queue.putUnmapMemory(hessian22, buffer);
+                buffer = queue.putMapBuffer(hessian23, CLMemory.Map.READ, 0, 4, true);
+                buffer.rewind();
+                hessian[2][3] = (double)buffer.asFloatBuffer().get();
+                queue.putUnmapMemory(hessian23, buffer);
+                buffer = queue.putMapBuffer(hessian33, CLMemory.Map.READ, 0, 4, true);
+                buffer.rewind();
+                hessian[3][3] = (double)buffer.asFloatBuffer().get();
+                queue.putUnmapMemory(hessian33, buffer);
             }
             else
             {
                 
-                int nrOfBlocks = ((int)(sourcePyramid[pyramidIndex].width * sourcePyramid[pyramidIndex].height))%blockSizesRigidBodyParallel;
-                nrOfBlocks = nrOfBlocks == 0 ? (int)Math.min(((int)(sourcePyramid[pyramidIndex].width * sourcePyramid[pyramidIndex].height))/blockSizesRigidBodyParallel,maximumSumReductionBlockNr) : (int)Math.min((((int)(sourcePyramid[pyramidIndex].width * sourcePyramid[pyramidIndex].height))+(blockSizesRigidBodyParallel-nrOfBlocks))/blockSizesRigidBodyParallel,maximumSumReductionBlockNr);
+                int nrOfBlocks = ((int)(sourcePyramid[pyramidIndex].width * sourcePyramid[pyramidIndex].height))%blockSizesParallel;
+                nrOfBlocks = nrOfBlocks == 0 ? (int)Math.min(((int)(sourcePyramid[pyramidIndex].width * sourcePyramid[pyramidIndex].height))/blockSizesParallel,maximumSumReductionBlockNr) : (int)Math.min((((int)(sourcePyramid[pyramidIndex].width * sourcePyramid[pyramidIndex].height))+(blockSizesParallel-nrOfBlocks))/blockSizesParallel,maximumSumReductionBlockNr);
                 
-                int globalWorkSize = nrOfBlocks * blockSizesRigidBodyParallel;
-                uniformBSplineTransformProgramKernels[KERNEL_ftranslationErrorWithGradAndHessBrent]
+                int globalWorkSize = nrOfBlocks * blockSizesParallel;
+                uniformBSplineTransformProgramKernels[KERNEL_fscaledRotationErrorWithGradAndHessBrent]
                         .putArg(sourcePyramid[pyramidIndex].Image)
                         .putArg(targetPyramid[pyramidIndex].Coefficient)
                         .putArg(sourcePyramid[pyramidIndex].xGradient)
                         .putArg(sourcePyramid[pyramidIndex].yGradient)
                         .putArg(gradient0)
                         .putArg(gradient1)
+                        .putArg(gradient2)
                         .putArg(hessian00)
                         .putArg(hessian01)
+                        .putArg(hessian02)
                         .putArg(hessian11)
+                        .putArg(hessian12)
+                        .putArg(hessian22)
                         .putArg(entryImageBuffer)
                         .putArg(maskBuffer);
                 
-                uniformBSplineTransformProgramKernels[KERNEL_ftranslationErrorWithGradAndHessBrent]
-                        .putNullArg(blockSizesRigidBodyParallel*4 /*size in bytes of local mem allocation*/)
-                        .putNullArg(blockSizesRigidBodyParallel*4 /*size in bytes of local mem allocation*/)
-                        .putNullArg(blockSizesRigidBodyParallel*4 /*size in bytes of local mem allocation*/)
-                        .putNullArg(blockSizesRigidBodyParallel*4 /*size in bytes of local mem allocation*/)
-                        .putNullArg(blockSizesRigidBodyParallel*4 /*size in bytes of local mem allocation*/)
-                        .putNullArg(blockSizesRigidBodyParallel*4 /*size in bytes of local mem allocation*/)
-                        .putNullArg(blockSizesRigidBodyParallel*4 /*size in bytes of local mem allocation*/);
+                uniformBSplineTransformProgramKernels[KERNEL_fscaledRotationErrorWithGradAndHessBrent]
+                        .putNullArg(blockSizesParallel*4 /*size in bytes of local mem allocation*/)
+                        .putNullArg(blockSizesParallel*4 /*size in bytes of local mem allocation*/)
+                        .putNullArg(blockSizesParallel*4 /*size in bytes of local mem allocation*/)
+                        .putNullArg(blockSizesParallel*4 /*size in bytes of local mem allocation*/)
+                        .putNullArg(blockSizesParallel*4 /*size in bytes of local mem allocation*/)
+                        .putNullArg(blockSizesParallel*4 /*size in bytes of local mem allocation*/)
+                        .putNullArg(blockSizesParallel*4 /*size in bytes of local mem allocation*/)
+                        .putNullArg(blockSizesParallel*4 /*size in bytes of local mem allocation*/)
+                        .putNullArg(blockSizesParallel*4 /*size in bytes of local mem allocation*/)
+                        .putNullArg(blockSizesParallel*4 /*size in bytes of local mem allocation*/)
+                        .putNullArg(blockSizesParallel*4 /*size in bytes of local mem allocation*/)
+                        .putNullArg(blockSizesParallel*4 /*size in bytes of local mem allocation*/)
+                        .putNullArg(blockSizesParallel*4 /*size in bytes of local mem allocation*/)
+                        .putNullArg(blockSizesParallel*4 /*size in bytes of local mem allocation*/)
+                        .putNullArg(blockSizesParallel*4 /*size in bytes of local mem allocation*/)
+                        .putNullArg(blockSizesParallel*4 /*size in bytes of local mem allocation*/);
                 
-                uniformBSplineTransformProgramKernels[KERNEL_ftranslationErrorWithGradAndHessBrent]
+                uniformBSplineTransformProgramKernels[KERNEL_fscaledRotationErrorWithGradAndHessBrent]
                         .putArg((int)sourcePyramid[pyramidIndex].width)
                         .putArg((int)sourcePyramid[pyramidIndex].height)
                         .putArg((int)targetPyramid[pyramidIndex].width)
                         .putArg((int)targetPyramid[pyramidIndex].height);
 
-                uniformBSplineTransformProgramKernels[KERNEL_ftranslationErrorWithGradAndHessBrent]
+                uniformBSplineTransformProgramKernels[KERNEL_fscaledRotationErrorWithGradAndHessBrent]
                         .putArg((float)currentoffsetx)
-                        .putArg((float)curentoffsety);
+                        .putArg((float)curentoffsety)
+                        .putArg((float)Math.cos(currentangle))
+                        .putArg((float)-Math.sin(currentangle))
+                        .putArg((float)currentscale);
                
-                uniformBSplineTransformProgramKernels[KERNEL_ftranslationErrorWithGradAndHessBrent]
+                uniformBSplineTransformProgramKernels[KERNEL_fscaledRotationErrorWithGradAndHessBrent]
                         .putArg((int)targetPyramid[pyramidIndex].width*2)
                         .putArg((int)targetPyramid[pyramidIndex].height*2);
                 
-                queue.put1DRangeKernel(uniformBSplineTransformProgramKernels[KERNEL_ftranslationErrorWithGradAndHessBrent],0,globalWorkSize,blockSizesRigidBodyParallel);
-                uniformBSplineTransformProgramKernels[KERNEL_ftranslationErrorWithGradAndHessBrent].rewind();
+                queue.put1DRangeKernel(uniformBSplineTransformProgramKernels[KERNEL_fscaledRotationErrorWithGradAndHessBrent],0,globalWorkSize,blockSizesParallel);
+                uniformBSplineTransformProgramKernels[KERNEL_fscaledRotationErrorWithGradAndHessBrent].rewind();
                 
-                //now use the in memory summations (also async) each with its own buffer to do the final reduction)
+                // use in-memory summations (also async) each with its own buffer to do the final reduction)
                 halfReductionSize = (int) ((nrOfBlocks+(nrOfBlocks%2))/2);
-                int localWorkSize = halfReductionSize % optimalMultiples[KERNEL_ftranslationSumInLocalMemoryCombined] == 0 ? halfReductionSize : (int)Math.min(halfReductionSize + (optimalMultiples[KERNEL_ftranslationSumInLocalMemoryCombined] - (halfReductionSize % optimalMultiples[KERNEL_ftranslationSumInLocalMemoryCombined])), maximumElementsForLocalFPTcombinedSum);
+                int localWorkSize = halfReductionSize % optimalMultiples[KERNEL_fscaledRotationSumInLocalMemoryCombined] == 0 ? halfReductionSize : (int)Math.min(halfReductionSize + (optimalMultiples[KERNEL_fscaledRotationSumInLocalMemoryCombined] - (halfReductionSize % optimalMultiples[KERNEL_fscaledRotationSumInLocalMemoryCombined])), maximumElementsForLocalFPTcombinedSum);
                 globalWorkSize = localWorkSize;
-                uniformBSplineTransformProgramKernels[KERNEL_ftranslationSumInLocalMemoryCombined]
-                        .putArg(gradient0)
+                uniformBSplineTransformProgramKernels[KERNEL_fscaledRotationSumInLocalMemoryCombined]
+                		.putArg(gradient0)
                         .putArg(gradient1)
+                        .putArg(gradient2)
+                        .putArg(gradient3)
                         .putArg(hessian00)
                         .putArg(hessian01)
+                        .putArg(hessian02)
+                        .putArg(hessian03)
                         .putArg(hessian11)
+                        .putArg(hessian12)
+                        .putArg(hessian13)
+                        .putArg(hessian22)
+                        .putArg(hessian23)
+                        .putArg(hessian33)
                         .putArg(entryImageBuffer)
                         .putArg(maskBuffer)
                         .putNullArg(halfReductionSize*4 /*size in bytes of local mem allocation*/)
                         .putArg((int)(nrOfBlocks));
-                queue.put1DRangeKernel(uniformBSplineTransformProgramKernels[KERNEL_ftranslationSumInLocalMemoryCombined],0,globalWorkSize,localWorkSize);
-                uniformBSplineTransformProgramKernels[KERNEL_ftranslationSumInLocalMemoryCombined].rewind();
+                queue.put1DRangeKernel(uniformBSplineTransformProgramKernels[KERNEL_fscaledRotationSumInLocalMemoryCombined],0,globalWorkSize,localWorkSize);
+                uniformBSplineTransformProgramKernels[KERNEL_fscaledRotationSumInLocalMemoryCombined].rewind();
                 
                 buffer = queue.putMapBuffer(maskBuffer, CLMemory.Map.READ, 0, 4, true);
                 buffer.rewind();
@@ -2423,6 +4441,16 @@ public class HybridPrecisionNGStackReg extends RegistrationAndTransformation
                 gradient[1] = (double)buffer.asFloatBuffer().get();
                 queue.putUnmapMemory(gradient1, buffer);
                         
+                buffer = queue.putMapBuffer(gradient2, CLMemory.Map.READ, 0, 4, true);
+                buffer.rewind();
+                gradient[2] = (double)buffer.asFloatBuffer().get();
+                queue.putUnmapMemory(gradient2, buffer);
+                
+                buffer = queue.putMapBuffer(gradient3, CLMemory.Map.READ, 0, 4, true);
+                buffer.rewind();
+                gradient[3] = (double)buffer.asFloatBuffer().get();
+                queue.putUnmapMemory(gradient3, buffer);
+                        
                 buffer = queue.putMapBuffer(hessian00, CLMemory.Map.READ, 0, 4, true);
                 buffer.rewind();
                 hessian[0][0] = (double)buffer.asFloatBuffer().get();
@@ -2433,13 +4461,592 @@ public class HybridPrecisionNGStackReg extends RegistrationAndTransformation
                 hessian[0][1] = (double)buffer.asFloatBuffer().get();
                 queue.putUnmapMemory(hessian01, buffer);
                         
+                buffer = queue.putMapBuffer(hessian02, CLMemory.Map.READ, 0, 4, true);
+                buffer.rewind();
+                hessian[0][2] = (double)buffer.asFloatBuffer().get();
+                queue.putUnmapMemory(hessian02, buffer);
+                
+                buffer = queue.putMapBuffer(hessian03, CLMemory.Map.READ, 0, 4, true);
+                buffer.rewind();
+                hessian[0][3] = (double)buffer.asFloatBuffer().get();
+                queue.putUnmapMemory(hessian03, buffer);
+                        
                 buffer = queue.putMapBuffer(hessian11, CLMemory.Map.READ, 0, 4, true);
                 buffer.rewind();
                 hessian[1][1] = (double)buffer.asFloatBuffer().get();
                 queue.putUnmapMemory(hessian11, buffer);
+                        
+                buffer = queue.putMapBuffer(hessian12, CLMemory.Map.READ, 0, 4, true);
+                buffer.rewind();
+                hessian[1][2] = (double)buffer.asFloatBuffer().get();
+                queue.putUnmapMemory(hessian12, buffer);
+                
+                buffer = queue.putMapBuffer(hessian13, CLMemory.Map.READ, 0, 4, true);
+                buffer.rewind();
+                hessian[1][3] = (double)buffer.asFloatBuffer().get();
+                queue.putUnmapMemory(hessian13, buffer);
+                        
+                buffer = queue.putMapBuffer(hessian22, CLMemory.Map.READ, 0, 4, true);
+                buffer.rewind();
+                hessian[2][2] = (double)buffer.asFloatBuffer().get();
+                queue.putUnmapMemory(hessian22, buffer);
+                
+                buffer = queue.putMapBuffer(hessian23, CLMemory.Map.READ, 0, 4, true);
+                buffer.rewind();
+                hessian[2][3] = (double)buffer.asFloatBuffer().get();
+                queue.putUnmapMemory(hessian23, buffer);
+                
+                buffer = queue.putMapBuffer(hessian33, CLMemory.Map.READ, 0, 4, true);
+                buffer.rewind();
+                hessian[3][3] = (double)buffer.asFloatBuffer().get();
+                queue.putUnmapMemory(hessian33, buffer);
             }
             //symmetrize hessian
-            for (int i = 1; (i < 2); i++) {
+            for (int i = 1; (i < 4); i++) {
+                for (int j = 0; (j < i); j++) {
+                        hessian[i][j] = hessian[j][i];
+                }
+            }
+            return mse/area;
+        }
+        
+        private double getAffineMeanSquares(int pyramidIndex, double currentoffsetx, double curentoffsety,
+                double currenta11, double currenta12,
+                double currenta21, double currenta22)
+        {
+        	// First reset the global values which will not be reset in the loop
+            Arrays.fill(gradient, 0.0);
+            for (int i = 0; (i < 6); i++) {
+                Arrays.fill(hessian[i], 0.0);
+            }
+            
+            // now we have the diffs let's calculate all the derived elements
+            int halfReductionSize = (int) (((sourcePyramid[pyramidIndex].width * sourcePyramid[pyramidIndex].height)+((sourcePyramid[pyramidIndex].width * sourcePyramid[pyramidIndex].height)%2))/2);
+            ByteBuffer buffer;
+            double area;
+            // calculate the MSE row-wise
+            double mse;
+            if(halfReductionSize <= maximumElementsForLocalFPTcombinedSum)
+            {                
+                uniformBSplineTransformProgramKernels[KERNEL_faffineErrorWithGradAndHess]
+                        .putArg(sourcePyramid[pyramidIndex].Image)
+                        .putArg(targetPyramid[pyramidIndex].Coefficient)
+                        .putArg(sourcePyramid[pyramidIndex].xGradient)
+                        .putArg(sourcePyramid[pyramidIndex].yGradient)
+                        .putArg(maskBuffer)
+                        .putArg(gradient0)
+                        .putArg(gradient1)
+                        .putArg(gradient2)
+                        .putArg(gradient3)
+                        .putArg(gradient4)
+                        .putArg(gradient5)
+                        .putArg(hessian00)
+                        .putArg(hessian01)
+                        .putArg(hessian02)
+                        .putArg(hessian03)
+                        .putArg(hessian04)
+                        .putArg(hessian05)
+                        .putArg(hessian11)
+                        .putArg(hessian12)
+                        .putArg(hessian13)
+                        .putArg(hessian14)
+                        .putArg(hessian15)
+                        .putArg(hessian22)
+                        .putArg(hessian23)
+                        .putArg(hessian24)
+                        .putArg(hessian25)
+                        .putArg(hessian33)
+                        .putArg(hessian34)
+                        .putArg(hessian35)
+                        .putArg(hessian44)
+                        .putArg(hessian45)
+                        .putArg(hessian55)
+                        .putArg(entryImageBuffer)
+                        .putArg((int)sourcePyramid[pyramidIndex].width)
+                        .putArg((int)sourcePyramid[pyramidIndex].height)
+                        .putArg((int)targetPyramid[pyramidIndex].width)
+                        .putArg((int)targetPyramid[pyramidIndex].height)
+                        .putArg((int)targetPyramid[pyramidIndex].width * 2)
+                        .putArg((int)targetPyramid[pyramidIndex].height * 2)
+                        .putArg((float)currentoffsetx)
+                        .putArg((float)curentoffsety)
+                        .putArg((float)currenta11)
+                        .putArg((float)currenta12)
+                        .putArg((float)currenta21)
+                        .putArg((float)currenta22);
+
+                int localWorkSize = (int)Math.min(uniformBSplineTransformProgramKernels[KERNEL_faffineErrorWithGradAndHess].getWorkGroupSize(device),blocksizeMultiplier*optimalMultiples[KERNEL_faffineErrorWithGradAndHess]);  // Local work size dimensions
+                int globalWorkSize = StaticUtility.roundUp(localWorkSize, optimalMultiples[KERNEL_faffineErrorWithGradAndHess], (int)(sourcePyramid[pyramidIndex].width*sourcePyramid[pyramidIndex].height));
+                queue.put1DRangeKernel(uniformBSplineTransformProgramKernels[KERNEL_faffineErrorWithGradAndHess],0,globalWorkSize,localWorkSize);
+                uniformBSplineTransformProgramKernels[KERNEL_faffineErrorWithGradAndHess].rewind();
+                
+                /*
+                Because each of the following kernels is synchronized by barriers on the GPU they can only be executed on a single compute device.
+                Therefore, using an async queue may increase the speed by allowing multiple kernels to execute in parallel (if local memory permits)
+                */
+                localWorkSize = halfReductionSize % optimalMultiples[KERNEL_faffineSumInLocalMemoryCombined] == 0 ? halfReductionSize : (int)Math.min(halfReductionSize + (optimalMultiples[KERNEL_faffineSumInLocalMemoryCombined] - (halfReductionSize % optimalMultiples[KERNEL_faffineSumInLocalMemoryCombined])), maximumElementsForLocalFPTcombinedSum);
+                globalWorkSize = localWorkSize;
+                uniformBSplineTransformProgramKernels[KERNEL_faffineSumInLocalMemoryCombined]
+                		.putArg(maskBuffer)
+                        .putArg(entryImageBuffer)
+                        .putArg(gradient0)
+                        .putArg(gradient1)
+                        .putArg(gradient2)
+                        .putArg(gradient3)
+                        .putArg(gradient4)
+                        .putArg(gradient5)
+                        .putArg(hessian00)
+                        .putArg(hessian01)
+                        .putArg(hessian02)
+                        .putArg(hessian03)
+                        .putArg(hessian04)
+                        .putArg(hessian05)
+                        .putArg(hessian11)
+                        .putArg(hessian12)
+                        .putArg(hessian13)
+                        .putArg(hessian14)
+                        .putArg(hessian15)
+                        .putArg(hessian22)
+                        .putArg(hessian23)
+                        .putArg(hessian24)
+                        .putArg(hessian25)
+                        .putArg(hessian33)
+                        .putArg(hessian34)
+                        .putArg(hessian35)
+                        .putArg(hessian44)
+                        .putArg(hessian45)
+                        .putArg(hessian55)
+                        .putNullArg(localWorkSize*4 /*size in bytes of local mem allocation*/)
+                        .putArg((int)(sourcePyramid[pyramidIndex].width * sourcePyramid[pyramidIndex].height));
+                queue.put1DRangeKernel(uniformBSplineTransformProgramKernels[KERNEL_faffineSumInLocalMemoryCombined],0,globalWorkSize,localWorkSize);
+                uniformBSplineTransformProgramKernels[KERNEL_faffineSumInLocalMemoryCombined].rewind();
+                
+              //TODO: the implicit if's for float/double can be reduced by separating the cases into two blocks using a single if statement
+                buffer = queue.putMapBuffer(maskBuffer, CLMemory.Map.READ, 0, 4, true);
+                buffer.rewind();
+                area = (double)buffer.asFloatBuffer().get();
+                queue.putUnmapMemory(maskBuffer, buffer);
+                
+                buffer = queue.putMapBuffer(entryImageBuffer, CLMemory.Map.READ, 0, 4, true);
+                buffer.rewind();
+                mse = (double)buffer.asFloatBuffer().get();
+                queue.putUnmapMemory(entryImageBuffer, buffer);
+                
+                buffer = queue.putMapBuffer(gradient0, CLMemory.Map.READ, 0, 4, true);
+                buffer.rewind();
+                gradient[0] = (double)buffer.asFloatBuffer().get();
+                queue.putUnmapMemory(gradient0, buffer);
+                
+                buffer = queue.putMapBuffer(gradient1, CLMemory.Map.READ, 0, 4, true);
+                buffer.rewind();
+                gradient[1] = (double)buffer.asFloatBuffer().get();
+                queue.putUnmapMemory(gradient1, buffer);
+                
+                buffer = queue.putMapBuffer(gradient2, CLMemory.Map.READ, 0, 4, true);
+                buffer.rewind();
+                gradient[2] = (double)buffer.asFloatBuffer().get();
+                queue.putUnmapMemory(gradient2, buffer);
+                
+                buffer = queue.putMapBuffer(gradient3, CLMemory.Map.READ, 0, 4, true);
+                buffer.rewind();
+                gradient[3] = (double)buffer.asFloatBuffer().get();
+                queue.putUnmapMemory(gradient3, buffer);
+                
+                buffer = queue.putMapBuffer(gradient4, CLMemory.Map.READ, 0, 4, true);
+                buffer.rewind();
+                gradient[4] = (double)buffer.asFloatBuffer().get();
+                queue.putUnmapMemory(gradient4, buffer);
+                
+                buffer = queue.putMapBuffer(gradient5, CLMemory.Map.READ, 0, 4, true);
+                buffer.rewind();
+                gradient[5] = (double)buffer.asFloatBuffer().get();
+                queue.putUnmapMemory(gradient5, buffer);
+                
+                buffer = queue.putMapBuffer(hessian00, CLMemory.Map.READ, 0, 4, true);
+                buffer.rewind();
+                hessian[0][0] = (double)buffer.asFloatBuffer().get();
+                queue.putUnmapMemory(hessian00, buffer);
+                
+                buffer = queue.putMapBuffer(hessian01, CLMemory.Map.READ, 0, 4, true);
+                buffer.rewind();
+                hessian[0][1] = (double)buffer.asFloatBuffer().get();
+                queue.putUnmapMemory(hessian01, buffer);
+                
+                buffer = queue.putMapBuffer(hessian02, CLMemory.Map.READ, 0, 4, true);
+                buffer.rewind();
+                hessian[0][2] = (double)buffer.asFloatBuffer().get();
+                queue.putUnmapMemory(hessian02, buffer);
+                
+                buffer = queue.putMapBuffer(hessian03, CLMemory.Map.READ, 0, 4, true);
+                buffer.rewind();
+                hessian[0][3] = (double)buffer.asFloatBuffer().get();
+                queue.putUnmapMemory(hessian03, buffer);
+                
+                buffer = queue.putMapBuffer(hessian04, CLMemory.Map.READ, 0, 4, true);
+                buffer.rewind();
+                hessian[0][4] = (double)buffer.asFloatBuffer().get();
+                queue.putUnmapMemory(hessian04, buffer);
+                
+                buffer = queue.putMapBuffer(hessian05, CLMemory.Map.READ, 0, 4, true);
+                buffer.rewind();
+                hessian[0][5] = (double)buffer.asFloatBuffer().get();
+                queue.putUnmapMemory(hessian05, buffer);
+                
+                buffer = queue.putMapBuffer(hessian11, CLMemory.Map.READ, 0, 4, true);
+                buffer.rewind();
+                hessian[1][1] = (double)buffer.asFloatBuffer().get();
+                queue.putUnmapMemory(hessian11, buffer);
+                
+                buffer = queue.putMapBuffer(hessian12, CLMemory.Map.READ, 0, 4, true);
+                buffer.rewind();
+                hessian[1][2] = (double)buffer.asFloatBuffer().get();
+                queue.putUnmapMemory(hessian12, buffer);
+                
+                buffer = queue.putMapBuffer(hessian13, CLMemory.Map.READ, 0, 4, true);
+                buffer.rewind();
+                hessian[1][3] = (double)buffer.asFloatBuffer().get();
+                queue.putUnmapMemory(hessian13, buffer);
+                
+                buffer = queue.putMapBuffer(hessian14, CLMemory.Map.READ, 0, 4, true);
+                buffer.rewind();
+                hessian[1][4] = (double)buffer.asFloatBuffer().get();
+                queue.putUnmapMemory(hessian14, buffer);
+                
+                buffer = queue.putMapBuffer(hessian15, CLMemory.Map.READ, 0, 4, true);
+                buffer.rewind();
+                hessian[1][5] = (double)buffer.asFloatBuffer().get();
+                queue.putUnmapMemory(hessian15, buffer);
+                
+                buffer = queue.putMapBuffer(hessian22, CLMemory.Map.READ, 0, 4, true);
+                buffer.rewind();
+                hessian[2][2] = (double)buffer.asFloatBuffer().get();
+                queue.putUnmapMemory(hessian22, buffer);
+                
+                buffer = queue.putMapBuffer(hessian23, CLMemory.Map.READ, 0, 4, true);
+                buffer.rewind();
+                hessian[2][3] = (double)buffer.asFloatBuffer().get();
+                queue.putUnmapMemory(hessian23, buffer);
+                
+                buffer = queue.putMapBuffer(hessian24, CLMemory.Map.READ, 0, 4, true);
+                buffer.rewind();
+                hessian[2][4] = (double)buffer.asFloatBuffer().get();
+                queue.putUnmapMemory(hessian24, buffer);
+                
+                buffer = queue.putMapBuffer(hessian25, CLMemory.Map.READ, 0, 4, true);
+                buffer.rewind();
+                hessian[2][5] = (double)buffer.asFloatBuffer().get();
+                queue.putUnmapMemory(hessian25, buffer);
+                
+                buffer = queue.putMapBuffer(hessian33, CLMemory.Map.READ, 0, 4, true);
+                buffer.rewind();
+                hessian[3][3] = (double)buffer.asFloatBuffer().get();
+                queue.putUnmapMemory(hessian33, buffer);
+                
+                buffer = queue.putMapBuffer(hessian34, CLMemory.Map.READ, 0, 4, true);
+                buffer.rewind();
+                hessian[3][4] = (double)buffer.asFloatBuffer().get();
+                queue.putUnmapMemory(hessian34, buffer);
+                
+                buffer = queue.putMapBuffer(hessian35, CLMemory.Map.READ, 0, 4, true);
+                buffer.rewind();
+                hessian[3][5] = (double)buffer.asFloatBuffer().get();
+                queue.putUnmapMemory(hessian35, buffer);
+                
+                buffer = queue.putMapBuffer(hessian44, CLMemory.Map.READ, 0, 4, true);
+                buffer.rewind();
+                hessian[4][4] = (double)buffer.asFloatBuffer().get();
+                queue.putUnmapMemory(hessian44, buffer);
+                
+                buffer = queue.putMapBuffer(hessian45, CLMemory.Map.READ, 0, 4, true);
+                buffer.rewind();
+                hessian[4][5] = (double)buffer.asFloatBuffer().get();
+                queue.putUnmapMemory(hessian45, buffer);
+                
+                buffer = queue.putMapBuffer(hessian55, CLMemory.Map.READ, 0, 4, true);
+                buffer.rewind();
+                hessian[5][5] = (double)buffer.asFloatBuffer().get();
+                queue.putUnmapMemory(hessian55, buffer);
+            }
+            else
+            {
+                
+                int nrOfBlocks = ((int)(sourcePyramid[pyramidIndex].width * sourcePyramid[pyramidIndex].height))%blockSizesParallel;
+                nrOfBlocks = nrOfBlocks == 0 ? (int)Math.min(((int)(sourcePyramid[pyramidIndex].width * sourcePyramid[pyramidIndex].height))/blockSizesParallel,maximumSumReductionBlockNr) : (int)Math.min((((int)(sourcePyramid[pyramidIndex].width * sourcePyramid[pyramidIndex].height))+(blockSizesParallel-nrOfBlocks))/blockSizesParallel,maximumSumReductionBlockNr);
+                
+                int globalWorkSize = nrOfBlocks * blockSizesParallel;
+                uniformBSplineTransformProgramKernels[KERNEL_faffineErrorWithGradAndHessBrent]
+                        .putArg(sourcePyramid[pyramidIndex].Image)
+                        .putArg(targetPyramid[pyramidIndex].Coefficient)
+                        .putArg(sourcePyramid[pyramidIndex].xGradient)
+                        .putArg(sourcePyramid[pyramidIndex].yGradient)
+                        .putArg(gradient0)
+                        .putArg(gradient1)
+                        .putArg(gradient2)
+                        .putArg(gradient3)
+                        .putArg(gradient4)
+                        .putArg(gradient5)
+                        .putArg(hessian00)
+                        .putArg(hessian01)
+                        .putArg(hessian02)
+                        .putArg(hessian03)
+                        .putArg(hessian04)
+                        .putArg(hessian05)
+                        .putArg(hessian11)
+                        .putArg(hessian12)
+                        .putArg(hessian13)
+                        .putArg(hessian14)
+                        .putArg(hessian15)
+                        .putArg(hessian22)
+                        .putArg(hessian23)
+                        .putArg(hessian24)
+                        .putArg(hessian25)
+                        .putArg(hessian33)
+                        .putArg(hessian34)
+                        .putArg(hessian35)
+                        .putArg(hessian44)
+                        .putArg(hessian45)
+                        .putArg(hessian55)
+                        .putArg(entryImageBuffer)
+                        .putArg(maskBuffer);
+                
+                uniformBSplineTransformProgramKernels[KERNEL_faffineErrorWithGradAndHessBrent]
+                        .putNullArg(blockSizesParallel*4 /*size in bytes of local mem allocation*/)
+                        .putNullArg(blockSizesParallel*4 /*size in bytes of local mem allocation*/)
+                        .putNullArg(blockSizesParallel*4 /*size in bytes of local mem allocation*/)
+                        .putNullArg(blockSizesParallel*4 /*size in bytes of local mem allocation*/)
+                        .putNullArg(blockSizesParallel*4 /*size in bytes of local mem allocation*/)
+                        .putNullArg(blockSizesParallel*4 /*size in bytes of local mem allocation*/)
+                        .putNullArg(blockSizesParallel*4 /*size in bytes of local mem allocation*/)
+                        .putNullArg(blockSizesParallel*4 /*size in bytes of local mem allocation*/)
+                        .putNullArg(blockSizesParallel*4 /*size in bytes of local mem allocation*/)
+                        .putNullArg(blockSizesParallel*4 /*size in bytes of local mem allocation*/)
+                        .putNullArg(blockSizesParallel*4 /*size in bytes of local mem allocation*/)
+                        .putNullArg(blockSizesParallel*4 /*size in bytes of local mem allocation*/)
+                        .putNullArg(blockSizesParallel*4 /*size in bytes of local mem allocation*/)
+                        .putNullArg(blockSizesParallel*4 /*size in bytes of local mem allocation*/)
+                        .putNullArg(blockSizesParallel*4 /*size in bytes of local mem allocation*/)
+                        .putNullArg(blockSizesParallel*4 /*size in bytes of local mem allocation*/)
+                        .putNullArg(blockSizesParallel*4 /*size in bytes of local mem allocation*/)
+                        .putNullArg(blockSizesParallel*4 /*size in bytes of local mem allocation*/)
+                        .putNullArg(blockSizesParallel*4 /*size in bytes of local mem allocation*/)
+                        .putNullArg(blockSizesParallel*4 /*size in bytes of local mem allocation*/)
+                        .putNullArg(blockSizesParallel*4 /*size in bytes of local mem allocation*/)
+                        .putNullArg(blockSizesParallel*4 /*size in bytes of local mem allocation*/)
+                        .putNullArg(blockSizesParallel*4 /*size in bytes of local mem allocation*/)
+                        .putNullArg(blockSizesParallel*4 /*size in bytes of local mem allocation*/)
+                        .putNullArg(blockSizesParallel*4 /*size in bytes of local mem allocation*/)
+                        .putNullArg(blockSizesParallel*4 /*size in bytes of local mem allocation*/)
+                        .putNullArg(blockSizesParallel*4 /*size in bytes of local mem allocation*/)
+                        .putNullArg(blockSizesParallel*4 /*size in bytes of local mem allocation*/)
+                        .putNullArg(blockSizesParallel*4 /*size in bytes of local mem allocation*/);
+                
+                uniformBSplineTransformProgramKernels[KERNEL_faffineErrorWithGradAndHessBrent]
+                        .putArg((int)sourcePyramid[pyramidIndex].width)
+                        .putArg((int)sourcePyramid[pyramidIndex].height)
+                        .putArg((int)targetPyramid[pyramidIndex].width)
+                        .putArg((int)targetPyramid[pyramidIndex].height);
+
+                uniformBSplineTransformProgramKernels[KERNEL_faffineErrorWithGradAndHessBrent]
+                		.putArg((float)currentoffsetx)
+                        .putArg((float)curentoffsety)
+                        .putArg((float)currenta11)
+                        .putArg((float)currenta12)
+                        .putArg((float)currenta21)
+                        .putArg((float)currenta22);
+               
+                uniformBSplineTransformProgramKernels[KERNEL_faffineErrorWithGradAndHessBrent]
+                        .putArg((int)targetPyramid[pyramidIndex].width*2)
+                        .putArg((int)targetPyramid[pyramidIndex].height*2);
+                
+                queue.put1DRangeKernel(uniformBSplineTransformProgramKernels[KERNEL_faffineErrorWithGradAndHessBrent],0,globalWorkSize,blockSizesParallel);
+                uniformBSplineTransformProgramKernels[KERNEL_faffineErrorWithGradAndHessBrent].rewind();
+                
+                // use in-memory summations (also async) each with its own buffer to do the final reduction)
+                halfReductionSize = (int) ((nrOfBlocks+(nrOfBlocks%2))/2);
+                int localWorkSize = halfReductionSize % optimalMultiples[KERNEL_faffineSumInLocalMemoryCombined] == 0 ? halfReductionSize : (int)Math.min(halfReductionSize + (optimalMultiples[KERNEL_faffineSumInLocalMemoryCombined] - (halfReductionSize % optimalMultiples[KERNEL_faffineSumInLocalMemoryCombined])), maximumElementsForLocalFPTcombinedSum);
+                globalWorkSize = localWorkSize;
+                uniformBSplineTransformProgramKernels[KERNEL_faffineSumInLocalMemoryCombined]
+                		.putArg(maskBuffer)
+                        .putArg(entryImageBuffer)
+                        .putArg(gradient0)
+                        .putArg(gradient1)
+                        .putArg(gradient2)
+                        .putArg(gradient3)
+                        .putArg(gradient4)
+                        .putArg(gradient5)
+                        .putArg(hessian00)
+                        .putArg(hessian01)
+                        .putArg(hessian02)
+                        .putArg(hessian03)
+                        .putArg(hessian04)
+                        .putArg(hessian05)
+                        .putArg(hessian11)
+                        .putArg(hessian12)
+                        .putArg(hessian13)
+                        .putArg(hessian14)
+                        .putArg(hessian15)
+                        .putArg(hessian22)
+                        .putArg(hessian23)
+                        .putArg(hessian24)
+                        .putArg(hessian25)
+                        .putArg(hessian33)
+                        .putArg(hessian34)
+                        .putArg(hessian35)
+                        .putArg(hessian44)
+                        .putArg(hessian45)
+                        .putArg(hessian55)
+                        .putNullArg(halfReductionSize*4 /*size in bytes of local mem allocation*/)
+                        .putArg((int)(nrOfBlocks));
+                queue.put1DRangeKernel(uniformBSplineTransformProgramKernels[KERNEL_faffineSumInLocalMemoryCombined],0,globalWorkSize,localWorkSize);
+                uniformBSplineTransformProgramKernels[KERNEL_faffineSumInLocalMemoryCombined].rewind();
+                
+                buffer = queue.putMapBuffer(maskBuffer, CLMemory.Map.READ, 0, 4, true);
+                buffer.rewind();
+                area = (double)buffer.asFloatBuffer().get();
+                queue.putUnmapMemory(maskBuffer, buffer);
+                
+                buffer = queue.putMapBuffer(entryImageBuffer, CLMemory.Map.READ, 0, 4, true);
+                buffer.rewind();
+                mse = (double)buffer.asFloatBuffer().get();
+                queue.putUnmapMemory(entryImageBuffer, buffer);
+                        
+                buffer = queue.putMapBuffer(gradient0, CLMemory.Map.READ, 0, 4, true);
+                buffer.rewind();
+                gradient[0] = (double)buffer.asFloatBuffer().get();
+                queue.putUnmapMemory(gradient0, buffer);
+                        
+                buffer = queue.putMapBuffer(gradient1, CLMemory.Map.READ, 0, 4, true);
+                buffer.rewind();
+                gradient[1] = (double)buffer.asFloatBuffer().get();
+                queue.putUnmapMemory(gradient1, buffer);
+                        
+                buffer = queue.putMapBuffer(gradient2, CLMemory.Map.READ, 0, 4, true);
+                buffer.rewind();
+                gradient[2] = (double)buffer.asFloatBuffer().get();
+                queue.putUnmapMemory(gradient2, buffer);
+                
+                buffer = queue.putMapBuffer(gradient3, CLMemory.Map.READ, 0, 4, true);
+                buffer.rewind();
+                gradient[3] = (double)buffer.asFloatBuffer().get();
+                queue.putUnmapMemory(gradient3, buffer);
+                
+                buffer = queue.putMapBuffer(gradient4, CLMemory.Map.READ, 0, 4, true);
+                buffer.rewind();
+                gradient[4] = (double)buffer.asFloatBuffer().get();
+                queue.putUnmapMemory(gradient4, buffer);
+                
+                buffer = queue.putMapBuffer(gradient5, CLMemory.Map.READ, 0, 4, true);
+                buffer.rewind();
+                gradient[5] = (double)buffer.asFloatBuffer().get();
+                queue.putUnmapMemory(gradient5, buffer);
+                        
+                buffer = queue.putMapBuffer(hessian00, CLMemory.Map.READ, 0, 4, true);
+                buffer.rewind();
+                hessian[0][0] = (double)buffer.asFloatBuffer().get();
+                queue.putUnmapMemory(hessian00, buffer);
+                        
+                buffer = queue.putMapBuffer(hessian01, CLMemory.Map.READ, 0, 4, true);
+                buffer.rewind();
+                hessian[0][1] = (double)buffer.asFloatBuffer().get();
+                queue.putUnmapMemory(hessian01, buffer);
+                        
+                buffer = queue.putMapBuffer(hessian02, CLMemory.Map.READ, 0, 4, true);
+                buffer.rewind();
+                hessian[0][2] = (double)buffer.asFloatBuffer().get();
+                queue.putUnmapMemory(hessian02, buffer);
+                
+                buffer = queue.putMapBuffer(hessian03, CLMemory.Map.READ, 0, 4, true);
+                buffer.rewind();
+                hessian[0][3] = (double)buffer.asFloatBuffer().get();
+                queue.putUnmapMemory(hessian03, buffer);
+                
+                buffer = queue.putMapBuffer(hessian04, CLMemory.Map.READ, 0, 4, true);
+                buffer.rewind();
+                hessian[0][4] = (double)buffer.asFloatBuffer().get();
+                queue.putUnmapMemory(hessian04, buffer);
+                
+                buffer = queue.putMapBuffer(hessian05, CLMemory.Map.READ, 0, 4, true);
+                buffer.rewind();
+                hessian[0][5] = (double)buffer.asFloatBuffer().get();
+                queue.putUnmapMemory(hessian05, buffer);
+                        
+                buffer = queue.putMapBuffer(hessian11, CLMemory.Map.READ, 0, 4, true);
+                buffer.rewind();
+                hessian[1][1] = (double)buffer.asFloatBuffer().get();
+                queue.putUnmapMemory(hessian11, buffer);
+                        
+                buffer = queue.putMapBuffer(hessian12, CLMemory.Map.READ, 0, 4, true);
+                buffer.rewind();
+                hessian[1][2] = (double)buffer.asFloatBuffer().get();
+                queue.putUnmapMemory(hessian12, buffer);
+                
+                buffer = queue.putMapBuffer(hessian13, CLMemory.Map.READ, 0, 4, true);
+                buffer.rewind();
+                hessian[1][3] = (double)buffer.asFloatBuffer().get();
+                queue.putUnmapMemory(hessian13, buffer);
+                
+                buffer = queue.putMapBuffer(hessian14, CLMemory.Map.READ, 0, 4, true);
+                buffer.rewind();
+                hessian[1][4] = (double)buffer.asFloatBuffer().get();
+                queue.putUnmapMemory(hessian14, buffer);
+                
+                buffer = queue.putMapBuffer(hessian15, CLMemory.Map.READ, 0, 4, true);
+                buffer.rewind();
+                hessian[1][5] = (double)buffer.asFloatBuffer().get();
+                queue.putUnmapMemory(hessian15, buffer);
+                        
+                buffer = queue.putMapBuffer(hessian22, CLMemory.Map.READ, 0, 4, true);
+                buffer.rewind();
+                hessian[2][2] = (double)buffer.asFloatBuffer().get();
+                queue.putUnmapMemory(hessian22, buffer);
+                
+                buffer = queue.putMapBuffer(hessian23, CLMemory.Map.READ, 0, 4, true);
+                buffer.rewind();
+                hessian[2][3] = (double)buffer.asFloatBuffer().get();
+                queue.putUnmapMemory(hessian23, buffer);
+                
+                buffer = queue.putMapBuffer(hessian24, CLMemory.Map.READ, 0, 4, true);
+                buffer.rewind();
+                hessian[2][4] = (double)buffer.asFloatBuffer().get();
+                queue.putUnmapMemory(hessian24, buffer);
+                
+                buffer = queue.putMapBuffer(hessian25, CLMemory.Map.READ, 0, 4, true);
+                buffer.rewind();
+                hessian[2][5] = (double)buffer.asFloatBuffer().get();
+                queue.putUnmapMemory(hessian25, buffer);
+                
+                buffer = queue.putMapBuffer(hessian33, CLMemory.Map.READ, 0, 4, true);
+                buffer.rewind();
+                hessian[3][3] = (double)buffer.asFloatBuffer().get();
+                queue.putUnmapMemory(hessian33, buffer);
+                
+                buffer = queue.putMapBuffer(hessian34, CLMemory.Map.READ, 0, 4, true);
+                buffer.rewind();
+                hessian[3][4] = (double)buffer.asFloatBuffer().get();
+                queue.putUnmapMemory(hessian34, buffer);
+                
+                buffer = queue.putMapBuffer(hessian35, CLMemory.Map.READ, 0, 4, true);
+                buffer.rewind();
+                hessian[3][5] = (double)buffer.asFloatBuffer().get();
+                queue.putUnmapMemory(hessian35, buffer);
+                
+                buffer = queue.putMapBuffer(hessian44, CLMemory.Map.READ, 0, 4, true);
+                buffer.rewind();
+                hessian[4][4] = (double)buffer.asFloatBuffer().get();
+                queue.putUnmapMemory(hessian44, buffer);
+                
+                buffer = queue.putMapBuffer(hessian45, CLMemory.Map.READ, 0, 4, true);
+                buffer.rewind();
+                hessian[4][5] = (double)buffer.asFloatBuffer().get();
+                queue.putUnmapMemory(hessian45, buffer);
+                
+                buffer = queue.putMapBuffer(hessian55, CLMemory.Map.READ, 0, 4, true);
+                buffer.rewind();
+                hessian[5][5] = (double)buffer.asFloatBuffer().get();
+                queue.putUnmapMemory(hessian55, buffer);
+            }
+            //symmetrize hessian
+            for (int i = 1; (i < 6); i++) {
                 for (int j = 0; (j < i); j++) {
                         hessian[i][j] = hessian[j][i];
                 }
@@ -2448,10 +5055,297 @@ public class HybridPrecisionNGStackReg extends RegistrationAndTransformation
         }
         
         
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        private double doubleGetTranslationMeanSquares(double currentoffsetx, double currentoffsety)
+        {
+            double area = 0.0;
+            double mse = 0.0;
+            Arrays.fill(gradient, 0.0);
+            for (int i = 0; (i < 2); i++) {
+                Arrays.fill(hessian[i], 0.0);
+            }
+            if(!usesFloat)
+            {
+                // we have the diffs let's calculate all the derived elements
+                int halfReductionSize = (int) (((sourceDoubleSlice.width * sourceDoubleSlice.height)+((sourceDoubleSlice.width * sourceDoubleSlice.height)%2))/2);
+                ByteBuffer buffer;
+                // calculate the MSE row-wise
+                if(halfReductionSize <= doublemaximumElementsForLocalFPTcombinedSum)
+                {                
+                    uniformBSplineTransformProgramKernels[KERNEL_dtranslationErrorWithGradAndHess]
+                            .putArg(sourceDoubleSlice.Image)
+                            .putArg(targetDoubleSlice.Coefficient)
+                            .putArg(sourceDoubleSlice.xGradient)
+                            .putArg(sourceDoubleSlice.yGradient)
+                            .putArg(gradient0)
+                            .putArg(gradient1)
+                            .putArg(hessian00)
+                            .putArg(hessian01)
+                            .putArg(hessian11)
+                            .putArg(doubleEntryImageBuffer)
+                            .putArg(maskBuffer)
+                            .putArg((int)sourceDoubleSlice.width)
+                            .putArg((int)sourceDoubleSlice.height)
+                            .putArg((int)targetDoubleSlice.width)
+                            .putArg((int)targetDoubleSlice.height)
+                            .putArg((int)targetDoubleSlice.width * 2)
+                            .putArg((int)targetDoubleSlice.height * 2)
+                            .putArg(currentoffsetx)
+                            .putArg(currentoffsety);
+
+                    int localWorkSize = (int)Math.min(uniformBSplineTransformProgramKernels[KERNEL_dtranslationErrorWithGradAndHess].getWorkGroupSize(device),blocksizeMultiplier*optimalMultiples[KERNEL_dtranslationErrorWithGradAndHess]);  // Local work size dimensions
+                    int globalWorkSize = StaticUtility.roundUp(localWorkSize, optimalMultiples[KERNEL_dtranslationErrorWithGradAndHess], (int)(sourceDoubleSlice.width*sourceDoubleSlice.height));
+                    queue.put1DRangeKernel(uniformBSplineTransformProgramKernels[KERNEL_dtranslationErrorWithGradAndHess],0,globalWorkSize,localWorkSize);
+                    uniformBSplineTransformProgramKernels[KERNEL_dtranslationErrorWithGradAndHess].rewind();
+
+                    /*
+                    Because each of the following kernels is synchronized by barriers on the GPU they can only be executed on a single compute device.
+                    Therefore using an async queue may increase the speed by allowing multiple kernels to execute in parallel (if local memory permits)
+                    */
+                    localWorkSize = halfReductionSize % optimalMultiples[KERNEL_dtranslationSumInLocalMemoryCombined] == 0 ? halfReductionSize : (int)Math.min(halfReductionSize + (optimalMultiples[KERNEL_dtranslationSumInLocalMemoryCombined] - (halfReductionSize % optimalMultiples[KERNEL_dtranslationSumInLocalMemoryCombined])), doublemaximumElementsForLocalFPTcombinedSum);
+                    globalWorkSize = localWorkSize;
+                    uniformBSplineTransformProgramKernels[KERNEL_dtranslationSumInLocalMemoryCombined]
+                            .putArg(maskBuffer)
+                            .putArg(doubleEntryImageBuffer)
+                            .putArg(gradient0)
+                            .putArg(gradient1)
+                            .putArg(hessian00)
+                            .putArg(hessian01)
+                            .putArg(hessian11)
+                            .putNullArg(localWorkSize*8 /*size in bytes of local mem allocation*/)
+                            .putArg((int)(sourceDoubleSlice.width * sourceDoubleSlice.height));
+                    queue.put1DRangeKernel(uniformBSplineTransformProgramKernels[KERNEL_dtranslationSumInLocalMemoryCombined],0,globalWorkSize,localWorkSize);
+                    uniformBSplineTransformProgramKernels[KERNEL_dtranslationSumInLocalMemoryCombined].rewind();
+
+                    buffer = queue.putMapBuffer(maskBuffer, CLMemory.Map.READ, 0, 8, true);
+                    buffer.rewind();
+                    area = buffer.asDoubleBuffer().get();
+                    queue.putUnmapMemory(maskBuffer, buffer);
+                    buffer = queue.putMapBuffer(doubleEntryImageBuffer, CLMemory.Map.READ, 0, 8, true);
+                    buffer.rewind();
+                    mse = buffer.asDoubleBuffer().get();
+                    queue.putUnmapMemory(doubleEntryImageBuffer, buffer);
+                    buffer = queue.putMapBuffer(gradient0, CLMemory.Map.READ, 0, 8, true);
+                    buffer.rewind();
+                    gradient[0] = buffer.asDoubleBuffer().get();
+                    queue.putUnmapMemory(gradient0, buffer);
+                    buffer = queue.putMapBuffer(gradient1, CLMemory.Map.READ, 0, 8, true);
+                    buffer.rewind();
+                    gradient[1] = buffer.asDoubleBuffer().get();
+                    queue.putUnmapMemory(gradient1, buffer);
+                    buffer = queue.putMapBuffer(hessian00, CLMemory.Map.READ, 0, 8, true);
+                    buffer.rewind();
+                    hessian[0][0] = buffer.asDoubleBuffer().get();
+                    queue.putUnmapMemory(hessian00, buffer);
+                    buffer = queue.putMapBuffer(hessian01, CLMemory.Map.READ, 0, 8, true);
+                    buffer.rewind();
+                    hessian[0][1] = buffer.asDoubleBuffer().get();
+                    queue.putUnmapMemory(hessian01, buffer);
+                    buffer = queue.putMapBuffer(hessian11, CLMemory.Map.READ, 0, 8, true);
+                    buffer.rewind();
+                    hessian[1][1] = buffer.asDoubleBuffer().get();
+                    queue.putUnmapMemory(hessian11, buffer);
+                }
+                else
+                {
+
+                    int nrOfBlocks = ((int)(sourceDoubleSlice.width * sourceDoubleSlice.height))%doubleblockSizesParallel;
+                    nrOfBlocks = nrOfBlocks == 0 ? (int)Math.min(((int)(sourceDoubleSlice.width * sourceDoubleSlice.height))/doubleblockSizesParallel,maximumSumReductionBlockNr) : (int)Math.min((((int)(sourceDoubleSlice.width * sourceDoubleSlice.height))+(doubleblockSizesParallel-nrOfBlocks))/doubleblockSizesParallel,maximumSumReductionBlockNr);
+
+                    int globalWorkSize = nrOfBlocks * doubleblockSizesParallel;
+                    uniformBSplineTransformProgramKernels[KERNEL_dtranslationErrorWithGradAndHessBrent]
+                            .putArg(sourceDoubleSlice.Image)
+                            .putArg(targetDoubleSlice.Coefficient)
+                            .putArg(sourceDoubleSlice.xGradient)
+                            .putArg(sourceDoubleSlice.yGradient)
+                            .putArg(gradient0)
+                            .putArg(gradient1)
+                            .putArg(hessian00)
+                            .putArg(hessian01)
+                            .putArg(hessian11)
+                            .putArg(doubleEntryImageBuffer)
+                            .putArg(maskBuffer);
+
+
+                    uniformBSplineTransformProgramKernels[KERNEL_dtranslationErrorWithGradAndHessBrent]
+                            .putNullArg(doubleblockSizesParallel*8 /*size in bytes of local mem allocation*/)
+                            .putNullArg(doubleblockSizesParallel*8 /*size in bytes of local mem allocation*/)
+                            .putNullArg(doubleblockSizesParallel*8 /*size in bytes of local mem allocation*/)
+                            .putNullArg(doubleblockSizesParallel*8 /*size in bytes of local mem allocation*/)
+                            .putNullArg(doubleblockSizesParallel*8 /*size in bytes of local mem allocation*/)
+                            .putNullArg(doubleblockSizesParallel*8 /*size in bytes of local mem allocation*/)
+                            .putNullArg(doubleblockSizesParallel*8 /*size in bytes of local mem allocation*/);
+
+                    uniformBSplineTransformProgramKernels[KERNEL_dtranslationErrorWithGradAndHessBrent]
+                            .putArg((int)sourceDoubleSlice.width)
+                            .putArg((int)sourceDoubleSlice.height)
+                            .putArg((int)targetDoubleSlice.width)
+                            .putArg((int)targetDoubleSlice.height);
+
+                    uniformBSplineTransformProgramKernels[KERNEL_dtranslationErrorWithGradAndHessBrent]
+                            .putArg(currentoffsetx)
+                            .putArg(currentoffsety);
+
+                    uniformBSplineTransformProgramKernels[KERNEL_dtranslationErrorWithGradAndHessBrent]
+                            .putArg((int)targetDoubleSlice.width*2)
+                            .putArg((int)targetDoubleSlice.height*2);                
+                    queue.put1DRangeKernel(uniformBSplineTransformProgramKernels[KERNEL_dtranslationErrorWithGradAndHessBrent],0,globalWorkSize,doubleblockSizesParallel);
+                    uniformBSplineTransformProgramKernels[KERNEL_dtranslationErrorWithGradAndHessBrent].rewind();
+
+                    // use in-memory summations (also async) each with its own buffer to do the final reduction)
+                    halfReductionSize = (int) ((nrOfBlocks+(nrOfBlocks%2))/2);
+                    int localWorkSize = halfReductionSize % optimalMultiples[KERNEL_dtranslationSumInLocalMemoryCombined] == 0 ? halfReductionSize : (int)Math.min(halfReductionSize + (optimalMultiples[KERNEL_dtranslationSumInLocalMemoryCombined] - (halfReductionSize % optimalMultiples[KERNEL_dtranslationSumInLocalMemoryCombined])), doublemaximumElementsForLocalFPTcombinedSum);
+                    globalWorkSize = localWorkSize;
+                    uniformBSplineTransformProgramKernels[KERNEL_dtranslationSumInLocalMemoryCombined]
+                            .putArg(gradient0)
+                            .putArg(gradient1)
+                            .putArg(hessian00)
+                            .putArg(hessian01)
+                            .putArg(hessian11)
+                            .putArg(doubleEntryImageBuffer)
+                            .putArg(maskBuffer)
+                            .putNullArg(halfReductionSize*8 /*size in bytes of local mem allocation*/)
+                            .putArg((int)(nrOfBlocks));
+                    queue.put1DRangeKernel(uniformBSplineTransformProgramKernels[KERNEL_dtranslationSumInLocalMemoryCombined],0,globalWorkSize,localWorkSize);
+                    uniformBSplineTransformProgramKernels[KERNEL_dtranslationSumInLocalMemoryCombined].rewind();
+
+                    buffer = queue.putMapBuffer(maskBuffer, CLMemory.Map.READ, 0, 8, true);
+                    buffer.rewind();
+                    area = buffer.asDoubleBuffer().get();
+                    queue.putUnmapMemory(maskBuffer, buffer);
+
+                    buffer = queue.putMapBuffer(doubleEntryImageBuffer, CLMemory.Map.READ, 0, 8, true);
+                    buffer.rewind();
+                    mse = buffer.asDoubleBuffer().get();
+                    queue.putUnmapMemory(doubleEntryImageBuffer, buffer);
+
+                    buffer = queue.putMapBuffer(gradient0, CLMemory.Map.READ, 0, 8, true);
+                    buffer.rewind();
+                    gradient[0] = buffer.asDoubleBuffer().get();
+                    queue.putUnmapMemory(gradient0, buffer);
+
+                    buffer = queue.putMapBuffer(gradient1, CLMemory.Map.READ, 0, 8, true);
+                    buffer.rewind();
+                    gradient[1] = buffer.asDoubleBuffer().get();
+                    queue.putUnmapMemory(gradient1, buffer);
+
+                    buffer = queue.putMapBuffer(hessian00, CLMemory.Map.READ, 0, 8, true);
+                    buffer.rewind();
+                    hessian[0][0] = buffer.asDoubleBuffer().get();
+                    queue.putUnmapMemory(hessian00, buffer);
+
+                    buffer = queue.putMapBuffer(hessian01, CLMemory.Map.READ, 0, 8, true);
+                    buffer.rewind();
+                    hessian[0][1] = buffer.asDoubleBuffer().get();
+                    queue.putUnmapMemory(hessian01, buffer);
+
+                    buffer = queue.putMapBuffer(hessian11, CLMemory.Map.READ, 0, 8, true);
+                    buffer.rewind();
+                    hessian[1][1] = buffer.asDoubleBuffer().get();
+                    queue.putUnmapMemory(hessian11, buffer);
+                }
+            }
+            else
+            {
+                final int width = (int)sharedContext.img.dimension(0);
+                final int height = (int)sharedContext.img.dimension(1);
+                final int doubletargetwidth = width * 2;
+                final int doubletargetheight = height * 2;
+                int nIndex = 0;
+                int larea = 0;
+                double s;
+                double coordx;
+                double rescoordx;
+                double coordy;
+                double rescoordy;
+                int mskx;
+                int msky;
+                for(int i = 0;i < height;i++)
+                {
+                	// First walk along the Y-vector direction and reset the X-position (otherwise the
+                    // y position is initially correct and then lagging behind by one all the time)
+                    coordx = currentoffsetx;
+                    coordy = currentoffsety + ((double)i);
+                    for(int n = 0;n < width;n++,nIndex++)
+                    {
+                        mskx = (int)Math.round(coordx);
+                        msky = (int)Math.round(coordy);
+                        if((mskx >= 0)&&(mskx < width)&&(msky >= 0)&&(msky < height))
+                        {
+                            larea++;
+                            
+                            PlainJavaCPUAligner.computeXInterpolationIndices(coordx, doubletargetwidth, width, xInterpolationIndices);
+                            PlainJavaCPUAligner.computeYInterpolationIndices(coordy, doubletargetheight, height, width, yInterpolationIndices);
+
+                            rescoordx = PlainJavaCPUAligner.getFractional(coordx);
+                            rescoordy = PlainJavaCPUAligner.getFractional(coordy);
+                            
+                            s = PlainJavaCPUAligner.interpolateCubicBSpline(rescoordx, rescoordy, xInterpolationIndices, yInterpolationIndices, targetCoefficientDoubleSlice);
+
+                            // calculate the values for returning
+                            double diff = sourceImageDoubleSlice[nIndex] - s;// repurposed for diff
+                            mse += diff * diff;
+                            /*
+                            TODO/FIXME/KNOWN ISSUE:
+                            The following summation is MUCH worse than the parallel sum reduction done on the GPU, because (relatively speaking)
+                            small numbers are added to an ever growing larger number reducing the precision in the outcome. Currently
+                            I ignore this like the original implementation, but this is one of many reasons why the GPU version and the CPU version
+                            will never yield the same results!
+                            */
+                            gradient[0] += diff * sourcexGradientDoubleSlice[nIndex];
+                            gradient[1] += diff * sourceyGradientDoubleSlice[nIndex];
+                            hessian[0][0] += sourcexGradientDoubleSlice[nIndex] * sourcexGradientDoubleSlice[nIndex];
+                            hessian[0][1] += sourcexGradientDoubleSlice[nIndex] * sourceyGradientDoubleSlice[nIndex];
+                            hessian[1][1] += sourceyGradientDoubleSlice[nIndex] * sourceyGradientDoubleSlice[nIndex];
+                        }
+                        // walk along the X-vector direction
+                        coordx += 1.0;
+                    }
+                }
+                area = (double)larea;
+            }
+            // symmetrize hessian
+            for (int i = 1; (i < 2); i++) {
+                for (int j = 0; (j < i); j++) {
+                        hessian[i][j] = hessian[j][i];
+                }
+            }
+            return mse/area;
+        }
+        
         private double doubleGetRigidBodyMeanSquares(double currentoffsetx, double currentoffsety, double currentangle)
         {
             double area = 0.0;
             double mse = 0.0;
+            // First reset the global values which will not be reset in the loop
+            Arrays.fill(gradient, 0.0);
+            for (int i = 0; (i < 3); i++) {
+                Arrays.fill(hessian[i], 0.0);
+            }
             if(!usesFloat)
             {
                 // now we have the diffs let's calculate all the derived elements
@@ -2563,10 +5457,10 @@ public class HybridPrecisionNGStackReg extends RegistrationAndTransformation
                 else
                 {
 
-                    int nrOfBlocks = ((int)(sourceDoubleSlice.width * sourceDoubleSlice.height))%doubleblockSizesRigidBodyParallel;
-                    nrOfBlocks = nrOfBlocks == 0 ? (int)Math.min(((int)(sourceDoubleSlice.width * sourceDoubleSlice.height))/doubleblockSizesRigidBodyParallel,maximumSumReductionBlockNr) : (int)Math.min((((int)(sourceDoubleSlice.width * sourceDoubleSlice.height))+(doubleblockSizesRigidBodyParallel-nrOfBlocks))/doubleblockSizesRigidBodyParallel,maximumSumReductionBlockNr);
+                    int nrOfBlocks = ((int)(sourceDoubleSlice.width * sourceDoubleSlice.height))%doubleblockSizesParallel;
+                    nrOfBlocks = nrOfBlocks == 0 ? (int)Math.min(((int)(sourceDoubleSlice.width * sourceDoubleSlice.height))/doubleblockSizesParallel,maximumSumReductionBlockNr) : (int)Math.min((((int)(sourceDoubleSlice.width * sourceDoubleSlice.height))+(doubleblockSizesParallel-nrOfBlocks))/doubleblockSizesParallel,maximumSumReductionBlockNr);
 
-                    int globalWorkSize = nrOfBlocks * doubleblockSizesRigidBodyParallel;
+                    int globalWorkSize = nrOfBlocks * doubleblockSizesParallel;
                     uniformBSplineTransformProgramKernels[KERNEL_drigidBodyErrorWithGradAndHessBrent]
                             .putArg(sourceDoubleSlice.Image)
                             .putArg(targetDoubleSlice.Coefficient)
@@ -2586,17 +5480,17 @@ public class HybridPrecisionNGStackReg extends RegistrationAndTransformation
 
 
                     uniformBSplineTransformProgramKernels[KERNEL_drigidBodyErrorWithGradAndHessBrent]
-                            .putNullArg(blockSizesRigidBodyParallel*8 /*size in bytes of local mem allocation*/)
-                            .putNullArg(blockSizesRigidBodyParallel*8 /*size in bytes of local mem allocation*/)
-                            .putNullArg(blockSizesRigidBodyParallel*8 /*size in bytes of local mem allocation*/)
-                            .putNullArg(blockSizesRigidBodyParallel*8 /*size in bytes of local mem allocation*/)
-                            .putNullArg(blockSizesRigidBodyParallel*8 /*size in bytes of local mem allocation*/)
-                            .putNullArg(blockSizesRigidBodyParallel*8 /*size in bytes of local mem allocation*/)
-                            .putNullArg(blockSizesRigidBodyParallel*8 /*size in bytes of local mem allocation*/)
-                            .putNullArg(blockSizesRigidBodyParallel*8 /*size in bytes of local mem allocation*/)
-                            .putNullArg(blockSizesRigidBodyParallel*8 /*size in bytes of local mem allocation*/)
-                            .putNullArg(blockSizesRigidBodyParallel*8 /*size in bytes of local mem allocation*/)
-                            .putNullArg(blockSizesRigidBodyParallel*8 /*size in bytes of local mem allocation*/);
+                            .putNullArg(doubleblockSizesParallel*8 /*size in bytes of local mem allocation*/)
+                            .putNullArg(doubleblockSizesParallel*8 /*size in bytes of local mem allocation*/)
+                            .putNullArg(doubleblockSizesParallel*8 /*size in bytes of local mem allocation*/)
+                            .putNullArg(doubleblockSizesParallel*8 /*size in bytes of local mem allocation*/)
+                            .putNullArg(doubleblockSizesParallel*8 /*size in bytes of local mem allocation*/)
+                            .putNullArg(doubleblockSizesParallel*8 /*size in bytes of local mem allocation*/)
+                            .putNullArg(doubleblockSizesParallel*8 /*size in bytes of local mem allocation*/)
+                            .putNullArg(doubleblockSizesParallel*8 /*size in bytes of local mem allocation*/)
+                            .putNullArg(doubleblockSizesParallel*8 /*size in bytes of local mem allocation*/)
+                            .putNullArg(doubleblockSizesParallel*8 /*size in bytes of local mem allocation*/)
+                            .putNullArg(doubleblockSizesParallel*8 /*size in bytes of local mem allocation*/);
 
                     uniformBSplineTransformProgramKernels[KERNEL_drigidBodyErrorWithGradAndHessBrent]
                             .putArg((int)sourceDoubleSlice.width)
@@ -2613,7 +5507,7 @@ public class HybridPrecisionNGStackReg extends RegistrationAndTransformation
                     uniformBSplineTransformProgramKernels[KERNEL_drigidBodyErrorWithGradAndHessBrent]
                             .putArg((int)targetDoubleSlice.width*2)
                             .putArg((int)targetDoubleSlice.height*2);                
-                    queue.put1DRangeKernel(uniformBSplineTransformProgramKernels[KERNEL_drigidBodyErrorWithGradAndHessBrent],0,globalWorkSize,doubleblockSizesRigidBodyParallel);
+                    queue.put1DRangeKernel(uniformBSplineTransformProgramKernels[KERNEL_drigidBodyErrorWithGradAndHessBrent],0,globalWorkSize,doubleblockSizesParallel);
                     uniformBSplineTransformProgramKernels[KERNEL_drigidBodyErrorWithGradAndHessBrent].rewind();
 
                     // use in-memory summations (also async) each with its own buffer to do the final reduction)
@@ -2695,25 +5589,12 @@ public class HybridPrecisionNGStackReg extends RegistrationAndTransformation
             }
             else
             {
-                // First reset the global values which will not be reset in the loop
-                gradient[0] = 0.0;
-                gradient[1] = 0.0;
-                gradient[2] = 0.0;
-                hessian[0][0] = 0.0;
-                hessian[0][1] = 0.0;
-                hessian[0][2] = 0.0;
-                hessian[1][1] = 0.0;
-                hessian[1][2] = 0.0;
-                hessian[2][2] = 0.0;
                 final int width = (int)sharedContext.img.dimension(0);
                 final int height = (int)sharedContext.img.dimension(1);
                 final int doubletargetwidth = width * 2;
                 final int doubletargetheight = height * 2;
                 int nIndex = 0;
                 int larea = 0;
-                int p;
-                int q;
-                int tmpindex;
                 double s;
                 double xvecx = Math.cos(currentangle);
                 double xvecy = -Math.sin(currentangle);
@@ -2738,57 +5619,19 @@ public class HybridPrecisionNGStackReg extends RegistrationAndTransformation
                         if((mskx >= 0)&&(mskx < width)&&(msky >= 0)&&(msky < height))
                         {
                             larea++;
-                            // Calculate X-interpolation indices
-                            p = (coordx >= 0) ? (((int)coordx) + 2) : (((int)coordx) + 1);
-                            for(int c = 0;c < 4;c++,p--)
-                            {
-                                q = (p < 0) ? (-1 - p) : p;
-                                q = (q < doubletargetwidth) ? q : q % doubletargetwidth;
-                                xInterpolationIndices[c] = q >= width ? (doubletargetwidth - 1 - q) : q;
-                            }
-                            // calculate Y-interpolation indices
-                            p = (coordy >= 0) ? (((int)coordy) + 2) : (((int)coordy) + 1);
-                            for(int c = 0;c < 4;c++,p--)
-                            {
-                                q = (p < 0) ? (-1 - p) : p;
-                                q = (q < doubletargetheight) ? q : q % doubletargetheight;
-                                yInterpolationIndices[c] = q >= height ? (doubletargetheight - 1 - q) * width : q * width;// calculate linearized coordinates of the coefficient array
-                            }
-                            // get the residuals of the coordinates
-                            rescoordx = coordx - (coordx >= 0.0 ? ((double)((int)coordx)) : ((double)(((int)coordx) - 1)));
-                            rescoordy = coordy - (coordy >= 0.0 ? ((double)((int)coordy)) : ((double)(((int)coordy) - 1)));
-                            // calculate the X-weights
-                            s = 1.0 - rescoordx;
-                            xWeights[3] = Math.pow(s, 3.0) / 6.0;
-                            s = rescoordx * rescoordx;
-                            xWeights[2] = (2.0 / 3.0) - 0.5 * s * (2.0 - rescoordx);
-                            xWeights[0] = s * rescoordx / 6.0;
-                            xWeights[1] = 1.0 - xWeights[0] - xWeights[2] - xWeights[3];
-                            // calculate the Y-weights
-                            s = 1.0 - rescoordy;
-                            yWeights[3] = Math.pow(s, 3.0) / 6.0;
-                            s = rescoordy * rescoordy;
-                            yWeights[2] = (2.0 / 3.0) - 0.5 * s * (2.0 - rescoordy);
-                            yWeights[0] = s * rescoordy / 6.0;
-                            yWeights[1] = 1.0 - yWeights[0] - yWeights[2] - yWeights[3];
+                            
+                            PlainJavaCPUAligner.computeXInterpolationIndices(coordx, doubletargetwidth, width, xInterpolationIndices);
+                            PlainJavaCPUAligner.computeYInterpolationIndices(coordy, doubletargetheight, height, width, yInterpolationIndices);
 
-                            // calculate the interpolated value from the target coefficients
-                            s = 0.0;
-                            for(int y = 0;y < 4;y++)
-                            {
-                                rescoordx = 0.0;// To avoid using too many variables this one will be repurposed
-                                tmpindex = yInterpolationIndices[y];
-                                for(int x = 0;x < 4; x++)
-                                {
-                                    rescoordx += xWeights[x] * targetCoefficientDoubleSlice[tmpindex + xInterpolationIndices[x]];
-                                }
-                                s += yWeights[y] * rescoordx;
-                            }
+                            rescoordx = PlainJavaCPUAligner.getFractional(coordx);
+                            rescoordy = PlainJavaCPUAligner.getFractional(coordy);
+                            
+                            s = PlainJavaCPUAligner.interpolateCubicBSpline(rescoordx, rescoordy, xInterpolationIndices, yInterpolationIndices, targetCoefficientDoubleSlice);
 
                             // calculate the values for returning
-                            rescoordx = sourceImageDoubleSlice[nIndex] - s;// repurposed for diff
-                            mse += rescoordx * rescoordx;
-                            rescoordy = sourceyGradientDoubleSlice[nIndex] * (double)n - sourcexGradientDoubleSlice[nIndex] * (double)i;//repurposed for Theta
+                            double diff = sourceImageDoubleSlice[nIndex] - s;
+                            mse += diff * diff;
+                            double theta = sourceyGradientDoubleSlice[nIndex] * (double)n - sourcexGradientDoubleSlice[nIndex] * (double)i;
                             /*
                             TODO/FIXME/KNOWN ISSUE:
                             The following summation is MUCH worse than the parallel sum reduction done on the GPU, because (relatively speaking)
@@ -2796,12 +5639,12 @@ public class HybridPrecisionNGStackReg extends RegistrationAndTransformation
                             I ignore this like the original implementation, but this is one of many reasons why the GPU version and the CPU version
                             will never yield the same results!
                             */
-                            gradient[0] += rescoordx * rescoordy;
-                            gradient[1] += rescoordx * sourcexGradientDoubleSlice[nIndex];
-                            gradient[2] += rescoordx * sourceyGradientDoubleSlice[nIndex];
-                            hessian[0][0] += rescoordy * rescoordy;
-                            hessian[0][1] += rescoordy * sourcexGradientDoubleSlice[nIndex];
-                            hessian[0][2] += rescoordy * sourceyGradientDoubleSlice[nIndex];
+                            gradient[0] += diff * theta;
+                            gradient[1] += diff * sourcexGradientDoubleSlice[nIndex];
+                            gradient[2] += diff * sourceyGradientDoubleSlice[nIndex];
+                            hessian[0][0] += theta * theta;
+                            hessian[0][1] += theta * sourcexGradientDoubleSlice[nIndex];
+                            hessian[0][2] += theta * sourceyGradientDoubleSlice[nIndex];
                             hessian[1][1] += sourcexGradientDoubleSlice[nIndex] * sourcexGradientDoubleSlice[nIndex];
                             hessian[1][2] += sourcexGradientDoubleSlice[nIndex] * sourceyGradientDoubleSlice[nIndex];
                             hessian[2][2] += sourceyGradientDoubleSlice[nIndex] * sourceyGradientDoubleSlice[nIndex];
@@ -2822,29 +5665,42 @@ public class HybridPrecisionNGStackReg extends RegistrationAndTransformation
             return mse/area;
         }
         
-        
-        private double doubleGetTranslationMeanSquares(double currentoffsetx, double currentoffsety)
+        private double doubleGetScaledRotationMeanSquares(double currentoffsetx, double currentoffsety, double currentangle, double currentscale)
         {
             double area = 0.0;
             double mse = 0.0;
+            // First reset the global values which will not be reset in the loop
+            Arrays.fill(gradient, 0.0);
+            for (int i = 0; (i < 4); i++) {
+                Arrays.fill(hessian[i], 0.0);
+            }
             if(!usesFloat)
             {
-                // we have the diffs let's calculate all the derived elements
+                // now we have the diffs let's calculate all the derived elements
                 int halfReductionSize = (int) (((sourceDoubleSlice.width * sourceDoubleSlice.height)+((sourceDoubleSlice.width * sourceDoubleSlice.height)%2))/2);
                 ByteBuffer buffer;
                 // calculate the MSE row-wise
                 if(halfReductionSize <= doublemaximumElementsForLocalFPTcombinedSum)
                 {                
-                    uniformBSplineTransformProgramKernels[KERNEL_dtranslationErrorWithGradAndHess]
+                    uniformBSplineTransformProgramKernels[KERNEL_dscaledRotationErrorWithGradAndHess]
                             .putArg(sourceDoubleSlice.Image)
                             .putArg(targetDoubleSlice.Coefficient)
                             .putArg(sourceDoubleSlice.xGradient)
                             .putArg(sourceDoubleSlice.yGradient)
                             .putArg(gradient0)
                             .putArg(gradient1)
+                            .putArg(gradient2)
+                            .putArg(gradient3)
                             .putArg(hessian00)
                             .putArg(hessian01)
+                            .putArg(hessian02)
+                            .putArg(hessian03)
                             .putArg(hessian11)
+                            .putArg(hessian12)
+                            .putArg(hessian13)
+                            .putArg(hessian22)
+                            .putArg(hessian23)
+                            .putArg(hessian33)
                             .putArg(doubleEntryImageBuffer)
                             .putArg(maskBuffer)
                             .putArg((int)sourceDoubleSlice.width)
@@ -2854,379 +5710,281 @@ public class HybridPrecisionNGStackReg extends RegistrationAndTransformation
                             .putArg((int)targetDoubleSlice.width * 2)
                             .putArg((int)targetDoubleSlice.height * 2)
                             .putArg(currentoffsetx)
-                            .putArg(currentoffsety);
+                            .putArg(currentoffsety)
+                            .putArg(Math.cos(currentangle))
+                            .putArg(-Math.sin(currentangle))
+                            .putArg(currentscale);
 
-                    int localWorkSize = (int)Math.min(uniformBSplineTransformProgramKernels[KERNEL_dtranslationErrorWithGradAndHess].getWorkGroupSize(device),blocksizeMultiplier*optimalMultiples[KERNEL_dtranslationErrorWithGradAndHess]);  // Local work size dimensions
-                    int globalWorkSize = StaticUtility.roundUp(localWorkSize, optimalMultiples[KERNEL_dtranslationErrorWithGradAndHess], (int)(sourceDoubleSlice.width*sourceDoubleSlice.height));
-                    queue.put1DRangeKernel(uniformBSplineTransformProgramKernels[KERNEL_dtranslationErrorWithGradAndHess],0,globalWorkSize,localWorkSize);
-                    uniformBSplineTransformProgramKernels[KERNEL_dtranslationErrorWithGradAndHess].rewind();
+                    int localWorkSize = (int)Math.min(uniformBSplineTransformProgramKernels[KERNEL_dscaledRotationErrorWithGradAndHess].getWorkGroupSize(device),blocksizeMultiplier*optimalMultiples[KERNEL_dscaledRotationErrorWithGradAndHess]);  // Local work size dimensions
+                    int globalWorkSize = StaticUtility.roundUp(localWorkSize, optimalMultiples[KERNEL_dscaledRotationErrorWithGradAndHess], (int)(sourceDoubleSlice.width*sourceDoubleSlice.height));
+                    queue.put1DRangeKernel(uniformBSplineTransformProgramKernels[KERNEL_dscaledRotationErrorWithGradAndHess],0,globalWorkSize,localWorkSize);
+                    uniformBSplineTransformProgramKernels[KERNEL_dscaledRotationErrorWithGradAndHess].rewind();
 
                     /*
                     Because each of the following kernels is synchronized by barriers on the GPU they can only be executed on a single compute device.
                     Therefore using an async queue may increase the speed by allowing multiple kernels to execute in parallel (if local memory permits)
                     */
-                    localWorkSize = halfReductionSize % optimalMultiples[KERNEL_dtranslationSumInLocalMemoryCombined] == 0 ? halfReductionSize : (int)Math.min(halfReductionSize + (optimalMultiples[KERNEL_dtranslationSumInLocalMemoryCombined] - (halfReductionSize % optimalMultiples[KERNEL_dtranslationSumInLocalMemoryCombined])), doublemaximumElementsForLocalFPTcombinedSum);
+                    localWorkSize = halfReductionSize % optimalMultiples[KERNEL_dscaledRotationSumInLocalMemoryCombined] == 0 ? halfReductionSize : (int)Math.min(halfReductionSize + (optimalMultiples[KERNEL_dscaledRotationSumInLocalMemoryCombined] - (halfReductionSize % optimalMultiples[KERNEL_dscaledRotationSumInLocalMemoryCombined])), doublemaximumElementsForLocalFPTcombinedSum);
                     globalWorkSize = localWorkSize;
-                    uniformBSplineTransformProgramKernels[KERNEL_dtranslationSumInLocalMemoryCombined]
+                    uniformBSplineTransformProgramKernels[KERNEL_dscaledRotationSumInLocalMemoryCombined]
                             .putArg(maskBuffer)
                             .putArg(doubleEntryImageBuffer)
                             .putArg(gradient0)
                             .putArg(gradient1)
+                            .putArg(gradient2)
+                            .putArg(gradient3)
                             .putArg(hessian00)
                             .putArg(hessian01)
+                            .putArg(hessian02)
+                            .putArg(hessian03)
                             .putArg(hessian11)
+                            .putArg(hessian12)
+                            .putArg(hessian13)
+                            .putArg(hessian22)
+                            .putArg(hessian23)
+                            .putArg(hessian33)
                             .putNullArg(localWorkSize*8 /*size in bytes of local mem allocation*/)
                             .putArg((int)(sourceDoubleSlice.width * sourceDoubleSlice.height));
-                    queue.put1DRangeKernel(uniformBSplineTransformProgramKernels[KERNEL_dtranslationSumInLocalMemoryCombined],0,globalWorkSize,localWorkSize);
-                    uniformBSplineTransformProgramKernels[KERNEL_dtranslationSumInLocalMemoryCombined].rewind();
+                    queue.put1DRangeKernel(uniformBSplineTransformProgramKernels[KERNEL_dscaledRotationSumInLocalMemoryCombined],0,globalWorkSize,localWorkSize);
+                    uniformBSplineTransformProgramKernels[KERNEL_dscaledRotationSumInLocalMemoryCombined].rewind();
 
                     buffer = queue.putMapBuffer(maskBuffer, CLMemory.Map.READ, 0, 8, true);
                     buffer.rewind();
-                    area = buffer.asDoubleBuffer().get();
+                    area = (double)buffer.asDoubleBuffer().get();
                     queue.putUnmapMemory(maskBuffer, buffer);
-                    buffer = queue.putMapBuffer(doubleEntryImageBuffer, CLMemory.Map.READ, 0, 8, true);
+                    buffer = queue.putMapBuffer(entryImageBuffer, CLMemory.Map.READ, 0, 8, true);
                     buffer.rewind();
-                    mse = buffer.asDoubleBuffer().get();
-                    queue.putUnmapMemory(doubleEntryImageBuffer, buffer);
+                    mse = (double)buffer.asDoubleBuffer().get();
+                    queue.putUnmapMemory(entryImageBuffer, buffer);
                     buffer = queue.putMapBuffer(gradient0, CLMemory.Map.READ, 0, 8, true);
                     buffer.rewind();
-                    gradient[0] = buffer.asDoubleBuffer().get();
+                    gradient[0] = (double)buffer.asDoubleBuffer().get();
                     queue.putUnmapMemory(gradient0, buffer);
                     buffer = queue.putMapBuffer(gradient1, CLMemory.Map.READ, 0, 8, true);
                     buffer.rewind();
-                    gradient[1] = buffer.asDoubleBuffer().get();
+                    gradient[1] = (double)buffer.asDoubleBuffer().get();
                     queue.putUnmapMemory(gradient1, buffer);
+                    buffer = queue.putMapBuffer(gradient2, CLMemory.Map.READ, 0, 8, true);
+                    buffer.rewind();
+                    gradient[2] = (double)buffer.asDoubleBuffer().get();
+                    queue.putUnmapMemory(gradient2, buffer);
+                    buffer = queue.putMapBuffer(gradient3, CLMemory.Map.READ, 0, 8, true);
+                    buffer.rewind();
+                    gradient[3] = (double)buffer.asDoubleBuffer().get();
+                    queue.putUnmapMemory(gradient3, buffer);
                     buffer = queue.putMapBuffer(hessian00, CLMemory.Map.READ, 0, 8, true);
                     buffer.rewind();
-                    hessian[0][0] = buffer.asDoubleBuffer().get();
+                    hessian[0][0] = (double)buffer.asDoubleBuffer().get();
                     queue.putUnmapMemory(hessian00, buffer);
                     buffer = queue.putMapBuffer(hessian01, CLMemory.Map.READ, 0, 8, true);
                     buffer.rewind();
-                    hessian[0][1] = buffer.asDoubleBuffer().get();
+                    hessian[0][1] = (double)buffer.asDoubleBuffer().get();
                     queue.putUnmapMemory(hessian01, buffer);
+                    buffer = queue.putMapBuffer(hessian02, CLMemory.Map.READ, 0, 8, true);
+                    buffer.rewind();
+                    hessian[0][2] = (double)buffer.asDoubleBuffer().get();
+                    queue.putUnmapMemory(hessian02, buffer);
+                    buffer = queue.putMapBuffer(hessian03, CLMemory.Map.READ, 0, 8, true);
+                    buffer.rewind();
+                    hessian[0][3] = (double)buffer.asDoubleBuffer().get();
+                    queue.putUnmapMemory(hessian03, buffer);
                     buffer = queue.putMapBuffer(hessian11, CLMemory.Map.READ, 0, 8, true);
                     buffer.rewind();
-                    hessian[1][1] = buffer.asDoubleBuffer().get();
+                    hessian[1][1] = (double)buffer.asDoubleBuffer().get();
                     queue.putUnmapMemory(hessian11, buffer);
+                    buffer = queue.putMapBuffer(hessian12, CLMemory.Map.READ, 0, 8, true);
+                    buffer.rewind();
+                    hessian[1][2] = (double)buffer.asDoubleBuffer().get();
+                    queue.putUnmapMemory(hessian12, buffer);
+                    buffer = queue.putMapBuffer(hessian13, CLMemory.Map.READ, 0, 8, true);
+                    buffer.rewind();
+                    hessian[1][3] = (double)buffer.asDoubleBuffer().get();
+                    queue.putUnmapMemory(hessian13, buffer);
+                    buffer = queue.putMapBuffer(hessian22, CLMemory.Map.READ, 0, 8, true);
+                    buffer.rewind();
+                    hessian[2][2] = (double)buffer.asDoubleBuffer().get();
+                    queue.putUnmapMemory(hessian22, buffer);
+                    buffer = queue.putMapBuffer(hessian23, CLMemory.Map.READ, 0, 8, true);
+                    buffer.rewind();
+                    hessian[2][3] = (double)buffer.asDoubleBuffer().get();
+                    queue.putUnmapMemory(hessian23, buffer);
+                    buffer = queue.putMapBuffer(hessian33, CLMemory.Map.READ, 0, 8, true);
+                    buffer.rewind();
+                    hessian[3][3] = (double)buffer.asDoubleBuffer().get();
+                    queue.putUnmapMemory(hessian33, buffer);
                 }
                 else
                 {
 
-                    int nrOfBlocks = ((int)(sourceDoubleSlice.width * sourceDoubleSlice.height))%doubleblockSizesRigidBodyParallel;
-                    nrOfBlocks = nrOfBlocks == 0 ? (int)Math.min(((int)(sourceDoubleSlice.width * sourceDoubleSlice.height))/doubleblockSizesRigidBodyParallel,maximumSumReductionBlockNr) : (int)Math.min((((int)(sourceDoubleSlice.width * sourceDoubleSlice.height))+(doubleblockSizesRigidBodyParallel-nrOfBlocks))/doubleblockSizesRigidBodyParallel,maximumSumReductionBlockNr);
+                    int nrOfBlocks = ((int)(sourceDoubleSlice.width * sourceDoubleSlice.height))%doubleblockSizesParallel;
+                    nrOfBlocks = nrOfBlocks == 0 ? (int)Math.min(((int)(sourceDoubleSlice.width * sourceDoubleSlice.height))/doubleblockSizesParallel,maximumSumReductionBlockNr) : (int)Math.min((((int)(sourceDoubleSlice.width * sourceDoubleSlice.height))+(doubleblockSizesParallel-nrOfBlocks))/doubleblockSizesParallel,maximumSumReductionBlockNr);
 
-                    int globalWorkSize = nrOfBlocks * doubleblockSizesRigidBodyParallel;
-                    uniformBSplineTransformProgramKernels[KERNEL_dtranslationErrorWithGradAndHessBrent]
+                    int globalWorkSize = nrOfBlocks * doubleblockSizesParallel;
+                    uniformBSplineTransformProgramKernels[KERNEL_dscaledRotationErrorWithGradAndHessBrent]
                             .putArg(sourceDoubleSlice.Image)
                             .putArg(targetDoubleSlice.Coefficient)
                             .putArg(sourceDoubleSlice.xGradient)
                             .putArg(sourceDoubleSlice.yGradient)
                             .putArg(gradient0)
                             .putArg(gradient1)
+                            .putArg(gradient2)
+                            .putArg(gradient3)
                             .putArg(hessian00)
                             .putArg(hessian01)
+                            .putArg(hessian02)
+                            .putArg(hessian03)
                             .putArg(hessian11)
+                            .putArg(hessian12)
+                            .putArg(hessian13)
+                            .putArg(hessian22)
+                            .putArg(hessian23)
+                            .putArg(hessian33)
                             .putArg(doubleEntryImageBuffer)
                             .putArg(maskBuffer);
 
 
-                    uniformBSplineTransformProgramKernels[KERNEL_dtranslationErrorWithGradAndHessBrent]
-                            .putNullArg(blockSizesRigidBodyParallel*8 /*size in bytes of local mem allocation*/)
-                            .putNullArg(blockSizesRigidBodyParallel*8 /*size in bytes of local mem allocation*/)
-                            .putNullArg(blockSizesRigidBodyParallel*8 /*size in bytes of local mem allocation*/)
-                            .putNullArg(blockSizesRigidBodyParallel*8 /*size in bytes of local mem allocation*/)
-                            .putNullArg(blockSizesRigidBodyParallel*8 /*size in bytes of local mem allocation*/)
-                            .putNullArg(blockSizesRigidBodyParallel*8 /*size in bytes of local mem allocation*/)
-                            .putNullArg(blockSizesRigidBodyParallel*8 /*size in bytes of local mem allocation*/);
+                    uniformBSplineTransformProgramKernels[KERNEL_dscaledRotationErrorWithGradAndHessBrent]
+                            .putNullArg(doubleblockSizesParallel*8 /*size in bytes of local mem allocation*/)
+                            .putNullArg(doubleblockSizesParallel*8 /*size in bytes of local mem allocation*/)
+                            .putNullArg(doubleblockSizesParallel*8 /*size in bytes of local mem allocation*/)
+                            .putNullArg(doubleblockSizesParallel*8 /*size in bytes of local mem allocation*/)
+                            .putNullArg(doubleblockSizesParallel*8 /*size in bytes of local mem allocation*/)
+                            .putNullArg(doubleblockSizesParallel*8 /*size in bytes of local mem allocation*/)
+                            .putNullArg(doubleblockSizesParallel*8 /*size in bytes of local mem allocation*/)
+                            .putNullArg(doubleblockSizesParallel*8 /*size in bytes of local mem allocation*/)
+                            .putNullArg(doubleblockSizesParallel*8 /*size in bytes of local mem allocation*/)
+                            .putNullArg(doubleblockSizesParallel*8 /*size in bytes of local mem allocation*/)
+                            .putNullArg(doubleblockSizesParallel*8 /*size in bytes of local mem allocation*/)
+                            .putNullArg(doubleblockSizesParallel*8 /*size in bytes of local mem allocation*/)
+                            .putNullArg(doubleblockSizesParallel*8 /*size in bytes of local mem allocation*/)
+                            .putNullArg(doubleblockSizesParallel*8 /*size in bytes of local mem allocation*/)
+                            .putNullArg(doubleblockSizesParallel*8 /*size in bytes of local mem allocation*/)
+                            .putNullArg(doubleblockSizesParallel*8 /*size in bytes of local mem allocation*/);
 
-                    uniformBSplineTransformProgramKernels[KERNEL_dtranslationErrorWithGradAndHessBrent]
+                    uniformBSplineTransformProgramKernels[KERNEL_dscaledRotationErrorWithGradAndHessBrent]
                             .putArg((int)sourceDoubleSlice.width)
                             .putArg((int)sourceDoubleSlice.height)
                             .putArg((int)targetDoubleSlice.width)
                             .putArg((int)targetDoubleSlice.height);
 
-                    uniformBSplineTransformProgramKernels[KERNEL_dtranslationErrorWithGradAndHessBrent]
+                    uniformBSplineTransformProgramKernels[KERNEL_dscaledRotationErrorWithGradAndHessBrent]
                             .putArg(currentoffsetx)
-                            .putArg(currentoffsety);
+                            .putArg(currentoffsety)
+                            .putArg(Math.cos(currentangle))
+                            .putArg(-Math.sin(currentangle))
+                            .putArg(currentscale);
 
-                    uniformBSplineTransformProgramKernels[KERNEL_dtranslationErrorWithGradAndHessBrent]
+                    uniformBSplineTransformProgramKernels[KERNEL_dscaledRotationErrorWithGradAndHessBrent]
                             .putArg((int)targetDoubleSlice.width*2)
                             .putArg((int)targetDoubleSlice.height*2);                
-                    queue.put1DRangeKernel(uniformBSplineTransformProgramKernels[KERNEL_dtranslationErrorWithGradAndHessBrent],0,globalWorkSize,doubleblockSizesRigidBodyParallel);
-                    uniformBSplineTransformProgramKernels[KERNEL_dtranslationErrorWithGradAndHessBrent].rewind();
+                    queue.put1DRangeKernel(uniformBSplineTransformProgramKernels[KERNEL_dscaledRotationErrorWithGradAndHessBrent],0,globalWorkSize,doubleblockSizesParallel);
+                    uniformBSplineTransformProgramKernels[KERNEL_dscaledRotationErrorWithGradAndHessBrent].rewind();
 
                     // use in-memory summations (also async) each with its own buffer to do the final reduction)
                     halfReductionSize = (int) ((nrOfBlocks+(nrOfBlocks%2))/2);
-                    int localWorkSize = halfReductionSize % optimalMultiples[KERNEL_dtranslationSumInLocalMemoryCombined] == 0 ? halfReductionSize : (int)Math.min(halfReductionSize + (optimalMultiples[KERNEL_dtranslationSumInLocalMemoryCombined] - (halfReductionSize % optimalMultiples[KERNEL_dtranslationSumInLocalMemoryCombined])), doublemaximumElementsForLocalFPTcombinedSum);
+                    int localWorkSize = halfReductionSize % optimalMultiples[KERNEL_dscaledRotationSumInLocalMemoryCombined] == 0 ? halfReductionSize : (int)Math.min(halfReductionSize + (optimalMultiples[KERNEL_dscaledRotationSumInLocalMemoryCombined] - (halfReductionSize % optimalMultiples[KERNEL_dscaledRotationSumInLocalMemoryCombined])), doublemaximumElementsForLocalFPTcombinedSum);
                     globalWorkSize = localWorkSize;
-                    uniformBSplineTransformProgramKernels[KERNEL_dtranslationSumInLocalMemoryCombined]
-                            .putArg(gradient0)
+                    uniformBSplineTransformProgramKernels[KERNEL_dscaledRotationSumInLocalMemoryCombined]
+                    		.putArg(gradient0)
                             .putArg(gradient1)
+                            .putArg(gradient2)
+                            .putArg(gradient3)
                             .putArg(hessian00)
                             .putArg(hessian01)
+                            .putArg(hessian02)
+                            .putArg(hessian03)
                             .putArg(hessian11)
+                            .putArg(hessian12)
+                            .putArg(hessian13)
+                            .putArg(hessian22)
+                            .putArg(hessian23)
+                            .putArg(hessian33)
                             .putArg(doubleEntryImageBuffer)
                             .putArg(maskBuffer)
                             .putNullArg(halfReductionSize*8 /*size in bytes of local mem allocation*/)
                             .putArg((int)(nrOfBlocks));
-                    queue.put1DRangeKernel(uniformBSplineTransformProgramKernels[KERNEL_dtranslationSumInLocalMemoryCombined],0,globalWorkSize,localWorkSize);
-                    uniformBSplineTransformProgramKernels[KERNEL_dtranslationSumInLocalMemoryCombined].rewind();
+                    queue.put1DRangeKernel(uniformBSplineTransformProgramKernels[KERNEL_dscaledRotationSumInLocalMemoryCombined],0,globalWorkSize,localWorkSize);
+                    uniformBSplineTransformProgramKernels[KERNEL_dscaledRotationSumInLocalMemoryCombined].rewind();
 
                     buffer = queue.putMapBuffer(maskBuffer, CLMemory.Map.READ, 0, 8, true);
                     buffer.rewind();
-                    area = buffer.asDoubleBuffer().get();
+                    area = (double)buffer.asDoubleBuffer().get();
                     queue.putUnmapMemory(maskBuffer, buffer);
-
-                    buffer = queue.putMapBuffer(doubleEntryImageBuffer, CLMemory.Map.READ, 0, 8, true);
+                    
+                    buffer = queue.putMapBuffer(entryImageBuffer, CLMemory.Map.READ, 0, 8, true);
                     buffer.rewind();
-                    mse = buffer.asDoubleBuffer().get();
-                    queue.putUnmapMemory(doubleEntryImageBuffer, buffer);
-
+                    mse = (double)buffer.asDoubleBuffer().get();
+                    queue.putUnmapMemory(entryImageBuffer, buffer);
+                            
                     buffer = queue.putMapBuffer(gradient0, CLMemory.Map.READ, 0, 8, true);
                     buffer.rewind();
-                    gradient[0] = buffer.asDoubleBuffer().get();
+                    gradient[0] = (double)buffer.asDoubleBuffer().get();
                     queue.putUnmapMemory(gradient0, buffer);
-
+                            
                     buffer = queue.putMapBuffer(gradient1, CLMemory.Map.READ, 0, 8, true);
                     buffer.rewind();
-                    gradient[1] = buffer.asDoubleBuffer().get();
+                    gradient[1] = (double)buffer.asDoubleBuffer().get();
                     queue.putUnmapMemory(gradient1, buffer);
-
+                            
+                    buffer = queue.putMapBuffer(gradient2, CLMemory.Map.READ, 0, 8, true);
+                    buffer.rewind();
+                    gradient[2] = (double)buffer.asDoubleBuffer().get();
+                    queue.putUnmapMemory(gradient2, buffer);
+                    
+                    buffer = queue.putMapBuffer(gradient3, CLMemory.Map.READ, 0, 8, true);
+                    buffer.rewind();
+                    gradient[3] = (double)buffer.asDoubleBuffer().get();
+                    queue.putUnmapMemory(gradient3, buffer);
+                            
                     buffer = queue.putMapBuffer(hessian00, CLMemory.Map.READ, 0, 8, true);
                     buffer.rewind();
-                    hessian[0][0] = buffer.asDoubleBuffer().get();
+                    hessian[0][0] = (double)buffer.asDoubleBuffer().get();
                     queue.putUnmapMemory(hessian00, buffer);
-
+                            
                     buffer = queue.putMapBuffer(hessian01, CLMemory.Map.READ, 0, 8, true);
                     buffer.rewind();
-                    hessian[0][1] = buffer.asDoubleBuffer().get();
+                    hessian[0][1] = (double)buffer.asDoubleBuffer().get();
                     queue.putUnmapMemory(hessian01, buffer);
-
+                            
+                    buffer = queue.putMapBuffer(hessian02, CLMemory.Map.READ, 0, 8, true);
+                    buffer.rewind();
+                    hessian[0][2] = (double)buffer.asDoubleBuffer().get();
+                    queue.putUnmapMemory(hessian02, buffer);
+                    
+                    buffer = queue.putMapBuffer(hessian03, CLMemory.Map.READ, 0, 8, true);
+                    buffer.rewind();
+                    hessian[0][3] = (double)buffer.asDoubleBuffer().get();
+                    queue.putUnmapMemory(hessian03, buffer);
+                            
                     buffer = queue.putMapBuffer(hessian11, CLMemory.Map.READ, 0, 8, true);
                     buffer.rewind();
-                    hessian[1][1] = buffer.asDoubleBuffer().get();
+                    hessian[1][1] = (double)buffer.asDoubleBuffer().get();
                     queue.putUnmapMemory(hessian11, buffer);
-                }
-            }
-            else
-            {
-                // First reset the global values which will not be reset in the loop
-                gradient[0] = 0.0;
-                gradient[1] = 0.0;
-                hessian[0][0] = 0.0;
-                hessian[0][1] = 0.0;
-                hessian[1][1] = 0.0;
-                final int width = (int)sharedContext.img.dimension(0);
-                final int height = (int)sharedContext.img.dimension(1);
-                final int doubletargetwidth = width * 2;
-                final int doubletargetheight = height * 2;
-                int nIndex = 0;
-                int larea = 0;
-                int p;
-                int q;
-                int tmpindex;
-                double s;
-                double coordx;
-                double rescoordx;
-                double coordy;
-                double rescoordy;
-                int mskx;
-                int msky;
-                for(int i = 0;i < height;i++)
-                {
-                	// First walk along the Y-vector direction and reset the X-position (otherwise the
-                    // y position is initially correct and then lagging behind by one all the time)
-                    coordx = currentoffsetx;
-                    coordy = currentoffsety + ((double)i);
-                    for(int n = 0;n < width;n++,nIndex++)
-                    {
-                        mskx = (int)Math.round(coordx);
-                        msky = (int)Math.round(coordy);
-                        if((mskx >= 0)&&(mskx < width)&&(msky >= 0)&&(msky < height))
-                        {
-                            larea++;
-                            // Calculate X-interpolation indices
-                            p = (coordx >= 0) ? (((int)coordx) + 2) : (((int)coordx) + 1);
-                            for(int c = 0;c < 4;c++,p--)
-                            {
-                                q = (p < 0) ? (-1 - p) : p;
-                                q = (q < doubletargetwidth) ? q : q % doubletargetwidth;
-                                xInterpolationIndices[c] = q >= width ? (doubletargetwidth - 1 - q) : q;
-                            }
-                            // calculate Y-interpolation indices
-                            p = (coordy >= 0) ? (((int)coordy) + 2) : (((int)coordy) + 1);
-                            for(int c = 0;c < 4;c++,p--)
-                            {
-                                q = (p < 0) ? (-1 - p) : p;
-                                q = (q < doubletargetheight) ? q : q % doubletargetheight;
-                                yInterpolationIndices[c] = q >= height ? (doubletargetheight - 1 - q) * width : q * width;// calculate linearized coordinates of the coefficient array
-                            }
-                            // get the residuals of the coordinates
-                            rescoordx = coordx - (coordx >= 0.0 ? ((double)((int)coordx)) : ((double)(((int)coordx) - 1)));
-                            rescoordy = coordy - (coordy >= 0.0 ? ((double)((int)coordy)) : ((double)(((int)coordy) - 1)));
-                            // calculate the X-weights
-                            s = 1.0 - rescoordx;
-                            xWeights[3] = Math.pow(s, 3.0) / 6.0;
-                            s = rescoordx * rescoordx;
-                            xWeights[2] = (2.0 / 3.0) - 0.5 * s * (2.0 - rescoordx);
-                            xWeights[0] = s * rescoordx / 6.0;
-                            xWeights[1] = 1.0 - xWeights[0] - xWeights[2] - xWeights[3];
-                            // calculate the Y-weights
-                            s = 1.0 - rescoordy;
-                            yWeights[3] = Math.pow(s, 3.0) / 6.0;
-                            s = rescoordy * rescoordy;
-                            yWeights[2] = (2.0 / 3.0) - 0.5 * s * (2.0 - rescoordy);
-                            yWeights[0] = s * rescoordy / 6.0;
-                            yWeights[1] = 1.0 - yWeights[0] - yWeights[2] - yWeights[3];
-
-                            // calculate the interpolated value from the target coefficients
-                            s = 0.0;
-                            for(int y = 0;y < 4;y++)
-                            {
-                                rescoordx = 0.0;// To avoid using too many variables this one will be repurposed
-                                tmpindex = yInterpolationIndices[y];
-                                for(int x = 0;x < 4; x++)
-                                {
-                                    rescoordx += xWeights[x] * targetCoefficientDoubleSlice[tmpindex + xInterpolationIndices[x]];
-                                }
-                                s += yWeights[y] * rescoordx;
-                            }
-
-                            // calculate the values for returning
-                            rescoordx = sourceImageDoubleSlice[nIndex] - s;// repurposed for diff
-                            mse += rescoordx * rescoordx;
-                            /*
-                            TODO/FIXME/KNOWN ISSUE:
-                            The following summation is MUCH worse than the parallel sum reduction done on the GPU, because (relatively speaking)
-                            small numbers are added to an ever growing larger number reducing the precision in the outcome. Currently
-                            I ignore this like the original implementation, but this is one of many reasons why the GPU version and the CPU version
-                            will never yield the same results!
-                            */
-                            gradient[0] += rescoordx * sourcexGradientDoubleSlice[nIndex];
-                            gradient[1] += rescoordx * sourceyGradientDoubleSlice[nIndex];
-                            hessian[0][0] += sourcexGradientDoubleSlice[nIndex] * sourcexGradientDoubleSlice[nIndex];
-                            hessian[0][1] += sourcexGradientDoubleSlice[nIndex] * sourceyGradientDoubleSlice[nIndex];
-                            hessian[1][1] += sourceyGradientDoubleSlice[nIndex] * sourceyGradientDoubleSlice[nIndex];
-                        }
-                        // walk along the X-vector direction
-                        coordx += 1.0;
-                    }
-                }
-                area = (double)larea;
-            }
-            // symmetrize hessian
-            for (int i = 1; (i < 2); i++) {
-                for (int j = 0; (j < i); j++) {
-                        hessian[i][j] = hessian[j][i];
-                }
-            }
-            return mse/area;
-        }
-        
-        
-        private double doubleGetRigidBodyMeanSquaresWithoutHessian(double currentoffsetx, double currentoffsety, double currentangle)
-        {
-            double area = 0.0;
-            double mse = 0.0;
-            if(!usesFloat)
-            {
-                uniformBSplineTransformProgramKernels[KERNEL_drigidBodyError]
-                        .putArg(sourceDoubleSlice.Image)
-                        .putArg(targetDoubleSlice.Coefficient)
-                        .putArg(doubleEntryImageBuffer)
-                        .putArg(maskBuffer)
-                        .putArg((int)sourceDoubleSlice.width)
-                        .putArg((int)sourceDoubleSlice.height)
-                        .putArg((int)targetDoubleSlice.width)
-                        .putArg((int)targetDoubleSlice.height)
-                        .putArg((int)targetDoubleSlice.width * 2)
-                        .putArg((int)targetDoubleSlice.height * 2)
-                        .putArg(currentoffsetx)
-                        .putArg(currentoffsety)
-                        .putArg(Math.cos(currentangle))
-                        .putArg(-Math.sin(currentangle));          
-                int localWorkSize = (int)Math.min(uniformBSplineTransformProgramKernels[KERNEL_drigidBodyError].getWorkGroupSize(device),optimalMultiples[KERNEL_drigidBodyError]*blocksizeMultiplier);  // Local work size dimensions
-                int globalWorkSize = StaticUtility.roundUp(localWorkSize, optimalMultiples[KERNEL_drigidBodyError], (int)(sourceDoubleSlice.width*sourceDoubleSlice.height));
-                queue.put1DRangeKernel(uniformBSplineTransformProgramKernels[KERNEL_drigidBodyError],0,globalWorkSize,localWorkSize);
-                uniformBSplineTransformProgramKernels[KERNEL_drigidBodyError].rewind();
-                //now we have the diffs let's calculate all the derived elements
-
-                // to transfer the data to the async queue it has to be synchronized first
-                queue.finish();
-
-                // calculate the MSE row-wise
-                int halfReductionSize = (int) (((sourceDoubleSlice.width * sourceDoubleSlice.height)+((sourceDoubleSlice.width * sourceDoubleSlice.height)%2))/2);
-                int nrOfBlocks;
-                ByteBuffer buffer;
-
-                if(halfReductionSize <= doublemaximumElementsForLocalFPTsum)
-                {
-                    /*
-                    Because each of the following kernels is synchronized by barriers on the GPU they can only be executed on a single compute device.
-                    Therefore using an async queue may increase the speed by allowing multiple kernels to execute in parallel (if local memory permits)
-                    */
-                    localWorkSize = halfReductionSize % optimalMultiples[KERNEL_dsumInLocalMemory] == 0 ? halfReductionSize : (int)Math.min(halfReductionSize + (optimalMultiples[KERNEL_dsumInLocalMemory] - (halfReductionSize % optimalMultiples[KERNEL_dsumInLocalMemory])), doublemaximumElementsForLocalFPTsum);
-                    globalWorkSize = localWorkSize;
-
-                    uniformBSplineTransformProgramKernels[KERNEL_dsumInLocalMemory].putArg(maskBuffer).putNullArg(halfReductionSize*8 /*size in bytes of local mem allocation*/).putArg((int)(sourceDoubleSlice.width * sourceDoubleSlice.height));
-                    asyncQueue.put1DRangeKernel(uniformBSplineTransformProgramKernels[KERNEL_dsumInLocalMemory],0,globalWorkSize,localWorkSize);
-                    uniformBSplineTransformProgramKernels[KERNEL_dsumInLocalMemory].rewind();
-                    uniformBSplineTransformProgramKernels[KERNEL_dsumInLocalMemory].putArg(doubleEntryImageBuffer).putNullArg(halfReductionSize*8 /*size in bytes of local mem allocation*/).putArg((int)(sourceDoubleSlice.width * sourceDoubleSlice.height));
-                    asyncQueue.put1DRangeKernel(uniformBSplineTransformProgramKernels[KERNEL_dsumInLocalMemory],0,globalWorkSize,localWorkSize);
-                    uniformBSplineTransformProgramKernels[KERNEL_dsumInLocalMemory].rewind();
-                    asyncQueue.finish();
-                    buffer = asyncQueue.putMapBuffer(maskBuffer, CLMemory.Map.READ, 0, 8, true);
+                            
+                    buffer = queue.putMapBuffer(hessian12, CLMemory.Map.READ, 0, 8, true);
                     buffer.rewind();
-                    area = (double)buffer.asFloatBuffer().get();
-                    asyncQueue.putUnmapMemory(maskBuffer, buffer);
-                    buffer = asyncQueue.putMapBuffer(doubleEntryImageBuffer, CLMemory.Map.READ, 0, 8, true);
+                    hessian[1][2] = (double)buffer.asDoubleBuffer().get();
+                    queue.putUnmapMemory(hessian12, buffer);
+                    
+                    buffer = queue.putMapBuffer(hessian13, CLMemory.Map.READ, 0, 8, true);
                     buffer.rewind();
-                    mse = (double)buffer.asFloatBuffer().get();
-                    asyncQueue.putUnmapMemory(doubleEntryImageBuffer, buffer);
-                    asyncQueue.finish();
-                }
-                else
-                {
-                    nrOfBlocks = ((int)(sourceDoubleSlice.width * sourceDoubleSlice.height))%doubleblockSizesFPT;
-                    nrOfBlocks = nrOfBlocks == 0 ? (int)Math.min(((int)(sourceDoubleSlice.width * sourceDoubleSlice.height))/doubleblockSizesFPT,maximumSumReductionBlockNr) : (int)Math.min((((int)(sourceDoubleSlice.width * sourceDoubleSlice.height))+(doubleblockSizesFPT-nrOfBlocks))/doubleblockSizesFPT,maximumSumReductionBlockNr);
-
-                    globalWorkSize = nrOfBlocks * doubleblockSizesFPT;
-                    uniformBSplineTransformProgramKernels[KERNEL_dparallelGroupedSumReduction].putArg(maskBuffer).putArg(parallelSumReductionBuffers[0]).putArg((int)(sourceDoubleSlice.width * sourceDoubleSlice.height)).putNullArg(doubleblockSizesFPT*8 /*size in bytes of local mem allocation*/);
-                    asyncQueue.put1DRangeKernel(uniformBSplineTransformProgramKernels[KERNEL_dparallelGroupedSumReduction],0,globalWorkSize,doubleblockSizesFPT);
-                    uniformBSplineTransformProgramKernels[KERNEL_dparallelGroupedSumReduction].rewind();
-
-                    uniformBSplineTransformProgramKernels[KERNEL_dparallelGroupedSumReduction].putArg(doubleEntryImageBuffer).putArg(parallelSumReductionBuffers[1]).putArg((int)(sourceDoubleSlice.width * sourceDoubleSlice.height)).putNullArg(doubleblockSizesFPT*8 /*size in bytes of local mem allocation*/);
-                    asyncQueue.put1DRangeKernel(uniformBSplineTransformProgramKernels[KERNEL_dparallelGroupedSumReduction],0,globalWorkSize,doubleblockSizesFPT);
-                    uniformBSplineTransformProgramKernels[KERNEL_dparallelGroupedSumReduction].rewind();
-
-                    // synchronize the data
-                    asyncQueue.finish();
-
-                    // reduce in local memory
-                    halfReductionSize = (int) ((nrOfBlocks+(nrOfBlocks%2))/2);
-                    localWorkSize = halfReductionSize % optimalMultiples[KERNEL_dsumInLocalMemory] == 0 ? halfReductionSize : (int)Math.min(halfReductionSize + (optimalMultiples[KERNEL_dsumInLocalMemory] - (halfReductionSize % optimalMultiples[KERNEL_dsumInLocalMemory])), doublemaximumElementsForLocalFPTsum);
-                    globalWorkSize = localWorkSize;
-                    uniformBSplineTransformProgramKernels[KERNEL_dsumInLocalMemory].putArg(parallelSumReductionBuffers[0]).putNullArg(halfReductionSize*8 /*size in bytes of local mem allocation*/).putArg(nrOfBlocks);
-                    asyncQueue.put1DRangeKernel(uniformBSplineTransformProgramKernels[KERNEL_dsumInLocalMemory],0,globalWorkSize,localWorkSize);
-                    uniformBSplineTransformProgramKernels[KERNEL_dsumInLocalMemory].rewind();
-
-                    uniformBSplineTransformProgramKernels[KERNEL_dsumInLocalMemory].putArg(parallelSumReductionBuffers[1]).putNullArg(halfReductionSize*8 /*size in bytes of local mem allocation*/).putArg(nrOfBlocks);
-                    asyncQueue.put1DRangeKernel(uniformBSplineTransformProgramKernels[KERNEL_dsumInLocalMemory],0,globalWorkSize,localWorkSize);
-                    uniformBSplineTransformProgramKernels[KERNEL_dsumInLocalMemory].rewind();
-
-                    // synchronize again
-                    asyncQueue.finish();
-
-                    // Download data
-                    buffer = asyncQueue.putMapBuffer(parallelSumReductionBuffers[0], CLMemory.Map.READ, 0, 8, true);
+                    hessian[1][3] = (double)buffer.asDoubleBuffer().get();
+                    queue.putUnmapMemory(hessian13, buffer);
+                            
+                    buffer = queue.putMapBuffer(hessian22, CLMemory.Map.READ, 0, 8, true);
                     buffer.rewind();
-                    area = (double)buffer.asFloatBuffer().get();
-                    asyncQueue.putUnmapMemory(parallelSumReductionBuffers[0], buffer);
-                    buffer = asyncQueue.putMapBuffer(parallelSumReductionBuffers[1], CLMemory.Map.READ, 0, 8, true);
+                    hessian[2][2] = (double)buffer.asDoubleBuffer().get();
+                    queue.putUnmapMemory(hessian22, buffer);
+                    
+                    buffer = queue.putMapBuffer(hessian23, CLMemory.Map.READ, 0, 8, true);
                     buffer.rewind();
-                    mse = (double)buffer.asFloatBuffer().get();
-                    asyncQueue.putUnmapMemory(parallelSumReductionBuffers[1], buffer);
-                    asyncQueue.finish();
+                    hessian[2][3] = (double)buffer.asDoubleBuffer().get();
+                    queue.putUnmapMemory(hessian23, buffer);
+                    
+                    buffer = queue.putMapBuffer(hessian33, CLMemory.Map.READ, 0, 8, true);
+                    buffer.rewind();
+                    hessian[3][3] = (double)buffer.asDoubleBuffer().get();
+                    queue.putUnmapMemory(hessian33, buffer);
                 }
             }
             else
@@ -3237,12 +5995,9 @@ public class HybridPrecisionNGStackReg extends RegistrationAndTransformation
                 final int doubletargetheight = height * 2;
                 int nIndex = 0;
                 int larea = 0;
-                int p;
-                int q;
-                int tmpindex;
                 double s;
-                double xvecx = Math.cos(currentangle);
-                double xvecy = -Math.sin(currentangle);
+                double xvecx = Math.cos(currentangle) * currentscale;
+                double xvecy = -Math.sin(currentangle) * currentscale;
                 double yvecx = -xvecy;
                 double yvecy = xvecx;
                 double coordx;
@@ -3264,56 +6019,41 @@ public class HybridPrecisionNGStackReg extends RegistrationAndTransformation
                         if((mskx >= 0)&&(mskx < width)&&(msky >= 0)&&(msky < height))
                         {
                             larea++;
-                            // Calculate X-interpolation indices
-                            p = (coordx >= 0) ? (((int)coordx) + 2) : (((int)coordx) + 1);
-                            for(int c = 0;c < 4;c++,p--)
-                            {
-                                q = (p < 0) ? (-1 - p) : p;
-                                q = q < doubletargetwidth ? q : q % doubletargetwidth;
-                                xInterpolationIndices[c] = q >= width ? (doubletargetwidth - 1 - q) : q;
-                            }
-                            // calculate Y-interpolation indices
-                            p = (coordy >= 0) ? (((int)coordy) + 2) : (((int)coordy) + 1);
-                            for(int c = 0;c < 4;c++,p--)
-                            {
-                                q = (p < 0) ? (-1 - p) : p;
-                                q = q < doubletargetheight ? q : q % doubletargetheight;
-                                yInterpolationIndices[c] = q >= height ? (doubletargetheight - 1 - q) * width : q * width;// calculate linearized coordinates of the coefficient array
-                            }
-                            // get the residuals of the coordinates
-                            rescoordx = coordx - (coordx >= 0.0 ? ((double)((int)coordx)) : ((double)(((int)coordx) - 1)));
-                            rescoordy = coordy - (coordy >= 0.0 ? ((double)((int)coordy)) : ((double)(((int)coordy) - 1)));
-                            // calculate the X-weights
-                            s = 1.0 - rescoordx;
-                            xWeights[3] = Math.pow(s, 3.0) / 6.0;
-                            s = rescoordx * rescoordx;
-                            xWeights[2] = (2.0 / 3.0) - 0.5 * s * (2.0 - rescoordx);
-                            xWeights[0] = s * rescoordx / 6.0;
-                            xWeights[1] = 1.0 - xWeights[0] - xWeights[2] - xWeights[3];
-                            // calculate the Y-weights
-                            s = 1.0 - rescoordy;
-                            yWeights[3] = Math.pow(s, 3.0) / 6.0;
-                            s = rescoordy * rescoordy;
-                            yWeights[2] = (2.0 / 3.0) - 0.5 * s * (2.0 - rescoordy);
-                            yWeights[0] = s * rescoordy / 6.0;
-                            yWeights[1] = 1.0 - yWeights[0] - yWeights[2] - yWeights[3];
+                            
+                            PlainJavaCPUAligner.computeXInterpolationIndices(coordx, doubletargetwidth, width, xInterpolationIndices);
+                            PlainJavaCPUAligner.computeYInterpolationIndices(coordy, doubletargetheight, height, width, yInterpolationIndices);
 
-                            // calculate the interpolated value from the target coefficients
-                            s = 0.0;
-                            for(int y = 0;y < 4;y++)
-                            {
-                                rescoordx = 0.0;// To avoid using too many variables this one will be repurposed
-                                tmpindex = yInterpolationIndices[y];
-                                for(int x = 0;x < 4; x++)
-                                {
-                                    rescoordx += xWeights[x] * targetCoefficientDoubleSlice[tmpindex + xInterpolationIndices[x]];
-                                }
-                                s += yWeights[y] * rescoordx;
-                            }
+                            rescoordx = PlainJavaCPUAligner.getFractional(coordx);
+                            rescoordy = PlainJavaCPUAligner.getFractional(coordy);
+                            
+                            s = PlainJavaCPUAligner.interpolateCubicBSpline(rescoordx, rescoordy, xInterpolationIndices, yInterpolationIndices, targetCoefficientDoubleSlice);
 
-                            // calculate the MSE
-                            rescoordx = sourceImageDoubleSlice[nIndex] - s;// repurposed for diff
-                            mse += rescoordx * rescoordx;
+                            // calculate the values for returning
+                            double diff = sourceImageDoubleSlice[nIndex] - s;
+                            mse += diff * diff;
+                            double theta = sourceyGradientDoubleSlice[nIndex] * (double)n - sourcexGradientDoubleSlice[nIndex] * (double)i;
+                            double j_scale = (((double)n) * sourcexGradientDoubleSlice[nIndex] + ((double)i) * sourceyGradientDoubleSlice[nIndex]); // scale contribution to j
+                            /*
+                            TODO/FIXME/KNOWN ISSUE:
+                            The following summation is MUCH worse than the parallel sum reduction done on the GPU, because (relatively speaking)
+                            small numbers are added to an ever growing larger number reducing the precision in the outcome. Currently
+                            I ignore this like the original implementation, but this is one of many reasons why the GPU version and the CPU version
+                            will never yield the same results!
+                            */
+                            gradient[0] += diff * j_scale;
+                            gradient[1] += diff * theta;
+                            gradient[2] += diff * sourcexGradientDoubleSlice[nIndex];
+                            gradient[3] += diff * sourceyGradientDoubleSlice[nIndex];
+                            hessian[0][0] += j_scale * j_scale;
+                            hessian[0][1] += j_scale * theta;
+                            hessian[0][2] += j_scale * sourcexGradientDoubleSlice[nIndex];
+                            hessian[0][3] += j_scale * sourceyGradientDoubleSlice[nIndex];
+                            hessian[1][1] += theta * theta;
+                            hessian[1][2] += theta * sourcexGradientDoubleSlice[nIndex];
+                            hessian[1][3] += theta * sourceyGradientDoubleSlice[nIndex];
+                            hessian[2][2] += sourcexGradientDoubleSlice[nIndex] * sourcexGradientDoubleSlice[nIndex];
+                            hessian[2][3] += sourcexGradientDoubleSlice[nIndex] * sourceyGradientDoubleSlice[nIndex];
+                            hessian[3][3] += sourceyGradientDoubleSlice[nIndex] * sourceyGradientDoubleSlice[nIndex];
                         }
                         // walk along the X-vector direction
                         coordx += xvecx;
@@ -3322,9 +6062,703 @@ public class HybridPrecisionNGStackReg extends RegistrationAndTransformation
                 }
                 area = (double)larea;
             }
+            // symmetrize hessian
+            for (int i = 1; (i < 4); i++) {
+                for (int j = 0; (j < i); j++) {
+                        hessian[i][j] = hessian[j][i];
+                }
+            }
             return mse/area;
         }
         
+        private double doubleGetAffineMeanSquares(double currentoffsetx, double currentoffsety,
+                double currenta11, double currenta12,
+                double currenta21, double currenta22)
+        {
+            double area = 0.0;
+            double mse = 0.0;
+            // First reset the global values which will not be reset in the loop
+            Arrays.fill(gradient, 0.0);
+            for (int i = 0; i < 6; i++) {
+                Arrays.fill(hessian[i], 0.0);
+            }
+            if(!usesFloat)
+            {
+                // now we have the diffs let's calculate all the derived elements
+                int halfReductionSize = (int) (((sourceDoubleSlice.width * sourceDoubleSlice.height)+((sourceDoubleSlice.width * sourceDoubleSlice.height)%2))/2);
+                ByteBuffer buffer;
+                // calculate the MSE row-wise
+                if(halfReductionSize <= doublemaximumElementsForLocalFPTcombinedSum)
+                {                
+                    uniformBSplineTransformProgramKernels[KERNEL_daffineErrorWithGradAndHess]
+                            .putArg(sourceDoubleSlice.Image)
+                            .putArg(targetDoubleSlice.Coefficient)
+                            .putArg(sourceDoubleSlice.xGradient)
+                            .putArg(sourceDoubleSlice.yGradient)
+                            .putArg(maskBuffer)
+                            .putArg(gradient0)
+                            .putArg(gradient1)
+                            .putArg(gradient2)
+                            .putArg(gradient3)
+                            .putArg(gradient4)
+                            .putArg(gradient5)
+                            .putArg(hessian00)
+                            .putArg(hessian01)
+                            .putArg(hessian02)
+                            .putArg(hessian03)
+                            .putArg(hessian04)
+                            .putArg(hessian05)
+                            .putArg(hessian11)
+                            .putArg(hessian12)
+                            .putArg(hessian13)
+                            .putArg(hessian14)
+                            .putArg(hessian15)
+                            .putArg(hessian22)
+                            .putArg(hessian23)
+                            .putArg(hessian24)
+                            .putArg(hessian25)
+                            .putArg(hessian33)
+                            .putArg(hessian34)
+                            .putArg(hessian35)
+                            .putArg(hessian44)
+                            .putArg(hessian45)
+                            .putArg(hessian55)
+                            .putArg(doubleEntryImageBuffer)
+                            .putArg((int)sourceDoubleSlice.width)
+                            .putArg((int)sourceDoubleSlice.height)
+                            .putArg((int)targetDoubleSlice.width)
+                            .putArg((int)targetDoubleSlice.height)
+                            .putArg((int)targetDoubleSlice.width * 2)
+                            .putArg((int)targetDoubleSlice.height * 2)
+                            .putArg(currentoffsetx)
+                            .putArg(currentoffsety)
+                            .putArg(currenta11)
+                            .putArg(currenta12)
+                            .putArg(currenta21)
+                            .putArg(currenta22);
+
+                    int localWorkSize = (int)Math.min(uniformBSplineTransformProgramKernels[KERNEL_daffineErrorWithGradAndHess].getWorkGroupSize(device),blocksizeMultiplier*optimalMultiples[KERNEL_daffineErrorWithGradAndHess]);  // Local work size dimensions
+                    int globalWorkSize = StaticUtility.roundUp(localWorkSize, optimalMultiples[KERNEL_daffineErrorWithGradAndHess], (int)(sourceDoubleSlice.width*sourceDoubleSlice.height));
+                    queue.put1DRangeKernel(uniformBSplineTransformProgramKernels[KERNEL_daffineErrorWithGradAndHess],0,globalWorkSize,localWorkSize);
+                    uniformBSplineTransformProgramKernels[KERNEL_daffineErrorWithGradAndHess].rewind();
+
+                    /*
+                    Because each of the following kernels is synchronized by barriers on the GPU they can only be executed on a single compute device.
+                    Therefore using an async queue may increase the speed by allowing multiple kernels to execute in parallel (if local memory permits)
+                    */
+                    localWorkSize = halfReductionSize % optimalMultiples[KERNEL_daffineSumInLocalMemoryCombined] == 0 ? halfReductionSize : (int)Math.min(halfReductionSize + (optimalMultiples[KERNEL_daffineSumInLocalMemoryCombined] - (halfReductionSize % optimalMultiples[KERNEL_daffineSumInLocalMemoryCombined])), doublemaximumElementsForLocalFPTcombinedSum);
+                    globalWorkSize = localWorkSize;
+                    uniformBSplineTransformProgramKernels[KERNEL_daffineSumInLocalMemoryCombined]
+                    		.putArg(maskBuffer)
+                            .putArg(entryImageBuffer)
+                            .putArg(gradient0)
+                            .putArg(gradient1)
+                            .putArg(gradient2)
+                            .putArg(gradient3)
+                            .putArg(gradient4)
+                            .putArg(gradient5)
+                            .putArg(hessian00)
+                            .putArg(hessian01)
+                            .putArg(hessian02)
+                            .putArg(hessian03)
+                            .putArg(hessian04)
+                            .putArg(hessian05)
+                            .putArg(hessian11)
+                            .putArg(hessian12)
+                            .putArg(hessian13)
+                            .putArg(hessian14)
+                            .putArg(hessian15)
+                            .putArg(hessian22)
+                            .putArg(hessian23)
+                            .putArg(hessian24)
+                            .putArg(hessian25)
+                            .putArg(hessian33)
+                            .putArg(hessian34)
+                            .putArg(hessian35)
+                            .putArg(hessian44)
+                            .putArg(hessian45)
+                            .putArg(hessian55)
+                            .putNullArg(localWorkSize*8 /*size in bytes of local mem allocation*/)
+                            .putArg((int)(sourceDoubleSlice.width * sourceDoubleSlice.height));
+                    queue.put1DRangeKernel(uniformBSplineTransformProgramKernels[KERNEL_daffineSumInLocalMemoryCombined],0,globalWorkSize,localWorkSize);
+                    uniformBSplineTransformProgramKernels[KERNEL_daffineSumInLocalMemoryCombined].rewind();
+
+                  //TODO: the implicit if's for float/double can be reduced by separating the cases into two blocks using a single if statement
+                    buffer = queue.putMapBuffer(maskBuffer, CLMemory.Map.READ, 0, 8, true);
+                    buffer.rewind();
+                    area = (double)buffer.asDoubleBuffer().get();
+                    queue.putUnmapMemory(maskBuffer, buffer);
+                    
+                    buffer = queue.putMapBuffer(entryImageBuffer, CLMemory.Map.READ, 0, 8, true);
+                    buffer.rewind();
+                    mse = (double)buffer.asDoubleBuffer().get();
+                    queue.putUnmapMemory(entryImageBuffer, buffer);
+                    
+                    buffer = queue.putMapBuffer(gradient0, CLMemory.Map.READ, 0, 8, true);
+                    buffer.rewind();
+                    gradient[0] = (double)buffer.asDoubleBuffer().get();
+                    queue.putUnmapMemory(gradient0, buffer);
+                    
+                    buffer = queue.putMapBuffer(gradient1, CLMemory.Map.READ, 0, 8, true);
+                    buffer.rewind();
+                    gradient[1] = (double)buffer.asDoubleBuffer().get();
+                    queue.putUnmapMemory(gradient1, buffer);
+                    
+                    buffer = queue.putMapBuffer(gradient2, CLMemory.Map.READ, 0, 8, true);
+                    buffer.rewind();
+                    gradient[2] = (double)buffer.asDoubleBuffer().get();
+                    queue.putUnmapMemory(gradient2, buffer);
+                    
+                    buffer = queue.putMapBuffer(gradient3, CLMemory.Map.READ, 0, 8, true);
+                    buffer.rewind();
+                    gradient[3] = (double)buffer.asDoubleBuffer().get();
+                    queue.putUnmapMemory(gradient3, buffer);
+                    
+                    buffer = queue.putMapBuffer(gradient4, CLMemory.Map.READ, 0, 8, true);
+                    buffer.rewind();
+                    gradient[4] = (double)buffer.asDoubleBuffer().get();
+                    queue.putUnmapMemory(gradient4, buffer);
+                    
+                    buffer = queue.putMapBuffer(gradient5, CLMemory.Map.READ, 0, 8, true);
+                    buffer.rewind();
+                    gradient[5] = (double)buffer.asDoubleBuffer().get();
+                    queue.putUnmapMemory(gradient5, buffer);
+                    
+                    buffer = queue.putMapBuffer(hessian00, CLMemory.Map.READ, 0, 8, true);
+                    buffer.rewind();
+                    hessian[0][0] = (double)buffer.asDoubleBuffer().get();
+                    queue.putUnmapMemory(hessian00, buffer);
+                    
+                    buffer = queue.putMapBuffer(hessian01, CLMemory.Map.READ, 0, 8, true);
+                    buffer.rewind();
+                    hessian[0][1] = (double)buffer.asDoubleBuffer().get();
+                    queue.putUnmapMemory(hessian01, buffer);
+                    
+                    buffer = queue.putMapBuffer(hessian02, CLMemory.Map.READ, 0, 8, true);
+                    buffer.rewind();
+                    hessian[0][2] = (double)buffer.asDoubleBuffer().get();
+                    queue.putUnmapMemory(hessian02, buffer);
+                    
+                    buffer = queue.putMapBuffer(hessian03, CLMemory.Map.READ, 0, 8, true);
+                    buffer.rewind();
+                    hessian[0][3] = (double)buffer.asDoubleBuffer().get();
+                    queue.putUnmapMemory(hessian03, buffer);
+                    
+                    buffer = queue.putMapBuffer(hessian04, CLMemory.Map.READ, 0, 8, true);
+                    buffer.rewind();
+                    hessian[0][4] = (double)buffer.asDoubleBuffer().get();
+                    queue.putUnmapMemory(hessian04, buffer);
+                    
+                    buffer = queue.putMapBuffer(hessian05, CLMemory.Map.READ, 0, 8, true);
+                    buffer.rewind();
+                    hessian[0][5] = (double)buffer.asDoubleBuffer().get();
+                    queue.putUnmapMemory(hessian05, buffer);
+                    
+                    buffer = queue.putMapBuffer(hessian11, CLMemory.Map.READ, 0, 8, true);
+                    buffer.rewind();
+                    hessian[1][1] = (double)buffer.asDoubleBuffer().get();
+                    queue.putUnmapMemory(hessian11, buffer);
+                    
+                    buffer = queue.putMapBuffer(hessian12, CLMemory.Map.READ, 0, 8, true);
+                    buffer.rewind();
+                    hessian[1][2] = (double)buffer.asDoubleBuffer().get();
+                    queue.putUnmapMemory(hessian12, buffer);
+                    
+                    buffer = queue.putMapBuffer(hessian13, CLMemory.Map.READ, 0, 8, true);
+                    buffer.rewind();
+                    hessian[1][3] = (double)buffer.asDoubleBuffer().get();
+                    queue.putUnmapMemory(hessian13, buffer);
+                    
+                    buffer = queue.putMapBuffer(hessian14, CLMemory.Map.READ, 0, 8, true);
+                    buffer.rewind();
+                    hessian[1][4] = (double)buffer.asDoubleBuffer().get();
+                    queue.putUnmapMemory(hessian14, buffer);
+                    
+                    buffer = queue.putMapBuffer(hessian15, CLMemory.Map.READ, 0, 8, true);
+                    buffer.rewind();
+                    hessian[1][5] = (double)buffer.asDoubleBuffer().get();
+                    queue.putUnmapMemory(hessian15, buffer);
+                    
+                    buffer = queue.putMapBuffer(hessian22, CLMemory.Map.READ, 0, 8, true);
+                    buffer.rewind();
+                    hessian[2][2] = (double)buffer.asDoubleBuffer().get();
+                    queue.putUnmapMemory(hessian22, buffer);
+                    
+                    buffer = queue.putMapBuffer(hessian23, CLMemory.Map.READ, 0, 8, true);
+                    buffer.rewind();
+                    hessian[2][3] = (double)buffer.asDoubleBuffer().get();
+                    queue.putUnmapMemory(hessian23, buffer);
+                    
+                    buffer = queue.putMapBuffer(hessian24, CLMemory.Map.READ, 0, 8, true);
+                    buffer.rewind();
+                    hessian[2][4] = (double)buffer.asDoubleBuffer().get();
+                    queue.putUnmapMemory(hessian24, buffer);
+                    
+                    buffer = queue.putMapBuffer(hessian25, CLMemory.Map.READ, 0, 8, true);
+                    buffer.rewind();
+                    hessian[2][5] = (double)buffer.asDoubleBuffer().get();
+                    queue.putUnmapMemory(hessian25, buffer);
+                    
+                    buffer = queue.putMapBuffer(hessian33, CLMemory.Map.READ, 0, 8, true);
+                    buffer.rewind();
+                    hessian[3][3] = (double)buffer.asDoubleBuffer().get();
+                    queue.putUnmapMemory(hessian33, buffer);
+                    
+                    buffer = queue.putMapBuffer(hessian34, CLMemory.Map.READ, 0, 8, true);
+                    buffer.rewind();
+                    hessian[3][4] = (double)buffer.asDoubleBuffer().get();
+                    queue.putUnmapMemory(hessian34, buffer);
+                    
+                    buffer = queue.putMapBuffer(hessian35, CLMemory.Map.READ, 0, 8, true);
+                    buffer.rewind();
+                    hessian[3][5] = (double)buffer.asDoubleBuffer().get();
+                    queue.putUnmapMemory(hessian35, buffer);
+                    
+                    buffer = queue.putMapBuffer(hessian44, CLMemory.Map.READ, 0, 8, true);
+                    buffer.rewind();
+                    hessian[4][4] = (double)buffer.asDoubleBuffer().get();
+                    queue.putUnmapMemory(hessian44, buffer);
+                    
+                    buffer = queue.putMapBuffer(hessian45, CLMemory.Map.READ, 0, 8, true);
+                    buffer.rewind();
+                    hessian[4][5] = (double)buffer.asDoubleBuffer().get();
+                    queue.putUnmapMemory(hessian45, buffer);
+                    
+                    buffer = queue.putMapBuffer(hessian55, CLMemory.Map.READ, 0, 8, true);
+                    buffer.rewind();
+                    hessian[5][5] = (double)buffer.asDoubleBuffer().get();
+                    queue.putUnmapMemory(hessian55, buffer);
+                }
+                else
+                {
+
+                    int nrOfBlocks = ((int)(sourceDoubleSlice.width * sourceDoubleSlice.height))%doubleblockSizesParallel;
+                    nrOfBlocks = nrOfBlocks == 0 ? (int)Math.min(((int)(sourceDoubleSlice.width * sourceDoubleSlice.height))/doubleblockSizesParallel,maximumSumReductionBlockNr) : (int)Math.min((((int)(sourceDoubleSlice.width * sourceDoubleSlice.height))+(doubleblockSizesParallel-nrOfBlocks))/doubleblockSizesParallel,maximumSumReductionBlockNr);
+
+                    int globalWorkSize = nrOfBlocks * doubleblockSizesParallel;
+                    uniformBSplineTransformProgramKernels[KERNEL_daffineErrorWithGradAndHessBrent]
+                            .putArg(sourceDoubleSlice.Image)
+                            .putArg(targetDoubleSlice.Coefficient)
+                            .putArg(sourceDoubleSlice.xGradient)
+                            .putArg(sourceDoubleSlice.yGradient)
+                            .putArg(gradient0)
+                            .putArg(gradient1)
+                            .putArg(gradient2)
+                            .putArg(gradient3)
+                            .putArg(gradient4)
+                            .putArg(gradient5)
+                            .putArg(hessian00)
+                            .putArg(hessian01)
+                            .putArg(hessian02)
+                            .putArg(hessian03)
+                            .putArg(hessian04)
+                            .putArg(hessian05)
+                            .putArg(hessian11)
+                            .putArg(hessian12)
+                            .putArg(hessian13)
+                            .putArg(hessian14)
+                            .putArg(hessian15)
+                            .putArg(hessian22)
+                            .putArg(hessian23)
+                            .putArg(hessian24)
+                            .putArg(hessian25)
+                            .putArg(hessian33)
+                            .putArg(hessian34)
+                            .putArg(hessian35)
+                            .putArg(hessian44)
+                            .putArg(hessian45)
+                            .putArg(hessian55)
+                            .putArg(entryImageBuffer)
+                            .putArg(maskBuffer);
+
+
+                    uniformBSplineTransformProgramKernels[KERNEL_daffineErrorWithGradAndHessBrent]
+                            .putNullArg(doubleblockSizesParallel*8 /*size in bytes of local mem allocation*/)
+                            .putNullArg(doubleblockSizesParallel*8 /*size in bytes of local mem allocation*/)
+                            .putNullArg(doubleblockSizesParallel*8 /*size in bytes of local mem allocation*/)
+                            .putNullArg(doubleblockSizesParallel*8 /*size in bytes of local mem allocation*/)
+                            .putNullArg(doubleblockSizesParallel*8 /*size in bytes of local mem allocation*/)
+                            .putNullArg(doubleblockSizesParallel*8 /*size in bytes of local mem allocation*/)
+                            .putNullArg(doubleblockSizesParallel*8 /*size in bytes of local mem allocation*/)
+                            .putNullArg(doubleblockSizesParallel*8 /*size in bytes of local mem allocation*/)
+                            .putNullArg(doubleblockSizesParallel*8 /*size in bytes of local mem allocation*/)
+                            .putNullArg(doubleblockSizesParallel*8 /*size in bytes of local mem allocation*/)
+                            .putNullArg(doubleblockSizesParallel*8 /*size in bytes of local mem allocation*/)
+                            .putNullArg(doubleblockSizesParallel*8 /*size in bytes of local mem allocation*/)
+                            .putNullArg(doubleblockSizesParallel*8 /*size in bytes of local mem allocation*/)
+                            .putNullArg(doubleblockSizesParallel*8 /*size in bytes of local mem allocation*/)
+                            .putNullArg(doubleblockSizesParallel*8 /*size in bytes of local mem allocation*/)
+                            .putNullArg(doubleblockSizesParallel*8 /*size in bytes of local mem allocation*/)
+                            .putNullArg(doubleblockSizesParallel*8 /*size in bytes of local mem allocation*/)
+                            .putNullArg(doubleblockSizesParallel*8 /*size in bytes of local mem allocation*/)
+                            .putNullArg(doubleblockSizesParallel*8 /*size in bytes of local mem allocation*/)
+                            .putNullArg(doubleblockSizesParallel*8 /*size in bytes of local mem allocation*/)
+                            .putNullArg(doubleblockSizesParallel*8 /*size in bytes of local mem allocation*/)
+                            .putNullArg(doubleblockSizesParallel*8 /*size in bytes of local mem allocation*/)
+                            .putNullArg(doubleblockSizesParallel*8 /*size in bytes of local mem allocation*/)
+                            .putNullArg(doubleblockSizesParallel*8 /*size in bytes of local mem allocation*/)
+                            .putNullArg(doubleblockSizesParallel*8 /*size in bytes of local mem allocation*/)
+                            .putNullArg(doubleblockSizesParallel*8 /*size in bytes of local mem allocation*/)
+                            .putNullArg(doubleblockSizesParallel*8 /*size in bytes of local mem allocation*/)
+                            .putNullArg(doubleblockSizesParallel*8 /*size in bytes of local mem allocation*/)
+                            .putNullArg(doubleblockSizesParallel*8 /*size in bytes of local mem allocation*/);
+
+                    uniformBSplineTransformProgramKernels[KERNEL_daffineErrorWithGradAndHessBrent]
+                            .putArg((int)sourceDoubleSlice.width)
+                            .putArg((int)sourceDoubleSlice.height)
+                            .putArg((int)targetDoubleSlice.width)
+                            .putArg((int)targetDoubleSlice.height);
+
+                    uniformBSplineTransformProgramKernels[KERNEL_daffineErrorWithGradAndHessBrent]
+                    		.putArg(currentoffsetx)
+                            .putArg(currentoffsety)
+                            .putArg(currenta11)
+                            .putArg(currenta12)
+                            .putArg(currenta21)
+                            .putArg(currenta22);
+
+                    uniformBSplineTransformProgramKernels[KERNEL_daffineErrorWithGradAndHessBrent]
+                            .putArg((int)targetDoubleSlice.width*2)
+                            .putArg((int)targetDoubleSlice.height*2);                
+                    queue.put1DRangeKernel(uniformBSplineTransformProgramKernels[KERNEL_daffineErrorWithGradAndHessBrent],0,globalWorkSize,doubleblockSizesParallel);
+                    uniformBSplineTransformProgramKernels[KERNEL_daffineErrorWithGradAndHessBrent].rewind();
+
+                    // use in-memory summations (also async) each with its own buffer to do the final reduction)
+                    halfReductionSize = (int) ((nrOfBlocks+(nrOfBlocks%2))/2);
+                    int localWorkSize = halfReductionSize % optimalMultiples[KERNEL_daffineSumInLocalMemoryCombined] == 0 ? halfReductionSize : (int)Math.min(halfReductionSize + (optimalMultiples[KERNEL_daffineSumInLocalMemoryCombined] - (halfReductionSize % optimalMultiples[KERNEL_daffineSumInLocalMemoryCombined])), doublemaximumElementsForLocalFPTcombinedSum);
+                    globalWorkSize = localWorkSize;
+                    uniformBSplineTransformProgramKernels[KERNEL_daffineSumInLocalMemoryCombined]
+                    		.putArg(maskBuffer)
+                            .putArg(entryImageBuffer)
+                            .putArg(gradient0)
+                            .putArg(gradient1)
+                            .putArg(gradient2)
+                            .putArg(gradient3)
+                            .putArg(gradient4)
+                            .putArg(gradient5)
+                            .putArg(hessian00)
+                            .putArg(hessian01)
+                            .putArg(hessian02)
+                            .putArg(hessian03)
+                            .putArg(hessian04)
+                            .putArg(hessian05)
+                            .putArg(hessian11)
+                            .putArg(hessian12)
+                            .putArg(hessian13)
+                            .putArg(hessian14)
+                            .putArg(hessian15)
+                            .putArg(hessian22)
+                            .putArg(hessian23)
+                            .putArg(hessian24)
+                            .putArg(hessian25)
+                            .putArg(hessian33)
+                            .putArg(hessian34)
+                            .putArg(hessian35)
+                            .putArg(hessian44)
+                            .putArg(hessian45)
+                            .putArg(hessian55)
+                            .putNullArg(halfReductionSize*8 /*size in bytes of local mem allocation*/)
+                            .putArg((int)(nrOfBlocks));
+                    queue.put1DRangeKernel(uniformBSplineTransformProgramKernels[KERNEL_daffineSumInLocalMemoryCombined],0,globalWorkSize,localWorkSize);
+                    uniformBSplineTransformProgramKernels[KERNEL_daffineSumInLocalMemoryCombined].rewind();
+
+                    buffer = queue.putMapBuffer(maskBuffer, CLMemory.Map.READ, 0, 8, true);
+                    buffer.rewind();
+                    area = (double)buffer.asDoubleBuffer().get();
+                    queue.putUnmapMemory(maskBuffer, buffer);
+                    
+                    buffer = queue.putMapBuffer(entryImageBuffer, CLMemory.Map.READ, 0, 8, true);
+                    buffer.rewind();
+                    mse = (double)buffer.asDoubleBuffer().get();
+                    queue.putUnmapMemory(entryImageBuffer, buffer);
+                            
+                    buffer = queue.putMapBuffer(gradient0, CLMemory.Map.READ, 0, 8, true);
+                    buffer.rewind();
+                    gradient[0] = (double)buffer.asDoubleBuffer().get();
+                    queue.putUnmapMemory(gradient0, buffer);
+                            
+                    buffer = queue.putMapBuffer(gradient1, CLMemory.Map.READ, 0, 8, true);
+                    buffer.rewind();
+                    gradient[1] = (double)buffer.asDoubleBuffer().get();
+                    queue.putUnmapMemory(gradient1, buffer);
+                            
+                    buffer = queue.putMapBuffer(gradient2, CLMemory.Map.READ, 0, 8, true);
+                    buffer.rewind();
+                    gradient[2] = (double)buffer.asDoubleBuffer().get();
+                    queue.putUnmapMemory(gradient2, buffer);
+                    
+                    buffer = queue.putMapBuffer(gradient3, CLMemory.Map.READ, 0, 8, true);
+                    buffer.rewind();
+                    gradient[3] = (double)buffer.asDoubleBuffer().get();
+                    queue.putUnmapMemory(gradient3, buffer);
+                    
+                    buffer = queue.putMapBuffer(gradient4, CLMemory.Map.READ, 0, 8, true);
+                    buffer.rewind();
+                    gradient[4] = (double)buffer.asDoubleBuffer().get();
+                    queue.putUnmapMemory(gradient4, buffer);
+                    
+                    buffer = queue.putMapBuffer(gradient5, CLMemory.Map.READ, 0, 8, true);
+                    buffer.rewind();
+                    gradient[5] = (double)buffer.asDoubleBuffer().get();
+                    queue.putUnmapMemory(gradient5, buffer);
+                            
+                    buffer = queue.putMapBuffer(hessian00, CLMemory.Map.READ, 0, 8, true);
+                    buffer.rewind();
+                    hessian[0][0] = (double)buffer.asDoubleBuffer().get();
+                    queue.putUnmapMemory(hessian00, buffer);
+                            
+                    buffer = queue.putMapBuffer(hessian01, CLMemory.Map.READ, 0, 8, true);
+                    buffer.rewind();
+                    hessian[0][1] = (double)buffer.asDoubleBuffer().get();
+                    queue.putUnmapMemory(hessian01, buffer);
+                            
+                    buffer = queue.putMapBuffer(hessian02, CLMemory.Map.READ, 0, 8, true);
+                    buffer.rewind();
+                    hessian[0][2] = (double)buffer.asDoubleBuffer().get();
+                    queue.putUnmapMemory(hessian02, buffer);
+                    
+                    buffer = queue.putMapBuffer(hessian03, CLMemory.Map.READ, 0, 8, true);
+                    buffer.rewind();
+                    hessian[0][3] = (double)buffer.asDoubleBuffer().get();
+                    queue.putUnmapMemory(hessian03, buffer);
+                    
+                    buffer = queue.putMapBuffer(hessian04, CLMemory.Map.READ, 0, 8, true);
+                    buffer.rewind();
+                    hessian[0][4] = (double)buffer.asDoubleBuffer().get();
+                    queue.putUnmapMemory(hessian04, buffer);
+                    
+                    buffer = queue.putMapBuffer(hessian05, CLMemory.Map.READ, 0, 8, true);
+                    buffer.rewind();
+                    hessian[0][5] = (double)buffer.asDoubleBuffer().get();
+                    queue.putUnmapMemory(hessian05, buffer);
+                            
+                    buffer = queue.putMapBuffer(hessian11, CLMemory.Map.READ, 0, 8, true);
+                    buffer.rewind();
+                    hessian[1][1] = (double)buffer.asDoubleBuffer().get();
+                    queue.putUnmapMemory(hessian11, buffer);
+                            
+                    buffer = queue.putMapBuffer(hessian12, CLMemory.Map.READ, 0, 8, true);
+                    buffer.rewind();
+                    hessian[1][2] = (double)buffer.asDoubleBuffer().get();
+                    queue.putUnmapMemory(hessian12, buffer);
+                    
+                    buffer = queue.putMapBuffer(hessian13, CLMemory.Map.READ, 0, 8, true);
+                    buffer.rewind();
+                    hessian[1][3] = (double)buffer.asDoubleBuffer().get();
+                    queue.putUnmapMemory(hessian13, buffer);
+                    
+                    buffer = queue.putMapBuffer(hessian14, CLMemory.Map.READ, 0, 8, true);
+                    buffer.rewind();
+                    hessian[1][4] = (double)buffer.asDoubleBuffer().get();
+                    queue.putUnmapMemory(hessian14, buffer);
+                    
+                    buffer = queue.putMapBuffer(hessian15, CLMemory.Map.READ, 0, 8, true);
+                    buffer.rewind();
+                    hessian[1][5] = (double)buffer.asDoubleBuffer().get();
+                    queue.putUnmapMemory(hessian15, buffer);
+                            
+                    buffer = queue.putMapBuffer(hessian22, CLMemory.Map.READ, 0, 8, true);
+                    buffer.rewind();
+                    hessian[2][2] = (double)buffer.asDoubleBuffer().get();
+                    queue.putUnmapMemory(hessian22, buffer);
+                    
+                    buffer = queue.putMapBuffer(hessian23, CLMemory.Map.READ, 0, 8, true);
+                    buffer.rewind();
+                    hessian[2][3] = (double)buffer.asDoubleBuffer().get();
+                    queue.putUnmapMemory(hessian23, buffer);
+                    
+                    buffer = queue.putMapBuffer(hessian24, CLMemory.Map.READ, 0, 8, true);
+                    buffer.rewind();
+                    hessian[2][4] = (double)buffer.asDoubleBuffer().get();
+                    queue.putUnmapMemory(hessian24, buffer);
+                    
+                    buffer = queue.putMapBuffer(hessian25, CLMemory.Map.READ, 0, 8, true);
+                    buffer.rewind();
+                    hessian[2][5] = (double)buffer.asDoubleBuffer().get();
+                    queue.putUnmapMemory(hessian25, buffer);
+                    
+                    buffer = queue.putMapBuffer(hessian33, CLMemory.Map.READ, 0, 8, true);
+                    buffer.rewind();
+                    hessian[3][3] = (double)buffer.asDoubleBuffer().get();
+                    queue.putUnmapMemory(hessian33, buffer);
+                    
+                    buffer = queue.putMapBuffer(hessian34, CLMemory.Map.READ, 0, 8, true);
+                    buffer.rewind();
+                    hessian[3][4] = (double)buffer.asDoubleBuffer().get();
+                    queue.putUnmapMemory(hessian34, buffer);
+                    
+                    buffer = queue.putMapBuffer(hessian35, CLMemory.Map.READ, 0, 8, true);
+                    buffer.rewind();
+                    hessian[3][5] = (double)buffer.asDoubleBuffer().get();
+                    queue.putUnmapMemory(hessian35, buffer);
+                    
+                    buffer = queue.putMapBuffer(hessian44, CLMemory.Map.READ, 0, 8, true);
+                    buffer.rewind();
+                    hessian[4][4] = (double)buffer.asDoubleBuffer().get();
+                    queue.putUnmapMemory(hessian44, buffer);
+                    
+                    buffer = queue.putMapBuffer(hessian45, CLMemory.Map.READ, 0, 8, true);
+                    buffer.rewind();
+                    hessian[4][5] = (double)buffer.asDoubleBuffer().get();
+                    queue.putUnmapMemory(hessian45, buffer);
+                    
+                    buffer = queue.putMapBuffer(hessian55, CLMemory.Map.READ, 0, 8, true);
+                    buffer.rewind();
+                    hessian[5][5] = (double)buffer.asDoubleBuffer().get();
+                    queue.putUnmapMemory(hessian55, buffer);
+                }
+            }
+            else
+            {
+                final int width = (int)sharedContext.img.dimension(0);
+                final int height = (int)sharedContext.img.dimension(1);
+                final int doubletargetwidth = width * 2;
+                final int doubletargetheight = height * 2;
+                int nIndex = 0;
+                int larea = 0;
+                double s;
+                double coordx;
+                double rescoordx;
+                double coordy;
+                double rescoordy;
+                int mskx;
+                int msky;
+                
+                /*
+                 * Affine coordinate vectors:
+                 *   xvec = (a11, a21) — the column-step direction (stepping n by +1)
+                 *   yvec = (a12, a22) — the row-step direction (stepping i by +1)
+                 *
+                 * For output pixel (n, i):
+                 *   coordx = tx + n*a11 + i*a12
+                 *   coordy = ty + n*a21 + i*a22
+                 *
+                 * We use incremental stepping (adding xvec per column, resetting
+                 * to base + i*yvec per row) to avoid per-pixel multiplications,
+                 * identical to how rigid body uses cos/sin vectors.
+                 */
+                double xvecx = currenta11;
+                double xvecy = currenta21;
+                double yvecx = currenta12;
+                double yvecy = currenta22;
+                
+                /*
+                 * Jacobian column variables (recomputed per pixel):
+                 *   dx0 = n * ∂f/∂x   (∂f/∂a11)
+                 *   dx1 = i * ∂f/∂x   (∂f/∂a12)
+                 *   dy0 = n * ∂f/∂y   (∂f/∂a21)
+                 *   dy1 = i * ∂f/∂y   (∂f/∂a22)
+                 *   dx  = ∂f/∂x       (∂f/∂tx)
+                 *   dy  = ∂f/∂y       (∂f/∂ty)
+                 */
+                double dx0, dx1, dy0, dy1, dx, dy;
+                
+                for(int i = 0;i < height;i++)
+                {
+                	// First walk along the Y-vector direction and reset the X-position (otherwise the
+                    // y position is initially correct and then lagging behind by one all the time)
+                    coordx = currentoffsetx + ((double)i) * yvecx;
+                    coordy = currentoffsety + ((double)i) * yvecy;
+                    for(int n = 0;n < width;n++,nIndex++)
+                    {
+                        mskx = (int)Math.round(coordx);
+                        msky = (int)Math.round(coordy);
+                        if((mskx >= 0)&&(mskx < width)&&(msky >= 0)&&(msky < height))
+                        {
+                            larea++;
+                            
+                            PlainJavaCPUAligner.computeXInterpolationIndices(coordx, doubletargetwidth, width, xInterpolationIndices);
+                            PlainJavaCPUAligner.computeYInterpolationIndices(coordy, doubletargetheight, height, width, yInterpolationIndices);
+
+                            rescoordx = PlainJavaCPUAligner.getFractional(coordx);
+                            rescoordy = PlainJavaCPUAligner.getFractional(coordy);
+                            
+                            s = PlainJavaCPUAligner.interpolateCubicBSpline(rescoordx, rescoordy, xInterpolationIndices, yInterpolationIndices, targetCoefficientDoubleSlice);
+
+                            // calculate the values for returning
+                            double diff = sourceImageDoubleSlice[nIndex] - s;
+                            mse += diff * diff;
+                            
+                            /*
+                             * Jacobian columns for the affine parameterization:
+                             *   ∂f/∂a11 = n * ∂f/∂x       → dx0
+                             *   ∂f/∂a12 = i * ∂f/∂x       → dx1
+                             *   ∂f/∂a21 = n * ∂f/∂y       → dy0
+                             *   ∂f/∂a22 = i * ∂f/∂y       → dy1
+                             *   ∂f/∂tx  = ∂f/∂x           → dx
+                             *   ∂f/∂ty  = ∂f/∂y           → dy
+                             *
+                             * These use the SOURCE gradients (the "inverse" approach).
+                             */
+                            dx = sourcexGradientDoubleSlice[nIndex];
+                            dy = sourceyGradientDoubleSlice[nIndex];
+                            dx0 = ((double)n) * dx;   // n * ∂f/∂x
+                            dx1 = ((double)i) * dx;   // i * ∂f/∂x
+                            dy0 = ((double)n) * dy;   // n * ∂f/∂y
+                            dy1 = ((double)i) * dy;   // i * ∂f/∂y
+
+                            /*
+                             * Gradient accumulation: g_k += r_i * J_ik
+                             * Parameter order: (a11, a12, a21, a22, tx, ty)
+                             */
+                            gradient[0] += diff * dx0;   // Σ r * n * ∂f/∂x
+                            gradient[1] += diff * dx1;   // Σ r * i * ∂f/∂x
+                            gradient[2] += diff * dy0;   // Σ r * n * ∂f/∂y
+                            gradient[3] += diff * dy1;   // Σ r * i * ∂f/∂y
+                            gradient[4] += diff * dx;    // Σ r * ∂f/∂x
+                            gradient[5] += diff * dy;    // Σ r * ∂f/∂y
+
+                            /*
+                             * Hessian accumulation (upper triangle only):
+                             * H_kl += J_ik * J_il
+                             *
+                             * This is the Gauss-Newton approximation H ≈ J^T J,
+                             * ignoring the second-order terms r_i * ∇²f_i.
+                             * Only 21 unique entries (upper triangle of 6×6 symmetric matrix).
+                             */
+                            // Row 0: a11 × {a11, a12, a21, a22, tx, ty}
+                            hessian[0][0] += dx0 * dx0;
+                            hessian[0][1] += dx0 * dx1;
+                            hessian[0][2] += dx0 * dy0;
+                            hessian[0][3] += dx0 * dy1;
+                            hessian[0][4] += dx0 * dx;
+                            hessian[0][5] += dx0 * dy;
+                            // Row 1: a12 × {a12, a21, a22, tx, ty}
+                            hessian[1][1] += dx1 * dx1;
+                            hessian[1][2] += dx1 * dy0;
+                            hessian[1][3] += dx1 * dy1;
+                            hessian[1][4] += dx1 * dx;
+                            hessian[1][5] += dx1 * dy;
+                            // Row 2: a21 × {a21, a22, tx, ty}
+                            hessian[2][2] += dy0 * dy0;
+                            hessian[2][3] += dy0 * dy1;
+                            hessian[2][4] += dy0 * dx;
+                            hessian[2][5] += dy0 * dy;
+                            // Row 3: a22 × {a22, tx, ty}
+                            hessian[3][3] += dy1 * dy1;
+                            hessian[3][4] += dy1 * dx;
+                            hessian[3][5] += dy1 * dy;
+                            // Row 4: tx × {tx, ty}
+                            hessian[4][4] += dx * dx;
+                            hessian[4][5] += dx * dy;
+                            // Row 5: ty × {ty}
+                            hessian[5][5] += dy * dy;
+                        }
+                        // walk along the X-vector direction
+                        coordx += xvecx;
+                        coordy += xvecy;
+                    }
+                }
+                area = (double)larea;
+            }
+            // symmetrize hessian
+            for (int i = 1; (i < 6); i++) {
+                for (int j = 0; (j < i); j++) {
+                        hessian[i][j] = hessian[j][i];
+                }
+            }
+            return mse/area;
+        }
         
         private double doubleGetTranslationMeanSquaresWithoutHessian(double currentoffsetx, double currentoffsety)
         {
@@ -3457,9 +6891,6 @@ public class HybridPrecisionNGStackReg extends RegistrationAndTransformation
                 final int doubletargetheight = height * 2;
                 int nIndex = 0;
                 int larea = 0;
-                int p;
-                int q;
-                int tmpindex;
                 double s;
                 double coordx;
                 double rescoordx;
@@ -3480,56 +6911,19 @@ public class HybridPrecisionNGStackReg extends RegistrationAndTransformation
                         if((mskx >= 0)&&(mskx < width)&&(msky >= 0)&&(msky < height))
                         {
                             larea++;
-                            // Calculate X-interpolation indices
-                            p = (coordx >= 0) ? (((int)coordx) + 2) : (((int)coordx) + 1);
-                            for(int c = 0;c < 4;c++,p--)
-                            {
-                                q = (p < 0) ? (-1 - p) : p;
-                                q = q < doubletargetwidth ? q : q % doubletargetwidth;
-                                xInterpolationIndices[c] = q >= width ? (doubletargetwidth - 1 - q) : q;
-                            }
-                            // calculate Y-interpolation indices
-                            p = (coordy >= 0) ? (((int)coordy) + 2) : (((int)coordy) + 1);
-                            for(int c = 0;c < 4;c++,p--)
-                            {
-                                q = (p < 0) ? (-1 - p) : p;
-                                q = q < doubletargetheight ? q : q % doubletargetheight;
-                                yInterpolationIndices[c] = q >= height ? (doubletargetheight - 1 - q) * width : q * width;// calculate linearized coordinates of the coefficient array
-                            }
-                            // get the residuals of the coordinates
-                            rescoordx = coordx - (coordx >= 0.0 ? ((double)((int)coordx)) : ((double)(((int)coordx) - 1)));
-                            rescoordy = coordy - (coordy >= 0.0 ? ((double)((int)coordy)) : ((double)(((int)coordy) - 1)));
-                            // calculate the X-weights
-                            s = 1.0 - rescoordx;
-                            xWeights[3] = Math.pow(s, 3.0) / 6.0;
-                            s = rescoordx * rescoordx;
-                            xWeights[2] = (2.0 / 3.0) - 0.5 * s * (2.0 - rescoordx);
-                            xWeights[0] = s * rescoordx / 6.0;
-                            xWeights[1] = 1.0 - xWeights[0] - xWeights[2] - xWeights[3];
-                            // calculate the Y-weights
-                            s = 1.0 - rescoordy;
-                            yWeights[3] = Math.pow(s, 3.0) / 6.0;
-                            s = rescoordy * rescoordy;
-                            yWeights[2] = (2.0 / 3.0) - 0.5 * s * (2.0 - rescoordy);
-                            yWeights[0] = s * rescoordy / 6.0;
-                            yWeights[1] = 1.0 - yWeights[0] - yWeights[2] - yWeights[3];
+                            
+                            PlainJavaCPUAligner.computeXInterpolationIndices(coordx, doubletargetwidth, width, xInterpolationIndices);
+                            PlainJavaCPUAligner.computeYInterpolationIndices(coordy, doubletargetheight, height, width, yInterpolationIndices);
 
-                            // calculate the interpolated value from the target coefficients
-                            s = 0.0;
-                            for(int y = 0;y < 4;y++)
-                            {
-                                rescoordx = 0.0;// To avoid using too many variables this one will be repurposed
-                                tmpindex = yInterpolationIndices[y];
-                                for(int x = 0;x < 4; x++)
-                                {
-                                    rescoordx += xWeights[x] * targetCoefficientDoubleSlice[tmpindex + xInterpolationIndices[x]];
-                                }
-                                s += yWeights[y] * rescoordx;
-                            }
+                            rescoordx = PlainJavaCPUAligner.getFractional(coordx);
+                            rescoordy = PlainJavaCPUAligner.getFractional(coordy);
+                            
+                            s = PlainJavaCPUAligner.interpolateCubicBSpline(rescoordx, rescoordy, xInterpolationIndices, yInterpolationIndices, targetCoefficientDoubleSlice);
+
 
                             // calculate the MSE
-                            rescoordx = sourceImageDoubleSlice[nIndex] - s;// repurposed for diff
-                            mse += rescoordx * rescoordx;
+                            double diff = sourceImageDoubleSlice[nIndex] - s;
+                            mse += diff * diff;
                         }
                         // walk along the X-vector direction
                         coordx += 1.0;
@@ -3540,112 +6934,492 @@ public class HybridPrecisionNGStackReg extends RegistrationAndTransformation
             return mse/area;
         }
         
-        
-        private double getRigidBodyMeanSquaresWithoutHessian(int pyramidIndex, double currentoffsetx, double curentoffsety, double currentangle)
+        private double doubleGetRigidBodyMeanSquaresWithoutHessian(double currentoffsetx, double currentoffsety, double currentangle)
         {
-            uniformBSplineTransformProgramKernels[KERNEL_rigidBodyError]
-                    .putArg(sourcePyramid[pyramidIndex].Image)
-                    .putArg(targetPyramid[pyramidIndex].Coefficient)
-                    .putArg(entryImageBuffer)
-                    .putArg(maskBuffer)
-                    .putArg((int)sourcePyramid[pyramidIndex].width)
-                    .putArg((int)sourcePyramid[pyramidIndex].height)
-                    .putArg((int)targetPyramid[pyramidIndex].width)
-                    .putArg((int)targetPyramid[pyramidIndex].height)
-                    .putArg((int)targetPyramid[pyramidIndex].width * 2)
-                    .putArg((int)targetPyramid[pyramidIndex].height * 2)
-                    .putArg((float)currentoffsetx)
-                    .putArg((float)curentoffsety)
-                    .putArg((float)Math.cos(currentangle))
-                    .putArg((float)-Math.sin(currentangle));
-            
-            int localWorkSize = (int)Math.min(uniformBSplineTransformProgramKernels[KERNEL_rigidBodyError].getWorkGroupSize(device),optimalMultiples[KERNEL_rigidBodyError]*blocksizeMultiplier);  // Local work size dimensions
-            int globalWorkSize = StaticUtility.roundUp(localWorkSize, optimalMultiples[KERNEL_rigidBodyError], (int)(sourcePyramid[pyramidIndex].width*sourcePyramid[pyramidIndex].height));
-            queue.put1DRangeKernel(uniformBSplineTransformProgramKernels[KERNEL_rigidBodyError],0,globalWorkSize,localWorkSize);
-            uniformBSplineTransformProgramKernels[KERNEL_rigidBodyError].rewind();
-            // now we have the diffs let's calculate all the derived elements
-            
-            // to transfer the data to the async queue it has to be synchronized first
-            queue.finish();
-            
-            // calculate the MSE row-wise
-            int halfReductionSize = (int) (((sourcePyramid[pyramidIndex].width * sourcePyramid[pyramidIndex].height)+((sourcePyramid[pyramidIndex].width * sourcePyramid[pyramidIndex].height)%2))/2);
-            int nrOfBlocks;
-            ByteBuffer buffer;
-            double area;
-            double mse;
-            if(halfReductionSize <= maximumElementsForLocalFPTsum)
+            double area = 0.0;
+            double mse = 0.0;
+            if(!usesFloat)
             {
-                /*
-                Because each of the following kernels is synchronized by barriers on the GPU they can only be executed on a single compute device.
-                Therefore using an async queue may increase the speed by allowing multiple kernels to execute in parallel (if local memory permits)
-                */
-                localWorkSize = halfReductionSize % optimalMultiples[KERNEL_sumInLocalMemory] == 0 ? halfReductionSize : (int)Math.min(halfReductionSize + (optimalMultiples[KERNEL_sumInLocalMemory] - (halfReductionSize % optimalMultiples[KERNEL_sumInLocalMemory])), maximumElementsForLocalFPTsum);
-                globalWorkSize = localWorkSize;
-                
-                uniformBSplineTransformProgramKernels[KERNEL_sumInLocalMemory].putArg(maskBuffer).putNullArg(halfReductionSize*4 /*size in bytes of local mem allocation*/).putArg((int)(sourcePyramid[pyramidIndex].width * sourcePyramid[pyramidIndex].height));
-                asyncQueue.put1DRangeKernel(uniformBSplineTransformProgramKernels[KERNEL_sumInLocalMemory],0,globalWorkSize,localWorkSize);
-                uniformBSplineTransformProgramKernels[KERNEL_sumInLocalMemory].rewind();
-                uniformBSplineTransformProgramKernels[KERNEL_sumInLocalMemory].putArg(entryImageBuffer).putNullArg(halfReductionSize*4 /*size in bytes of local mem allocation*/).putArg((int)(sourcePyramid[pyramidIndex].width * sourcePyramid[pyramidIndex].height));
-                asyncQueue.put1DRangeKernel(uniformBSplineTransformProgramKernels[KERNEL_sumInLocalMemory],0,globalWorkSize,localWorkSize);
-                uniformBSplineTransformProgramKernels[KERNEL_sumInLocalMemory].rewind();
-                asyncQueue.finish();
-                buffer = asyncQueue.putMapBuffer(maskBuffer, CLMemory.Map.READ, 0, 4, true);
-                buffer.rewind();
-                area = (double)buffer.asFloatBuffer().get();
-                asyncQueue.putUnmapMemory(maskBuffer, buffer);
-                buffer = asyncQueue.putMapBuffer(entryImageBuffer, CLMemory.Map.READ, 0, 4, true);
-                buffer.rewind();
-                mse = (double)buffer.asFloatBuffer().get();
-                asyncQueue.putUnmapMemory(entryImageBuffer, buffer);
-                asyncQueue.finish();
+                uniformBSplineTransformProgramKernels[KERNEL_drigidBodyError]
+                        .putArg(sourceDoubleSlice.Image)
+                        .putArg(targetDoubleSlice.Coefficient)
+                        .putArg(doubleEntryImageBuffer)
+                        .putArg(maskBuffer)
+                        .putArg((int)sourceDoubleSlice.width)
+                        .putArg((int)sourceDoubleSlice.height)
+                        .putArg((int)targetDoubleSlice.width)
+                        .putArg((int)targetDoubleSlice.height)
+                        .putArg((int)targetDoubleSlice.width * 2)
+                        .putArg((int)targetDoubleSlice.height * 2)
+                        .putArg(currentoffsetx)
+                        .putArg(currentoffsety)
+                        .putArg(Math.cos(currentangle))
+                        .putArg(-Math.sin(currentangle));          
+                int localWorkSize = (int)Math.min(uniformBSplineTransformProgramKernels[KERNEL_drigidBodyError].getWorkGroupSize(device),optimalMultiples[KERNEL_drigidBodyError]*blocksizeMultiplier);  // Local work size dimensions
+                int globalWorkSize = StaticUtility.roundUp(localWorkSize, optimalMultiples[KERNEL_drigidBodyError], (int)(sourceDoubleSlice.width*sourceDoubleSlice.height));
+                queue.put1DRangeKernel(uniformBSplineTransformProgramKernels[KERNEL_drigidBodyError],0,globalWorkSize,localWorkSize);
+                uniformBSplineTransformProgramKernels[KERNEL_drigidBodyError].rewind();
+                //now we have the diffs let's calculate all the derived elements
+
+                // to transfer the data to the async queue it has to be synchronized first
+                queue.finish();
+
+                // calculate the MSE row-wise
+                int halfReductionSize = (int) (((sourceDoubleSlice.width * sourceDoubleSlice.height)+((sourceDoubleSlice.width * sourceDoubleSlice.height)%2))/2);
+                int nrOfBlocks;
+                ByteBuffer buffer;
+
+                if(halfReductionSize <= doublemaximumElementsForLocalFPTsum)
+                {
+                    /*
+                    Because each of the following kernels is synchronized by barriers on the GPU they can only be executed on a single compute device.
+                    Therefore using an async queue may increase the speed by allowing multiple kernels to execute in parallel (if local memory permits)
+                    */
+                    localWorkSize = halfReductionSize % optimalMultiples[KERNEL_dsumInLocalMemory] == 0 ? halfReductionSize : (int)Math.min(halfReductionSize + (optimalMultiples[KERNEL_dsumInLocalMemory] - (halfReductionSize % optimalMultiples[KERNEL_dsumInLocalMemory])), doublemaximumElementsForLocalFPTsum);
+                    globalWorkSize = localWorkSize;
+
+                    uniformBSplineTransformProgramKernels[KERNEL_dsumInLocalMemory].putArg(maskBuffer).putNullArg(halfReductionSize*8 /*size in bytes of local mem allocation*/).putArg((int)(sourceDoubleSlice.width * sourceDoubleSlice.height));
+                    asyncQueue.put1DRangeKernel(uniformBSplineTransformProgramKernels[KERNEL_dsumInLocalMemory],0,globalWorkSize,localWorkSize);
+                    uniformBSplineTransformProgramKernels[KERNEL_dsumInLocalMemory].rewind();
+                    uniformBSplineTransformProgramKernels[KERNEL_dsumInLocalMemory].putArg(doubleEntryImageBuffer).putNullArg(halfReductionSize*8 /*size in bytes of local mem allocation*/).putArg((int)(sourceDoubleSlice.width * sourceDoubleSlice.height));
+                    asyncQueue.put1DRangeKernel(uniformBSplineTransformProgramKernels[KERNEL_dsumInLocalMemory],0,globalWorkSize,localWorkSize);
+                    uniformBSplineTransformProgramKernels[KERNEL_dsumInLocalMemory].rewind();
+                    asyncQueue.finish();
+                    buffer = asyncQueue.putMapBuffer(maskBuffer, CLMemory.Map.READ, 0, 8, true);
+                    buffer.rewind();
+                    area = (double)buffer.asFloatBuffer().get();
+                    asyncQueue.putUnmapMemory(maskBuffer, buffer);
+                    buffer = asyncQueue.putMapBuffer(doubleEntryImageBuffer, CLMemory.Map.READ, 0, 8, true);
+                    buffer.rewind();
+                    mse = (double)buffer.asFloatBuffer().get();
+                    asyncQueue.putUnmapMemory(doubleEntryImageBuffer, buffer);
+                    asyncQueue.finish();
+                }
+                else
+                {
+                    nrOfBlocks = ((int)(sourceDoubleSlice.width * sourceDoubleSlice.height))%doubleblockSizesFPT;
+                    nrOfBlocks = nrOfBlocks == 0 ? (int)Math.min(((int)(sourceDoubleSlice.width * sourceDoubleSlice.height))/doubleblockSizesFPT,maximumSumReductionBlockNr) : (int)Math.min((((int)(sourceDoubleSlice.width * sourceDoubleSlice.height))+(doubleblockSizesFPT-nrOfBlocks))/doubleblockSizesFPT,maximumSumReductionBlockNr);
+
+                    globalWorkSize = nrOfBlocks * doubleblockSizesFPT;
+                    uniformBSplineTransformProgramKernels[KERNEL_dparallelGroupedSumReduction].putArg(maskBuffer).putArg(parallelSumReductionBuffers[0]).putArg((int)(sourceDoubleSlice.width * sourceDoubleSlice.height)).putNullArg(doubleblockSizesFPT*8 /*size in bytes of local mem allocation*/);
+                    asyncQueue.put1DRangeKernel(uniformBSplineTransformProgramKernels[KERNEL_dparallelGroupedSumReduction],0,globalWorkSize,doubleblockSizesFPT);
+                    uniformBSplineTransformProgramKernels[KERNEL_dparallelGroupedSumReduction].rewind();
+
+                    uniformBSplineTransformProgramKernels[KERNEL_dparallelGroupedSumReduction].putArg(doubleEntryImageBuffer).putArg(parallelSumReductionBuffers[1]).putArg((int)(sourceDoubleSlice.width * sourceDoubleSlice.height)).putNullArg(doubleblockSizesFPT*8 /*size in bytes of local mem allocation*/);
+                    asyncQueue.put1DRangeKernel(uniformBSplineTransformProgramKernels[KERNEL_dparallelGroupedSumReduction],0,globalWorkSize,doubleblockSizesFPT);
+                    uniformBSplineTransformProgramKernels[KERNEL_dparallelGroupedSumReduction].rewind();
+
+                    // synchronize the data
+                    asyncQueue.finish();
+
+                    // reduce in local memory
+                    halfReductionSize = (int) ((nrOfBlocks+(nrOfBlocks%2))/2);
+                    localWorkSize = halfReductionSize % optimalMultiples[KERNEL_dsumInLocalMemory] == 0 ? halfReductionSize : (int)Math.min(halfReductionSize + (optimalMultiples[KERNEL_dsumInLocalMemory] - (halfReductionSize % optimalMultiples[KERNEL_dsumInLocalMemory])), doublemaximumElementsForLocalFPTsum);
+                    globalWorkSize = localWorkSize;
+                    uniformBSplineTransformProgramKernels[KERNEL_dsumInLocalMemory].putArg(parallelSumReductionBuffers[0]).putNullArg(halfReductionSize*8 /*size in bytes of local mem allocation*/).putArg(nrOfBlocks);
+                    asyncQueue.put1DRangeKernel(uniformBSplineTransformProgramKernels[KERNEL_dsumInLocalMemory],0,globalWorkSize,localWorkSize);
+                    uniformBSplineTransformProgramKernels[KERNEL_dsumInLocalMemory].rewind();
+
+                    uniformBSplineTransformProgramKernels[KERNEL_dsumInLocalMemory].putArg(parallelSumReductionBuffers[1]).putNullArg(halfReductionSize*8 /*size in bytes of local mem allocation*/).putArg(nrOfBlocks);
+                    asyncQueue.put1DRangeKernel(uniformBSplineTransformProgramKernels[KERNEL_dsumInLocalMemory],0,globalWorkSize,localWorkSize);
+                    uniformBSplineTransformProgramKernels[KERNEL_dsumInLocalMemory].rewind();
+
+                    // synchronize again
+                    asyncQueue.finish();
+
+                    // Download data
+                    buffer = asyncQueue.putMapBuffer(parallelSumReductionBuffers[0], CLMemory.Map.READ, 0, 8, true);
+                    buffer.rewind();
+                    area = (double)buffer.asFloatBuffer().get();
+                    asyncQueue.putUnmapMemory(parallelSumReductionBuffers[0], buffer);
+                    buffer = asyncQueue.putMapBuffer(parallelSumReductionBuffers[1], CLMemory.Map.READ, 0, 8, true);
+                    buffer.rewind();
+                    mse = (double)buffer.asFloatBuffer().get();
+                    asyncQueue.putUnmapMemory(parallelSumReductionBuffers[1], buffer);
+                    asyncQueue.finish();
+                }
             }
             else
             {
-                nrOfBlocks = ((int)(sourcePyramid[pyramidIndex].width * sourcePyramid[pyramidIndex].height))%blockSizesFPT;
-                nrOfBlocks = nrOfBlocks == 0 ? (int)Math.min(((int)(sourcePyramid[pyramidIndex].width * sourcePyramid[pyramidIndex].height))/blockSizesFPT,maximumSumReductionBlockNr) : (int)Math.min((((int)(sourcePyramid[pyramidIndex].width * sourcePyramid[pyramidIndex].height))+(blockSizesFPT-nrOfBlocks))/blockSizesFPT,maximumSumReductionBlockNr);
-                
-                globalWorkSize = nrOfBlocks * blockSizesFPT;
-                uniformBSplineTransformProgramKernels[KERNEL_parallelGroupedSumReduction].putArg(maskBuffer).putArg(parallelSumReductionBuffers[0]).putArg((int)(sourcePyramid[pyramidIndex].width * sourcePyramid[pyramidIndex].height)).putNullArg(blockSizesFPT*4 /*size in bytes of local mem allocation*/);
-                asyncQueue.put1DRangeKernel(uniformBSplineTransformProgramKernels[KERNEL_parallelGroupedSumReduction],0,globalWorkSize,blockSizesFPT);
-                uniformBSplineTransformProgramKernels[KERNEL_parallelGroupedSumReduction].rewind();
-                
-                uniformBSplineTransformProgramKernels[KERNEL_parallelGroupedSumReduction].putArg(entryImageBuffer).putArg(parallelSumReductionBuffers[1]).putArg((int)(sourcePyramid[pyramidIndex].width * sourcePyramid[pyramidIndex].height)).putNullArg(blockSizesFPT*4 /*size in bytes of local mem allocation*/);
-                asyncQueue.put1DRangeKernel(uniformBSplineTransformProgramKernels[KERNEL_parallelGroupedSumReduction],0,globalWorkSize,blockSizesFPT);
-                uniformBSplineTransformProgramKernels[KERNEL_parallelGroupedSumReduction].rewind();
-                
-                // synchronize the data
-                asyncQueue.finish();
-                
-                // reduce in local memory
-                halfReductionSize = (int) ((nrOfBlocks+(nrOfBlocks%2))/2);
-                localWorkSize = halfReductionSize % optimalMultiples[KERNEL_sumInLocalMemory] == 0 ? halfReductionSize : (int)Math.min(halfReductionSize + (optimalMultiples[KERNEL_sumInLocalMemory] - (halfReductionSize % optimalMultiples[KERNEL_sumInLocalMemory])), maximumElementsForLocalFPTsum);
-                globalWorkSize = localWorkSize;
-                uniformBSplineTransformProgramKernels[KERNEL_sumInLocalMemory].putArg(parallelSumReductionBuffers[0]).putNullArg(halfReductionSize*4 /*size in bytes of local mem allocation*/).putArg(nrOfBlocks);
-                asyncQueue.put1DRangeKernel(uniformBSplineTransformProgramKernels[KERNEL_sumInLocalMemory],0,globalWorkSize,localWorkSize);
-                uniformBSplineTransformProgramKernels[KERNEL_sumInLocalMemory].rewind();
-                
-                uniformBSplineTransformProgramKernels[KERNEL_sumInLocalMemory].putArg(parallelSumReductionBuffers[1]).putNullArg(halfReductionSize*4 /*size in bytes of local mem allocation*/).putArg(nrOfBlocks);
-                asyncQueue.put1DRangeKernel(uniformBSplineTransformProgramKernels[KERNEL_sumInLocalMemory],0,globalWorkSize,localWorkSize);
-                uniformBSplineTransformProgramKernels[KERNEL_sumInLocalMemory].rewind();
-                
-                // synchronize again
-                asyncQueue.finish();
-                
-                // Download data
-                buffer = asyncQueue.putMapBuffer(parallelSumReductionBuffers[0], CLMemory.Map.READ, 0, 4, true);
-                buffer.rewind();
-                area = (double)buffer.asFloatBuffer().get();
-                asyncQueue.putUnmapMemory(parallelSumReductionBuffers[0], buffer);
-                buffer = asyncQueue.putMapBuffer(parallelSumReductionBuffers[1], CLMemory.Map.READ, 0, 4, true);
-                buffer.rewind();
-                mse = (double)buffer.asFloatBuffer().get();
-                asyncQueue.putUnmapMemory(parallelSumReductionBuffers[1], buffer);
-                asyncQueue.finish();
+                final int width = (int)sharedContext.img.dimension(0);
+                final int height = (int)sharedContext.img.dimension(1);
+                final int doubletargetwidth = width * 2;
+                final int doubletargetheight = height * 2;
+                int nIndex = 0;
+                int larea = 0;
+                double s;
+                double xvecx = Math.cos(currentangle);
+                double xvecy = -Math.sin(currentangle);
+                double yvecx = -xvecy;
+                double yvecy = xvecx;
+                double coordx;
+                double rescoordx;
+                double coordy;
+                double rescoordy;
+                int mskx;
+                int msky;
+                for(int i = 0;i < height;i++)
+                {
+                	// First walk along the Y-vector direction and reset the X-position (otherwise the
+                    // y position is initially correct and then lagging behind by one all the time)
+                    coordx = currentoffsetx + ((double)i) * yvecx;
+                    coordy = currentoffsety + ((double)i) * yvecy;
+                    for(int n = 0;n < width;n++,nIndex++)
+                    {
+                        mskx = (int)Math.round(coordx);
+                        msky = (int)Math.round(coordy);
+                        if((mskx >= 0)&&(mskx < width)&&(msky >= 0)&&(msky < height))
+                        {
+                            larea++;
+                            
+                            PlainJavaCPUAligner.computeXInterpolationIndices(coordx, doubletargetwidth, width, xInterpolationIndices);
+                            PlainJavaCPUAligner.computeYInterpolationIndices(coordy, doubletargetheight, height, width, yInterpolationIndices);
+
+                            rescoordx = PlainJavaCPUAligner.getFractional(coordx);
+                            rescoordy = PlainJavaCPUAligner.getFractional(coordy);
+                            
+                            s = PlainJavaCPUAligner.interpolateCubicBSpline(rescoordx, rescoordy, xInterpolationIndices, yInterpolationIndices, targetCoefficientDoubleSlice);
+
+                            // calculate the MSE
+                            double diff = sourceImageDoubleSlice[nIndex] - s;
+                            mse += diff * diff;
+                        }
+                        // walk along the X-vector direction
+                        coordx += xvecx;
+                        coordy += xvecy;
+                    }
+                }
+                area = (double)larea;
             }
             return mse/area;
         }
         
+        private double doubleGetScaledRotationMeanSquaresWithoutHessian(double currentoffsetx, double currentoffsety, double currentangle, double currentscale)
+        {
+            double area = 0.0;
+            double mse = 0.0;
+            if(!usesFloat)
+            {
+                uniformBSplineTransformProgramKernels[KERNEL_dscaledRotationError]
+                        .putArg(sourceDoubleSlice.Image)
+                        .putArg(targetDoubleSlice.Coefficient)
+                        .putArg(doubleEntryImageBuffer)
+                        .putArg(maskBuffer)
+                        .putArg((int)sourceDoubleSlice.width)
+                        .putArg((int)sourceDoubleSlice.height)
+                        .putArg((int)targetDoubleSlice.width)
+                        .putArg((int)targetDoubleSlice.height)
+                        .putArg((int)targetDoubleSlice.width * 2)
+                        .putArg((int)targetDoubleSlice.height * 2)
+                        .putArg(currentoffsetx)
+                        .putArg(currentoffsety)
+                        .putArg(Math.cos(currentangle))
+                        .putArg(-Math.sin(currentangle))
+                        .putArg(currentscale);          
+                int localWorkSize = (int)Math.min(uniformBSplineTransformProgramKernels[KERNEL_dscaledRotationError].getWorkGroupSize(device),optimalMultiples[KERNEL_dscaledRotationError]*blocksizeMultiplier);  // Local work size dimensions
+                int globalWorkSize = StaticUtility.roundUp(localWorkSize, optimalMultiples[KERNEL_dscaledRotationError], (int)(sourceDoubleSlice.width*sourceDoubleSlice.height));
+                queue.put1DRangeKernel(uniformBSplineTransformProgramKernels[KERNEL_dscaledRotationError],0,globalWorkSize,localWorkSize);
+                uniformBSplineTransformProgramKernels[KERNEL_dscaledRotationError].rewind();
+                //now we have the diffs let's calculate all the derived elements
+
+                // to transfer the data to the async queue it has to be synchronized first
+                queue.finish();
+
+                // calculate the MSE row-wise
+                int halfReductionSize = (int) (((sourceDoubleSlice.width * sourceDoubleSlice.height)+((sourceDoubleSlice.width * sourceDoubleSlice.height)%2))/2);
+                int nrOfBlocks;
+                ByteBuffer buffer;
+
+                if(halfReductionSize <= doublemaximumElementsForLocalFPTsum)
+                {
+                    /*
+                    Because each of the following kernels is synchronized by barriers on the GPU they can only be executed on a single compute device.
+                    Therefore using an async queue may increase the speed by allowing multiple kernels to execute in parallel (if local memory permits)
+                    */
+                    localWorkSize = halfReductionSize % optimalMultiples[KERNEL_dsumInLocalMemory] == 0 ? halfReductionSize : (int)Math.min(halfReductionSize + (optimalMultiples[KERNEL_dsumInLocalMemory] - (halfReductionSize % optimalMultiples[KERNEL_dsumInLocalMemory])), doublemaximumElementsForLocalFPTsum);
+                    globalWorkSize = localWorkSize;
+
+                    uniformBSplineTransformProgramKernels[KERNEL_dsumInLocalMemory].putArg(maskBuffer).putNullArg(halfReductionSize*8 /*size in bytes of local mem allocation*/).putArg((int)(sourceDoubleSlice.width * sourceDoubleSlice.height));
+                    asyncQueue.put1DRangeKernel(uniformBSplineTransformProgramKernels[KERNEL_dsumInLocalMemory],0,globalWorkSize,localWorkSize);
+                    uniformBSplineTransformProgramKernels[KERNEL_dsumInLocalMemory].rewind();
+                    uniformBSplineTransformProgramKernels[KERNEL_dsumInLocalMemory].putArg(doubleEntryImageBuffer).putNullArg(halfReductionSize*8 /*size in bytes of local mem allocation*/).putArg((int)(sourceDoubleSlice.width * sourceDoubleSlice.height));
+                    asyncQueue.put1DRangeKernel(uniformBSplineTransformProgramKernels[KERNEL_dsumInLocalMemory],0,globalWorkSize,localWorkSize);
+                    uniformBSplineTransformProgramKernels[KERNEL_dsumInLocalMemory].rewind();
+                    asyncQueue.finish();
+                    buffer = asyncQueue.putMapBuffer(maskBuffer, CLMemory.Map.READ, 0, 8, true);
+                    buffer.rewind();
+                    area = (double)buffer.asFloatBuffer().get();
+                    asyncQueue.putUnmapMemory(maskBuffer, buffer);
+                    buffer = asyncQueue.putMapBuffer(doubleEntryImageBuffer, CLMemory.Map.READ, 0, 8, true);
+                    buffer.rewind();
+                    mse = (double)buffer.asFloatBuffer().get();
+                    asyncQueue.putUnmapMemory(doubleEntryImageBuffer, buffer);
+                    asyncQueue.finish();
+                }
+                else
+                {
+                    nrOfBlocks = ((int)(sourceDoubleSlice.width * sourceDoubleSlice.height))%doubleblockSizesFPT;
+                    nrOfBlocks = nrOfBlocks == 0 ? (int)Math.min(((int)(sourceDoubleSlice.width * sourceDoubleSlice.height))/doubleblockSizesFPT,maximumSumReductionBlockNr) : (int)Math.min((((int)(sourceDoubleSlice.width * sourceDoubleSlice.height))+(doubleblockSizesFPT-nrOfBlocks))/doubleblockSizesFPT,maximumSumReductionBlockNr);
+
+                    globalWorkSize = nrOfBlocks * doubleblockSizesFPT;
+                    uniformBSplineTransformProgramKernels[KERNEL_dparallelGroupedSumReduction].putArg(maskBuffer).putArg(parallelSumReductionBuffers[0]).putArg((int)(sourceDoubleSlice.width * sourceDoubleSlice.height)).putNullArg(doubleblockSizesFPT*8 /*size in bytes of local mem allocation*/);
+                    asyncQueue.put1DRangeKernel(uniformBSplineTransformProgramKernels[KERNEL_dparallelGroupedSumReduction],0,globalWorkSize,doubleblockSizesFPT);
+                    uniformBSplineTransformProgramKernels[KERNEL_dparallelGroupedSumReduction].rewind();
+
+                    uniformBSplineTransformProgramKernels[KERNEL_dparallelGroupedSumReduction].putArg(doubleEntryImageBuffer).putArg(parallelSumReductionBuffers[1]).putArg((int)(sourceDoubleSlice.width * sourceDoubleSlice.height)).putNullArg(doubleblockSizesFPT*8 /*size in bytes of local mem allocation*/);
+                    asyncQueue.put1DRangeKernel(uniformBSplineTransformProgramKernels[KERNEL_dparallelGroupedSumReduction],0,globalWorkSize,doubleblockSizesFPT);
+                    uniformBSplineTransformProgramKernels[KERNEL_dparallelGroupedSumReduction].rewind();
+
+                    // synchronize the data
+                    asyncQueue.finish();
+
+                    // reduce in local memory
+                    halfReductionSize = (int) ((nrOfBlocks+(nrOfBlocks%2))/2);
+                    localWorkSize = halfReductionSize % optimalMultiples[KERNEL_dsumInLocalMemory] == 0 ? halfReductionSize : (int)Math.min(halfReductionSize + (optimalMultiples[KERNEL_dsumInLocalMemory] - (halfReductionSize % optimalMultiples[KERNEL_dsumInLocalMemory])), doublemaximumElementsForLocalFPTsum);
+                    globalWorkSize = localWorkSize;
+                    uniformBSplineTransformProgramKernels[KERNEL_dsumInLocalMemory].putArg(parallelSumReductionBuffers[0]).putNullArg(halfReductionSize*8 /*size in bytes of local mem allocation*/).putArg(nrOfBlocks);
+                    asyncQueue.put1DRangeKernel(uniformBSplineTransformProgramKernels[KERNEL_dsumInLocalMemory],0,globalWorkSize,localWorkSize);
+                    uniformBSplineTransformProgramKernels[KERNEL_dsumInLocalMemory].rewind();
+
+                    uniformBSplineTransformProgramKernels[KERNEL_dsumInLocalMemory].putArg(parallelSumReductionBuffers[1]).putNullArg(halfReductionSize*8 /*size in bytes of local mem allocation*/).putArg(nrOfBlocks);
+                    asyncQueue.put1DRangeKernel(uniformBSplineTransformProgramKernels[KERNEL_dsumInLocalMemory],0,globalWorkSize,localWorkSize);
+                    uniformBSplineTransformProgramKernels[KERNEL_dsumInLocalMemory].rewind();
+
+                    // synchronize again
+                    asyncQueue.finish();
+
+                    // Download data
+                    buffer = asyncQueue.putMapBuffer(parallelSumReductionBuffers[0], CLMemory.Map.READ, 0, 8, true);
+                    buffer.rewind();
+                    area = (double)buffer.asFloatBuffer().get();
+                    asyncQueue.putUnmapMemory(parallelSumReductionBuffers[0], buffer);
+                    buffer = asyncQueue.putMapBuffer(parallelSumReductionBuffers[1], CLMemory.Map.READ, 0, 8, true);
+                    buffer.rewind();
+                    mse = (double)buffer.asFloatBuffer().get();
+                    asyncQueue.putUnmapMemory(parallelSumReductionBuffers[1], buffer);
+                    asyncQueue.finish();
+                }
+            }
+            else
+            {
+                final int width = (int)sharedContext.img.dimension(0);
+                final int height = (int)sharedContext.img.dimension(1);
+                final int doubletargetwidth = width * 2;
+                final int doubletargetheight = height * 2;
+                int nIndex = 0;
+                int larea = 0;
+                double s;
+                double xvecx = Math.cos(currentangle) * currentscale;
+                double xvecy = -Math.sin(currentangle) * currentscale;
+                double yvecx = -xvecy;
+                double yvecy = xvecx;
+                double coordx;
+                double rescoordx;
+                double coordy;
+                double rescoordy;
+                int mskx;
+                int msky;
+                for(int i = 0;i < height;i++)
+                {
+                	// First walk along the Y-vector direction and reset the X-position (otherwise the
+                    // y position is initially correct and then lagging behind by one all the time)
+                    coordx = currentoffsetx + ((double)i) * yvecx;
+                    coordy = currentoffsety + ((double)i) * yvecy;
+                    for(int n = 0;n < width;n++,nIndex++)
+                    {
+                        mskx = (int)Math.round(coordx);
+                        msky = (int)Math.round(coordy);
+                        if((mskx >= 0)&&(mskx < width)&&(msky >= 0)&&(msky < height))
+                        {
+                            larea++;
+                            
+                            PlainJavaCPUAligner.computeXInterpolationIndices(coordx, doubletargetwidth, width, xInterpolationIndices);
+                            PlainJavaCPUAligner.computeYInterpolationIndices(coordy, doubletargetheight, height, width, yInterpolationIndices);
+
+                            rescoordx = PlainJavaCPUAligner.getFractional(coordx);
+                            rescoordy = PlainJavaCPUAligner.getFractional(coordy);
+                            
+                            s = PlainJavaCPUAligner.interpolateCubicBSpline(rescoordx, rescoordy, xInterpolationIndices, yInterpolationIndices, targetCoefficientDoubleSlice);
+
+                            // calculate the MSE
+                            double diff = sourceImageDoubleSlice[nIndex] - s;
+                            mse += diff * diff;
+                        }
+                        // walk along the X-vector direction
+                        coordx += xvecx;
+                        coordy += xvecy;
+                    }
+                }
+                area = (double)larea;
+            }
+            return mse/area;
+        }
+        
+        private double doubleGetAffineMeanSquaresWithoutHessian(double currentoffsetx, double currentoffsety,
+                double currenta11, double currenta12,
+                double currenta21, double currenta22)
+        {
+            double area = 0.0;
+            double mse = 0.0;
+            if(!usesFloat)
+            {
+                uniformBSplineTransformProgramKernels[KERNEL_daffineError]
+                        .putArg(sourceDoubleSlice.Image)
+                        .putArg(targetDoubleSlice.Coefficient)
+                        .putArg(doubleEntryImageBuffer)
+                        .putArg(maskBuffer)
+                        .putArg((int)sourceDoubleSlice.width)
+                        .putArg((int)sourceDoubleSlice.height)
+                        .putArg((int)targetDoubleSlice.width)
+                        .putArg((int)targetDoubleSlice.height)
+                        .putArg((int)targetDoubleSlice.width * 2)
+                        .putArg((int)targetDoubleSlice.height * 2)
+                        .putArg(currentoffsetx)
+                        .putArg(currentoffsety)
+                        .putArg(currenta11)
+                        .putArg(currenta12)
+                        .putArg(currenta21)
+                        .putArg(currenta22);          
+                int localWorkSize = (int)Math.min(uniformBSplineTransformProgramKernels[KERNEL_daffineError].getWorkGroupSize(device),optimalMultiples[KERNEL_daffineError]*blocksizeMultiplier);  // Local work size dimensions
+                int globalWorkSize = StaticUtility.roundUp(localWorkSize, optimalMultiples[KERNEL_daffineError], (int)(sourceDoubleSlice.width*sourceDoubleSlice.height));
+                queue.put1DRangeKernel(uniformBSplineTransformProgramKernels[KERNEL_daffineError],0,globalWorkSize,localWorkSize);
+                uniformBSplineTransformProgramKernels[KERNEL_daffineError].rewind();
+                //now we have the diffs let's calculate all the derived elements
+
+                // to transfer the data to the async queue it has to be synchronized first
+                queue.finish();
+
+                // calculate the MSE row-wise
+                int halfReductionSize = (int) (((sourceDoubleSlice.width * sourceDoubleSlice.height)+((sourceDoubleSlice.width * sourceDoubleSlice.height)%2))/2);
+                int nrOfBlocks;
+                ByteBuffer buffer;
+
+                if(halfReductionSize <= doublemaximumElementsForLocalFPTsum)
+                {
+                    /*
+                    Because each of the following kernels is synchronized by barriers on the GPU they can only be executed on a single compute device.
+                    Therefore using an async queue may increase the speed by allowing multiple kernels to execute in parallel (if local memory permits)
+                    */
+                    localWorkSize = halfReductionSize % optimalMultiples[KERNEL_dsumInLocalMemory] == 0 ? halfReductionSize : (int)Math.min(halfReductionSize + (optimalMultiples[KERNEL_dsumInLocalMemory] - (halfReductionSize % optimalMultiples[KERNEL_dsumInLocalMemory])), doublemaximumElementsForLocalFPTsum);
+                    globalWorkSize = localWorkSize;
+
+                    uniformBSplineTransformProgramKernels[KERNEL_dsumInLocalMemory].putArg(maskBuffer).putNullArg(halfReductionSize*8 /*size in bytes of local mem allocation*/).putArg((int)(sourceDoubleSlice.width * sourceDoubleSlice.height));
+                    asyncQueue.put1DRangeKernel(uniformBSplineTransformProgramKernels[KERNEL_dsumInLocalMemory],0,globalWorkSize,localWorkSize);
+                    uniformBSplineTransformProgramKernels[KERNEL_dsumInLocalMemory].rewind();
+                    uniformBSplineTransformProgramKernels[KERNEL_dsumInLocalMemory].putArg(doubleEntryImageBuffer).putNullArg(halfReductionSize*8 /*size in bytes of local mem allocation*/).putArg((int)(sourceDoubleSlice.width * sourceDoubleSlice.height));
+                    asyncQueue.put1DRangeKernel(uniformBSplineTransformProgramKernels[KERNEL_dsumInLocalMemory],0,globalWorkSize,localWorkSize);
+                    uniformBSplineTransformProgramKernels[KERNEL_dsumInLocalMemory].rewind();
+                    asyncQueue.finish();
+                    buffer = asyncQueue.putMapBuffer(maskBuffer, CLMemory.Map.READ, 0, 8, true);
+                    buffer.rewind();
+                    area = (double)buffer.asFloatBuffer().get();
+                    asyncQueue.putUnmapMemory(maskBuffer, buffer);
+                    buffer = asyncQueue.putMapBuffer(doubleEntryImageBuffer, CLMemory.Map.READ, 0, 8, true);
+                    buffer.rewind();
+                    mse = (double)buffer.asFloatBuffer().get();
+                    asyncQueue.putUnmapMemory(doubleEntryImageBuffer, buffer);
+                    asyncQueue.finish();
+                }
+                else
+                {
+                    nrOfBlocks = ((int)(sourceDoubleSlice.width * sourceDoubleSlice.height))%doubleblockSizesFPT;
+                    nrOfBlocks = nrOfBlocks == 0 ? (int)Math.min(((int)(sourceDoubleSlice.width * sourceDoubleSlice.height))/doubleblockSizesFPT,maximumSumReductionBlockNr) : (int)Math.min((((int)(sourceDoubleSlice.width * sourceDoubleSlice.height))+(doubleblockSizesFPT-nrOfBlocks))/doubleblockSizesFPT,maximumSumReductionBlockNr);
+
+                    globalWorkSize = nrOfBlocks * doubleblockSizesFPT;
+                    uniformBSplineTransformProgramKernels[KERNEL_dparallelGroupedSumReduction].putArg(maskBuffer).putArg(parallelSumReductionBuffers[0]).putArg((int)(sourceDoubleSlice.width * sourceDoubleSlice.height)).putNullArg(doubleblockSizesFPT*8 /*size in bytes of local mem allocation*/);
+                    asyncQueue.put1DRangeKernel(uniformBSplineTransformProgramKernels[KERNEL_dparallelGroupedSumReduction],0,globalWorkSize,doubleblockSizesFPT);
+                    uniformBSplineTransformProgramKernels[KERNEL_dparallelGroupedSumReduction].rewind();
+
+                    uniformBSplineTransformProgramKernels[KERNEL_dparallelGroupedSumReduction].putArg(doubleEntryImageBuffer).putArg(parallelSumReductionBuffers[1]).putArg((int)(sourceDoubleSlice.width * sourceDoubleSlice.height)).putNullArg(doubleblockSizesFPT*8 /*size in bytes of local mem allocation*/);
+                    asyncQueue.put1DRangeKernel(uniformBSplineTransformProgramKernels[KERNEL_dparallelGroupedSumReduction],0,globalWorkSize,doubleblockSizesFPT);
+                    uniformBSplineTransformProgramKernels[KERNEL_dparallelGroupedSumReduction].rewind();
+
+                    // synchronize the data
+                    asyncQueue.finish();
+
+                    // reduce in local memory
+                    halfReductionSize = (int) ((nrOfBlocks+(nrOfBlocks%2))/2);
+                    localWorkSize = halfReductionSize % optimalMultiples[KERNEL_dsumInLocalMemory] == 0 ? halfReductionSize : (int)Math.min(halfReductionSize + (optimalMultiples[KERNEL_dsumInLocalMemory] - (halfReductionSize % optimalMultiples[KERNEL_dsumInLocalMemory])), doublemaximumElementsForLocalFPTsum);
+                    globalWorkSize = localWorkSize;
+                    uniformBSplineTransformProgramKernels[KERNEL_dsumInLocalMemory].putArg(parallelSumReductionBuffers[0]).putNullArg(halfReductionSize*8 /*size in bytes of local mem allocation*/).putArg(nrOfBlocks);
+                    asyncQueue.put1DRangeKernel(uniformBSplineTransformProgramKernels[KERNEL_dsumInLocalMemory],0,globalWorkSize,localWorkSize);
+                    uniformBSplineTransformProgramKernels[KERNEL_dsumInLocalMemory].rewind();
+
+                    uniformBSplineTransformProgramKernels[KERNEL_dsumInLocalMemory].putArg(parallelSumReductionBuffers[1]).putNullArg(halfReductionSize*8 /*size in bytes of local mem allocation*/).putArg(nrOfBlocks);
+                    asyncQueue.put1DRangeKernel(uniformBSplineTransformProgramKernels[KERNEL_dsumInLocalMemory],0,globalWorkSize,localWorkSize);
+                    uniformBSplineTransformProgramKernels[KERNEL_dsumInLocalMemory].rewind();
+
+                    // synchronize again
+                    asyncQueue.finish();
+
+                    // Download data
+                    buffer = asyncQueue.putMapBuffer(parallelSumReductionBuffers[0], CLMemory.Map.READ, 0, 8, true);
+                    buffer.rewind();
+                    area = (double)buffer.asFloatBuffer().get();
+                    asyncQueue.putUnmapMemory(parallelSumReductionBuffers[0], buffer);
+                    buffer = asyncQueue.putMapBuffer(parallelSumReductionBuffers[1], CLMemory.Map.READ, 0, 8, true);
+                    buffer.rewind();
+                    mse = (double)buffer.asFloatBuffer().get();
+                    asyncQueue.putUnmapMemory(parallelSumReductionBuffers[1], buffer);
+                    asyncQueue.finish();
+                }
+            }
+            else
+            {
+                final int width = (int)sharedContext.img.dimension(0);
+                final int height = (int)sharedContext.img.dimension(1);
+                final int doubletargetwidth = width * 2;
+                final int doubletargetheight = height * 2;
+                int nIndex = 0;
+                int larea = 0;
+                double s;
+                double coordx;
+                double rescoordx;
+                double coordy;
+                double rescoordy;
+                int mskx;
+                int msky;
+                
+                // Affine coordinate step vectors (same as getAffineMeanSquares)
+                double xvecx = currenta11;
+                double xvecy = currenta21;
+                double yvecx = currenta12;
+                double yvecy = currenta22;
+                for(int i = 0;i < height;i++)
+                {
+                	// First walk along the Y-vector direction and reset the X-position (otherwise the
+                    // y position is initially correct and then lagging behind by one all the time)
+                    coordx = currentoffsetx + ((double)i) * yvecx;
+                    coordy = currentoffsety + ((double)i) * yvecy;
+                    for(int n = 0;n < width;n++,nIndex++)
+                    {
+                        mskx = (int)Math.round(coordx);
+                        msky = (int)Math.round(coordy);
+                        if((mskx >= 0)&&(mskx < width)&&(msky >= 0)&&(msky < height))
+                        {
+                            larea++;
+                            
+                            PlainJavaCPUAligner.computeXInterpolationIndices(coordx, doubletargetwidth, width, xInterpolationIndices);
+                            PlainJavaCPUAligner.computeYInterpolationIndices(coordy, doubletargetheight, height, width, yInterpolationIndices);
+
+                            rescoordx = PlainJavaCPUAligner.getFractional(coordx);
+                            rescoordy = PlainJavaCPUAligner.getFractional(coordy);
+                            
+                            s = PlainJavaCPUAligner.interpolateCubicBSpline(rescoordx, rescoordy, xInterpolationIndices, yInterpolationIndices, targetCoefficientDoubleSlice);
+
+                            // calculate the MSE
+                            double diff = sourceImageDoubleSlice[nIndex] - s;
+                            mse += diff * diff;
+                        }
+                        // walk along the X-vector direction
+                        coordx += xvecx;
+                        coordy += xvecy;
+                    }
+                }
+                area = (double)larea;
+            }
+            return mse/area;
+        }
         
         private double getTranslationMeanSquaresWithoutHessian(int pyramidIndex, double currentoffsetx, double curentoffsety)
         {
@@ -3769,7 +7543,327 @@ public class HybridPrecisionNGStackReg extends RegistrationAndTransformation
             }
             return mse/area;
         }
-     
+        
+        private double getRigidBodyMeanSquaresWithoutHessian(int pyramidIndex, double currentoffsetx, double curentoffsety, double currentangle)
+        {
+            uniformBSplineTransformProgramKernels[KERNEL_rigidBodyError]
+                    .putArg(sourcePyramid[pyramidIndex].Image)
+                    .putArg(targetPyramid[pyramidIndex].Coefficient)
+                    .putArg(entryImageBuffer)
+                    .putArg(maskBuffer)
+                    .putArg((int)sourcePyramid[pyramidIndex].width)
+                    .putArg((int)sourcePyramid[pyramidIndex].height)
+                    .putArg((int)targetPyramid[pyramidIndex].width)
+                    .putArg((int)targetPyramid[pyramidIndex].height)
+                    .putArg((int)targetPyramid[pyramidIndex].width * 2)
+                    .putArg((int)targetPyramid[pyramidIndex].height * 2)
+                    .putArg((float)currentoffsetx)
+                    .putArg((float)curentoffsety)
+                    .putArg((float)Math.cos(currentangle))
+                    .putArg((float)-Math.sin(currentangle));
+            
+            int localWorkSize = (int)Math.min(uniformBSplineTransformProgramKernels[KERNEL_rigidBodyError].getWorkGroupSize(device),optimalMultiples[KERNEL_rigidBodyError]*blocksizeMultiplier);  // Local work size dimensions
+            int globalWorkSize = StaticUtility.roundUp(localWorkSize, optimalMultiples[KERNEL_rigidBodyError], (int)(sourcePyramid[pyramidIndex].width*sourcePyramid[pyramidIndex].height));
+            queue.put1DRangeKernel(uniformBSplineTransformProgramKernels[KERNEL_rigidBodyError],0,globalWorkSize,localWorkSize);
+            uniformBSplineTransformProgramKernels[KERNEL_rigidBodyError].rewind();
+            // now we have the diffs let's calculate all the derived elements
+            
+            // to transfer the data to the async queue it has to be synchronized first
+            queue.finish();
+            
+            // calculate the MSE row-wise
+            int halfReductionSize = (int) (((sourcePyramid[pyramidIndex].width * sourcePyramid[pyramidIndex].height)+((sourcePyramid[pyramidIndex].width * sourcePyramid[pyramidIndex].height)%2))/2);
+            int nrOfBlocks;
+            ByteBuffer buffer;
+            double area;
+            double mse;
+            if(halfReductionSize <= maximumElementsForLocalFPTsum)
+            {
+                /*
+                Because each of the following kernels is synchronized by barriers on the GPU they can only be executed on a single compute device.
+                Therefore using an async queue may increase the speed by allowing multiple kernels to execute in parallel (if local memory permits)
+                */
+                localWorkSize = halfReductionSize % optimalMultiples[KERNEL_sumInLocalMemory] == 0 ? halfReductionSize : (int)Math.min(halfReductionSize + (optimalMultiples[KERNEL_sumInLocalMemory] - (halfReductionSize % optimalMultiples[KERNEL_sumInLocalMemory])), maximumElementsForLocalFPTsum);
+                globalWorkSize = localWorkSize;
+                
+                uniformBSplineTransformProgramKernels[KERNEL_sumInLocalMemory].putArg(maskBuffer).putNullArg(halfReductionSize*4 /*size in bytes of local mem allocation*/).putArg((int)(sourcePyramid[pyramidIndex].width * sourcePyramid[pyramidIndex].height));
+                asyncQueue.put1DRangeKernel(uniformBSplineTransformProgramKernels[KERNEL_sumInLocalMemory],0,globalWorkSize,localWorkSize);
+                uniformBSplineTransformProgramKernels[KERNEL_sumInLocalMemory].rewind();
+                uniformBSplineTransformProgramKernels[KERNEL_sumInLocalMemory].putArg(entryImageBuffer).putNullArg(halfReductionSize*4 /*size in bytes of local mem allocation*/).putArg((int)(sourcePyramid[pyramidIndex].width * sourcePyramid[pyramidIndex].height));
+                asyncQueue.put1DRangeKernel(uniformBSplineTransformProgramKernels[KERNEL_sumInLocalMemory],0,globalWorkSize,localWorkSize);
+                uniformBSplineTransformProgramKernels[KERNEL_sumInLocalMemory].rewind();
+                asyncQueue.finish();
+                buffer = asyncQueue.putMapBuffer(maskBuffer, CLMemory.Map.READ, 0, 4, true);
+                buffer.rewind();
+                area = (double)buffer.asFloatBuffer().get();
+                asyncQueue.putUnmapMemory(maskBuffer, buffer);
+                buffer = asyncQueue.putMapBuffer(entryImageBuffer, CLMemory.Map.READ, 0, 4, true);
+                buffer.rewind();
+                mse = (double)buffer.asFloatBuffer().get();
+                asyncQueue.putUnmapMemory(entryImageBuffer, buffer);
+                asyncQueue.finish();
+            }
+            else
+            {
+                nrOfBlocks = ((int)(sourcePyramid[pyramidIndex].width * sourcePyramid[pyramidIndex].height))%blockSizesFPT;
+                nrOfBlocks = nrOfBlocks == 0 ? (int)Math.min(((int)(sourcePyramid[pyramidIndex].width * sourcePyramid[pyramidIndex].height))/blockSizesFPT,maximumSumReductionBlockNr) : (int)Math.min((((int)(sourcePyramid[pyramidIndex].width * sourcePyramid[pyramidIndex].height))+(blockSizesFPT-nrOfBlocks))/blockSizesFPT,maximumSumReductionBlockNr);
+                
+                globalWorkSize = nrOfBlocks * blockSizesFPT;
+                uniformBSplineTransformProgramKernels[KERNEL_parallelGroupedSumReduction].putArg(maskBuffer).putArg(parallelSumReductionBuffers[0]).putArg((int)(sourcePyramid[pyramidIndex].width * sourcePyramid[pyramidIndex].height)).putNullArg(blockSizesFPT*4 /*size in bytes of local mem allocation*/);
+                asyncQueue.put1DRangeKernel(uniformBSplineTransformProgramKernels[KERNEL_parallelGroupedSumReduction],0,globalWorkSize,blockSizesFPT);
+                uniformBSplineTransformProgramKernels[KERNEL_parallelGroupedSumReduction].rewind();
+                
+                uniformBSplineTransformProgramKernels[KERNEL_parallelGroupedSumReduction].putArg(entryImageBuffer).putArg(parallelSumReductionBuffers[1]).putArg((int)(sourcePyramid[pyramidIndex].width * sourcePyramid[pyramidIndex].height)).putNullArg(blockSizesFPT*4 /*size in bytes of local mem allocation*/);
+                asyncQueue.put1DRangeKernel(uniformBSplineTransformProgramKernels[KERNEL_parallelGroupedSumReduction],0,globalWorkSize,blockSizesFPT);
+                uniformBSplineTransformProgramKernels[KERNEL_parallelGroupedSumReduction].rewind();
+                
+                // synchronize the data
+                asyncQueue.finish();
+                
+                // reduce in local memory
+                halfReductionSize = (int) ((nrOfBlocks+(nrOfBlocks%2))/2);
+                localWorkSize = halfReductionSize % optimalMultiples[KERNEL_sumInLocalMemory] == 0 ? halfReductionSize : (int)Math.min(halfReductionSize + (optimalMultiples[KERNEL_sumInLocalMemory] - (halfReductionSize % optimalMultiples[KERNEL_sumInLocalMemory])), maximumElementsForLocalFPTsum);
+                globalWorkSize = localWorkSize;
+                uniformBSplineTransformProgramKernels[KERNEL_sumInLocalMemory].putArg(parallelSumReductionBuffers[0]).putNullArg(halfReductionSize*4 /*size in bytes of local mem allocation*/).putArg(nrOfBlocks);
+                asyncQueue.put1DRangeKernel(uniformBSplineTransformProgramKernels[KERNEL_sumInLocalMemory],0,globalWorkSize,localWorkSize);
+                uniformBSplineTransformProgramKernels[KERNEL_sumInLocalMemory].rewind();
+                
+                uniformBSplineTransformProgramKernels[KERNEL_sumInLocalMemory].putArg(parallelSumReductionBuffers[1]).putNullArg(halfReductionSize*4 /*size in bytes of local mem allocation*/).putArg(nrOfBlocks);
+                asyncQueue.put1DRangeKernel(uniformBSplineTransformProgramKernels[KERNEL_sumInLocalMemory],0,globalWorkSize,localWorkSize);
+                uniformBSplineTransformProgramKernels[KERNEL_sumInLocalMemory].rewind();
+                
+                // synchronize again
+                asyncQueue.finish();
+                
+                // Download data
+                buffer = asyncQueue.putMapBuffer(parallelSumReductionBuffers[0], CLMemory.Map.READ, 0, 4, true);
+                buffer.rewind();
+                area = (double)buffer.asFloatBuffer().get();
+                asyncQueue.putUnmapMemory(parallelSumReductionBuffers[0], buffer);
+                buffer = asyncQueue.putMapBuffer(parallelSumReductionBuffers[1], CLMemory.Map.READ, 0, 4, true);
+                buffer.rewind();
+                mse = (double)buffer.asFloatBuffer().get();
+                asyncQueue.putUnmapMemory(parallelSumReductionBuffers[1], buffer);
+                asyncQueue.finish();
+            }
+            return mse/area;
+        }
+        
+        private double getScaledRotationMeanSquaresWithoutHessian(int pyramidIndex, double currentoffsetx, double currentoffsety, double currentangle, double currentscale)
+        {
+            uniformBSplineTransformProgramKernels[KERNEL_fscaledRotationError]
+                    .putArg(sourcePyramid[pyramidIndex].Image)
+                    .putArg(targetPyramid[pyramidIndex].Coefficient)
+                    .putArg(entryImageBuffer)
+                    .putArg(maskBuffer)
+                    .putArg((int)sourcePyramid[pyramidIndex].width)
+                    .putArg((int)sourcePyramid[pyramidIndex].height)
+                    .putArg((int)targetPyramid[pyramidIndex].width)
+                    .putArg((int)targetPyramid[pyramidIndex].height)
+                    .putArg((int)targetPyramid[pyramidIndex].width * 2)
+                    .putArg((int)targetPyramid[pyramidIndex].height * 2)
+                    .putArg((float)currentoffsetx)
+                    .putArg((float)currentoffsety)
+                    .putArg((float)Math.cos(currentangle))
+                    .putArg((float)-Math.sin(currentangle))
+                    .putArg((float)currentscale);
+            
+            int localWorkSize = (int)Math.min(uniformBSplineTransformProgramKernels[KERNEL_fscaledRotationError].getWorkGroupSize(device),optimalMultiples[KERNEL_fscaledRotationError]*blocksizeMultiplier);  // Local work size dimensions
+            int globalWorkSize = StaticUtility.roundUp(localWorkSize, optimalMultiples[KERNEL_fscaledRotationError], (int)(sourcePyramid[pyramidIndex].width*sourcePyramid[pyramidIndex].height));
+            queue.put1DRangeKernel(uniformBSplineTransformProgramKernels[KERNEL_fscaledRotationError],0,globalWorkSize,localWorkSize);
+            uniformBSplineTransformProgramKernels[KERNEL_fscaledRotationError].rewind();
+            // now we have the diffs let's calculate all the derived elements
+            
+            // to transfer the data to the async queue it has to be synchronized first
+            queue.finish();
+            
+            // calculate the MSE row-wise
+            int halfReductionSize = (int) (((sourcePyramid[pyramidIndex].width * sourcePyramid[pyramidIndex].height)+((sourcePyramid[pyramidIndex].width * sourcePyramid[pyramidIndex].height)%2))/2);
+            int nrOfBlocks;
+            ByteBuffer buffer;
+            double area;
+            double mse;
+            if(halfReductionSize <= maximumElementsForLocalFPTsum)
+            {
+                /*
+                Because each of the following kernels is synchronized by barriers on the GPU they can only be executed on a single compute device.
+                Therefore using an async queue may increase the speed by allowing multiple kernels to execute in parallel (if local memory permits)
+                */
+                localWorkSize = halfReductionSize % optimalMultiples[KERNEL_sumInLocalMemory] == 0 ? halfReductionSize : (int)Math.min(halfReductionSize + (optimalMultiples[KERNEL_sumInLocalMemory] - (halfReductionSize % optimalMultiples[KERNEL_sumInLocalMemory])), maximumElementsForLocalFPTsum);
+                globalWorkSize = localWorkSize;
+                
+                uniformBSplineTransformProgramKernels[KERNEL_sumInLocalMemory].putArg(maskBuffer).putNullArg(halfReductionSize*4 /*size in bytes of local mem allocation*/).putArg((int)(sourcePyramid[pyramidIndex].width * sourcePyramid[pyramidIndex].height));
+                asyncQueue.put1DRangeKernel(uniformBSplineTransformProgramKernels[KERNEL_sumInLocalMemory],0,globalWorkSize,localWorkSize);
+                uniformBSplineTransformProgramKernels[KERNEL_sumInLocalMemory].rewind();
+                uniformBSplineTransformProgramKernels[KERNEL_sumInLocalMemory].putArg(entryImageBuffer).putNullArg(halfReductionSize*4 /*size in bytes of local mem allocation*/).putArg((int)(sourcePyramid[pyramidIndex].width * sourcePyramid[pyramidIndex].height));
+                asyncQueue.put1DRangeKernel(uniformBSplineTransformProgramKernels[KERNEL_sumInLocalMemory],0,globalWorkSize,localWorkSize);
+                uniformBSplineTransformProgramKernels[KERNEL_sumInLocalMemory].rewind();
+                asyncQueue.finish();
+                buffer = asyncQueue.putMapBuffer(maskBuffer, CLMemory.Map.READ, 0, 4, true);
+                buffer.rewind();
+                area = (double)buffer.asFloatBuffer().get();
+                asyncQueue.putUnmapMemory(maskBuffer, buffer);
+                buffer = asyncQueue.putMapBuffer(entryImageBuffer, CLMemory.Map.READ, 0, 4, true);
+                buffer.rewind();
+                mse = (double)buffer.asFloatBuffer().get();
+                asyncQueue.putUnmapMemory(entryImageBuffer, buffer);
+                asyncQueue.finish();
+            }
+            else
+            {
+                nrOfBlocks = ((int)(sourcePyramid[pyramidIndex].width * sourcePyramid[pyramidIndex].height))%blockSizesFPT;
+                nrOfBlocks = nrOfBlocks == 0 ? (int)Math.min(((int)(sourcePyramid[pyramidIndex].width * sourcePyramid[pyramidIndex].height))/blockSizesFPT,maximumSumReductionBlockNr) : (int)Math.min((((int)(sourcePyramid[pyramidIndex].width * sourcePyramid[pyramidIndex].height))+(blockSizesFPT-nrOfBlocks))/blockSizesFPT,maximumSumReductionBlockNr);
+                
+                globalWorkSize = nrOfBlocks * blockSizesFPT;
+                uniformBSplineTransformProgramKernels[KERNEL_parallelGroupedSumReduction].putArg(maskBuffer).putArg(parallelSumReductionBuffers[0]).putArg((int)(sourcePyramid[pyramidIndex].width * sourcePyramid[pyramidIndex].height)).putNullArg(blockSizesFPT*4 /*size in bytes of local mem allocation*/);
+                asyncQueue.put1DRangeKernel(uniformBSplineTransformProgramKernels[KERNEL_parallelGroupedSumReduction],0,globalWorkSize,blockSizesFPT);
+                uniformBSplineTransformProgramKernels[KERNEL_parallelGroupedSumReduction].rewind();
+                
+                uniformBSplineTransformProgramKernels[KERNEL_parallelGroupedSumReduction].putArg(entryImageBuffer).putArg(parallelSumReductionBuffers[1]).putArg((int)(sourcePyramid[pyramidIndex].width * sourcePyramid[pyramidIndex].height)).putNullArg(blockSizesFPT*4 /*size in bytes of local mem allocation*/);
+                asyncQueue.put1DRangeKernel(uniformBSplineTransformProgramKernels[KERNEL_parallelGroupedSumReduction],0,globalWorkSize,blockSizesFPT);
+                uniformBSplineTransformProgramKernels[KERNEL_parallelGroupedSumReduction].rewind();
+                
+                // synchronize the data
+                asyncQueue.finish();
+                
+                // reduce in local memory
+                halfReductionSize = (int) ((nrOfBlocks+(nrOfBlocks%2))/2);
+                localWorkSize = halfReductionSize % optimalMultiples[KERNEL_sumInLocalMemory] == 0 ? halfReductionSize : (int)Math.min(halfReductionSize + (optimalMultiples[KERNEL_sumInLocalMemory] - (halfReductionSize % optimalMultiples[KERNEL_sumInLocalMemory])), maximumElementsForLocalFPTsum);
+                globalWorkSize = localWorkSize;
+                uniformBSplineTransformProgramKernels[KERNEL_sumInLocalMemory].putArg(parallelSumReductionBuffers[0]).putNullArg(halfReductionSize*4 /*size in bytes of local mem allocation*/).putArg(nrOfBlocks);
+                asyncQueue.put1DRangeKernel(uniformBSplineTransformProgramKernels[KERNEL_sumInLocalMemory],0,globalWorkSize,localWorkSize);
+                uniformBSplineTransformProgramKernels[KERNEL_sumInLocalMemory].rewind();
+                
+                uniformBSplineTransformProgramKernels[KERNEL_sumInLocalMemory].putArg(parallelSumReductionBuffers[1]).putNullArg(halfReductionSize*4 /*size in bytes of local mem allocation*/).putArg(nrOfBlocks);
+                asyncQueue.put1DRangeKernel(uniformBSplineTransformProgramKernels[KERNEL_sumInLocalMemory],0,globalWorkSize,localWorkSize);
+                uniformBSplineTransformProgramKernels[KERNEL_sumInLocalMemory].rewind();
+                
+                // synchronize again
+                asyncQueue.finish();
+                
+                // Download data
+                buffer = asyncQueue.putMapBuffer(parallelSumReductionBuffers[0], CLMemory.Map.READ, 0, 4, true);
+                buffer.rewind();
+                area = (double)buffer.asFloatBuffer().get();
+                asyncQueue.putUnmapMemory(parallelSumReductionBuffers[0], buffer);
+                buffer = asyncQueue.putMapBuffer(parallelSumReductionBuffers[1], CLMemory.Map.READ, 0, 4, true);
+                buffer.rewind();
+                mse = (double)buffer.asFloatBuffer().get();
+                asyncQueue.putUnmapMemory(parallelSumReductionBuffers[1], buffer);
+                asyncQueue.finish();
+            }
+            return mse/area;
+        }
+        
+        private double getAffineMeanSquaresWithoutHessian(int pyramidIndex, double currentoffsetx, double currentoffsety,
+                double currenta11, double currenta12,
+                double currenta21, double currenta22)
+        {
+            uniformBSplineTransformProgramKernels[KERNEL_faffineError]
+                    .putArg(sourcePyramid[pyramidIndex].Image)
+                    .putArg(targetPyramid[pyramidIndex].Coefficient)
+                    .putArg(entryImageBuffer)
+                    .putArg(maskBuffer)
+                    .putArg((int)sourcePyramid[pyramidIndex].width)
+                    .putArg((int)sourcePyramid[pyramidIndex].height)
+                    .putArg((int)targetPyramid[pyramidIndex].width)
+                    .putArg((int)targetPyramid[pyramidIndex].height)
+                    .putArg((int)targetPyramid[pyramidIndex].width * 2)
+                    .putArg((int)targetPyramid[pyramidIndex].height * 2)
+                    .putArg((float)currentoffsetx)
+                    .putArg((float)currentoffsety)
+                    .putArg((float)currenta11)
+                    .putArg((float)currenta12)
+                    .putArg((float)currenta21)
+                    .putArg((float)currenta22);
+            
+            int localWorkSize = (int)Math.min(uniformBSplineTransformProgramKernels[KERNEL_faffineError].getWorkGroupSize(device),optimalMultiples[KERNEL_faffineError]*blocksizeMultiplier);  // Local work size dimensions
+            int globalWorkSize = StaticUtility.roundUp(localWorkSize, optimalMultiples[KERNEL_faffineError], (int)(sourcePyramid[pyramidIndex].width*sourcePyramid[pyramidIndex].height));
+            queue.put1DRangeKernel(uniformBSplineTransformProgramKernels[KERNEL_faffineError],0,globalWorkSize,localWorkSize);
+            uniformBSplineTransformProgramKernels[KERNEL_faffineError].rewind();
+            // now we have the diffs let's calculate all the derived elements
+            
+            // to transfer the data to the async queue it has to be synchronized first
+            queue.finish();
+            
+            // calculate the MSE row-wise
+            int halfReductionSize = (int) (((sourcePyramid[pyramidIndex].width * sourcePyramid[pyramidIndex].height)+((sourcePyramid[pyramidIndex].width * sourcePyramid[pyramidIndex].height)%2))/2);
+            int nrOfBlocks;
+            ByteBuffer buffer;
+            double area;
+            double mse;
+            if(halfReductionSize <= maximumElementsForLocalFPTsum)
+            {
+                /*
+                Because each of the following kernels is synchronized by barriers on the GPU they can only be executed on a single compute device.
+                Therefore using an async queue may increase the speed by allowing multiple kernels to execute in parallel (if local memory permits)
+                */
+                localWorkSize = halfReductionSize % optimalMultiples[KERNEL_sumInLocalMemory] == 0 ? halfReductionSize : (int)Math.min(halfReductionSize + (optimalMultiples[KERNEL_sumInLocalMemory] - (halfReductionSize % optimalMultiples[KERNEL_sumInLocalMemory])), maximumElementsForLocalFPTsum);
+                globalWorkSize = localWorkSize;
+                
+                uniformBSplineTransformProgramKernels[KERNEL_sumInLocalMemory].putArg(maskBuffer).putNullArg(halfReductionSize*4 /*size in bytes of local mem allocation*/).putArg((int)(sourcePyramid[pyramidIndex].width * sourcePyramid[pyramidIndex].height));
+                asyncQueue.put1DRangeKernel(uniformBSplineTransformProgramKernels[KERNEL_sumInLocalMemory],0,globalWorkSize,localWorkSize);
+                uniformBSplineTransformProgramKernels[KERNEL_sumInLocalMemory].rewind();
+                uniformBSplineTransformProgramKernels[KERNEL_sumInLocalMemory].putArg(entryImageBuffer).putNullArg(halfReductionSize*4 /*size in bytes of local mem allocation*/).putArg((int)(sourcePyramid[pyramidIndex].width * sourcePyramid[pyramidIndex].height));
+                asyncQueue.put1DRangeKernel(uniformBSplineTransformProgramKernels[KERNEL_sumInLocalMemory],0,globalWorkSize,localWorkSize);
+                uniformBSplineTransformProgramKernels[KERNEL_sumInLocalMemory].rewind();
+                asyncQueue.finish();
+                buffer = asyncQueue.putMapBuffer(maskBuffer, CLMemory.Map.READ, 0, 4, true);
+                buffer.rewind();
+                area = (double)buffer.asFloatBuffer().get();
+                asyncQueue.putUnmapMemory(maskBuffer, buffer);
+                buffer = asyncQueue.putMapBuffer(entryImageBuffer, CLMemory.Map.READ, 0, 4, true);
+                buffer.rewind();
+                mse = (double)buffer.asFloatBuffer().get();
+                asyncQueue.putUnmapMemory(entryImageBuffer, buffer);
+                asyncQueue.finish();
+            }
+            else
+            {
+                nrOfBlocks = ((int)(sourcePyramid[pyramidIndex].width * sourcePyramid[pyramidIndex].height))%blockSizesFPT;
+                nrOfBlocks = nrOfBlocks == 0 ? (int)Math.min(((int)(sourcePyramid[pyramidIndex].width * sourcePyramid[pyramidIndex].height))/blockSizesFPT,maximumSumReductionBlockNr) : (int)Math.min((((int)(sourcePyramid[pyramidIndex].width * sourcePyramid[pyramidIndex].height))+(blockSizesFPT-nrOfBlocks))/blockSizesFPT,maximumSumReductionBlockNr);
+                
+                globalWorkSize = nrOfBlocks * blockSizesFPT;
+                uniformBSplineTransformProgramKernels[KERNEL_parallelGroupedSumReduction].putArg(maskBuffer).putArg(parallelSumReductionBuffers[0]).putArg((int)(sourcePyramid[pyramidIndex].width * sourcePyramid[pyramidIndex].height)).putNullArg(blockSizesFPT*4 /*size in bytes of local mem allocation*/);
+                asyncQueue.put1DRangeKernel(uniformBSplineTransformProgramKernels[KERNEL_parallelGroupedSumReduction],0,globalWorkSize,blockSizesFPT);
+                uniformBSplineTransformProgramKernels[KERNEL_parallelGroupedSumReduction].rewind();
+                
+                uniformBSplineTransformProgramKernels[KERNEL_parallelGroupedSumReduction].putArg(entryImageBuffer).putArg(parallelSumReductionBuffers[1]).putArg((int)(sourcePyramid[pyramidIndex].width * sourcePyramid[pyramidIndex].height)).putNullArg(blockSizesFPT*4 /*size in bytes of local mem allocation*/);
+                asyncQueue.put1DRangeKernel(uniformBSplineTransformProgramKernels[KERNEL_parallelGroupedSumReduction],0,globalWorkSize,blockSizesFPT);
+                uniformBSplineTransformProgramKernels[KERNEL_parallelGroupedSumReduction].rewind();
+                
+                // synchronize the data
+                asyncQueue.finish();
+                
+                // reduce in local memory
+                halfReductionSize = (int) ((nrOfBlocks+(nrOfBlocks%2))/2);
+                localWorkSize = halfReductionSize % optimalMultiples[KERNEL_sumInLocalMemory] == 0 ? halfReductionSize : (int)Math.min(halfReductionSize + (optimalMultiples[KERNEL_sumInLocalMemory] - (halfReductionSize % optimalMultiples[KERNEL_sumInLocalMemory])), maximumElementsForLocalFPTsum);
+                globalWorkSize = localWorkSize;
+                uniformBSplineTransformProgramKernels[KERNEL_sumInLocalMemory].putArg(parallelSumReductionBuffers[0]).putNullArg(halfReductionSize*4 /*size in bytes of local mem allocation*/).putArg(nrOfBlocks);
+                asyncQueue.put1DRangeKernel(uniformBSplineTransformProgramKernels[KERNEL_sumInLocalMemory],0,globalWorkSize,localWorkSize);
+                uniformBSplineTransformProgramKernels[KERNEL_sumInLocalMemory].rewind();
+                
+                uniformBSplineTransformProgramKernels[KERNEL_sumInLocalMemory].putArg(parallelSumReductionBuffers[1]).putNullArg(halfReductionSize*4 /*size in bytes of local mem allocation*/).putArg(nrOfBlocks);
+                asyncQueue.put1DRangeKernel(uniformBSplineTransformProgramKernels[KERNEL_sumInLocalMemory],0,globalWorkSize,localWorkSize);
+                uniformBSplineTransformProgramKernels[KERNEL_sumInLocalMemory].rewind();
+                
+                // synchronize again
+                asyncQueue.finish();
+                
+                // Download data
+                buffer = asyncQueue.putMapBuffer(parallelSumReductionBuffers[0], CLMemory.Map.READ, 0, 4, true);
+                buffer.rewind();
+                area = (double)buffer.asFloatBuffer().get();
+                asyncQueue.putUnmapMemory(parallelSumReductionBuffers[0], buffer);
+                buffer = asyncQueue.putMapBuffer(parallelSumReductionBuffers[1], CLMemory.Map.READ, 0, 4, true);
+                buffer.rewind();
+                mse = (double)buffer.asFloatBuffer().get();
+                asyncQueue.putUnmapMemory(parallelSumReductionBuffers[1], buffer);
+                asyncQueue.finish();
+            }
+            return mse/area;
+        }
+        
         private void constructSourceImagePyramid()
         {
             int width = (int)sharedContext.img.dimension(0);

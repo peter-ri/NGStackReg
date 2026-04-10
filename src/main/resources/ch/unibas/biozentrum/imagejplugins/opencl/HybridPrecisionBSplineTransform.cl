@@ -306,7 +306,38 @@ static inline double dinterpolate(const double2 coordinates, const int4 xInterpo
     return s;
 }
 
+#ifdef TRANSLATION
+__kernel void dtranslationError(const __global double *source ,const __global double *target, __global double *diffout, __global double *mask, const int sourcewidth, const int sourceheight, const int targetwidth, const int targetheight, const int doubletargetwidth, const int doubletargetheight, const double offsetx, const double offsety)
+{
+    __private int nIndex = get_global_id(0); // this directly corresponds to the linear address of the !SOURCE! pixel
+    if(nIndex < sourcewidth * sourceheight)
+    {
+        __private int column = nIndex % sourcewidth;
+        __private int row = (nIndex - column)/sourcewidth;
 
+        __private double2 coord = (double2)(offsetx + ((double)column), offsety + ((double)row));
+
+        __private int2 Msk = (int2)((int)round(coord.x), (int)round(coord.y));
+        __private int4 xInterpolationIndices;
+        __private int4 yInterpolationIndices;
+        if ((Msk.x >= 0) && (Msk.x < targetwidth) && (Msk.y >= 0) && (Msk.y < targetheight))
+        {
+            mask[nIndex] = dOne;
+            xInterpolationIndices = dcalculatexInterpolationIndices(coord.x, doubletargetwidth, targetwidth);
+            yInterpolationIndices = dcalculateyInterpolationIndices(coord.y, doubletargetheight, targetheight, targetwidth);
+            __private double s = dinterpolate(coord, xInterpolationIndices, yInterpolationIndices, target);
+            diffout[nIndex] = pown(source[nIndex] - s,2);
+        }
+        else
+        {
+            diffout[nIndex] = dZero;
+            mask[nIndex] = dZero;
+        } 
+    }   
+}
+#endif
+
+#ifdef RIGIDBODY
 __kernel void drigidBodyError(const __global double *source ,const __global double *target, __global double *diffout, __global double *mask, const int sourcewidth, const int sourceheight, const int targetwidth, const int targetheight, const int doubletargetwidth, const int doubletargetheight, const double offsetx, const double offsety, const double cosangle, const double negsinangle)
 {
     __private int nIndex = get_global_id(0); // this directly corresponds to the linear address of the !SOURCE! pixel
@@ -337,36 +368,7 @@ __kernel void drigidBodyError(const __global double *source ,const __global doub
         } 
     }   
 }
-
-
-__kernel void dtranslationError(const __global double *source ,const __global double *target, __global double *diffout, __global double *mask, const int sourcewidth, const int sourceheight, const int targetwidth, const int targetheight, const int doubletargetwidth, const int doubletargetheight, const double offsetx, const double offsety)
-{
-    __private int nIndex = get_global_id(0); // this directly corresponds to the linear address of the !SOURCE! pixel
-    if(nIndex < sourcewidth * sourceheight)
-    {
-        __private int column = nIndex % sourcewidth;
-        __private int row = (nIndex - column)/sourcewidth;
-
-        __private double2 coord = (double2)(offsetx + ((double)column), offsety + ((double)row));
-
-        __private int2 Msk = (int2)((int)round(coord.x), (int)round(coord.y));
-        __private int4 xInterpolationIndices;
-        __private int4 yInterpolationIndices;
-        if ((Msk.x >= 0) && (Msk.x < targetwidth) && (Msk.y >= 0) && (Msk.y < targetheight))
-        {
-            mask[nIndex] = dOne;
-            xInterpolationIndices = dcalculatexInterpolationIndices(coord.x, doubletargetwidth, targetwidth);
-            yInterpolationIndices = dcalculateyInterpolationIndices(coord.y, doubletargetheight, targetheight, targetwidth);
-            __private double s = dinterpolate(coord, xInterpolationIndices, yInterpolationIndices, target);
-            diffout[nIndex] = pown(source[nIndex] - s,2);
-        }
-        else
-        {
-            diffout[nIndex] = dZero;
-            mask[nIndex] = dZero;
-        } 
-    }   
-}
+#endif
 
 __kernel void drigidBodyErrorWithGradAndHess(const __global double *source ,const __global double *target,const __global double *xGradient,const __global double *yGradient,__global double *grad0,__global double *grad1,__global double *grad2,__global double *hessian00,__global double *hessian01,__global double *hessian02,__global double *hessian11,__global double *hessian12,__global double *hessian22, __global double *diffout, __global double *mask, const int sourcewidth, const int sourceheight, const int targetwidth, const int targetheight, const int doubletargetwidth, const int doubletargetheight, const double offsetx, const double offsety, const double cosangle, const double negsinangle)
 {

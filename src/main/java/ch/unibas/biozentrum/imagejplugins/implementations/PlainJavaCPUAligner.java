@@ -499,6 +499,7 @@ public class PlainJavaCPUAligner extends CPUAligner
             }
         }
     }
+    
     private void resizeTransformImageWithBsplineInterpolation(final int width, final int height, final int targetwidth, final int targetheight, double currentoffsetx, double currentoffsety, double currentangle)
     {
         /*
@@ -543,6 +544,7 @@ public class PlainJavaCPUAligner extends CPUAligner
             }
         }
     }
+    
     private void transformScaledRotationWithBsplineInterpolation(final int width, final int height, double currentoffsetx, double currentoffsety, double currentangle, double currentscale)
     {
         /*
@@ -587,50 +589,7 @@ public class PlainJavaCPUAligner extends CPUAligner
             }
         }
     }
-    private void transformAffineWithBsplineInterpolation(final int width, final int height, double currentoffsetx, double currentoffsety, double currenta11, double currenta12, double currenta21, double currenta22)
-    {
-        /*
-        Requires the coefficients to be in entryImageBuffers and the output
-        will be in fullSizedHelperBuffer
-        */
-        int doubleWidth = width*2;
-        int doubleHeight = height*2;
-        int nIndex = 0;
-        double xvecx = currenta11;
-        double xvecy = currenta21;
-        double yvecx = currenta12;
-        double yvecy = currenta22;
-        double coordx;
-        double coordy;
-        int mskx;
-        int msky;
-        for(int i = 0;i < height;i++)
-        {
-            // First walk along the Y-vector direction and reset the X-position (otherwise the
-            // y position is initially correct and then lagging behind by one all the time)
-            coordx = currentoffsetx + ((double)i) * yvecx;
-            coordy = currentoffsety + ((double)i) * yvecy;
-            for(int n = 0;n < width;n++,nIndex++)
-            {
-                mskx = (int)Math.round(coordx);
-                msky = (int)Math.round(coordy);
-                if((mskx >= 0)&&(mskx < width)&&(msky >= 0)&&(msky < height))
-                {
-                    computeXInterpolationIndices(coordx, doubleWidth, width, xInterpolationIndices);
-                    computeYInterpolationIndices(coordy, doubleHeight, height, width, yInterpolationIndices);
-                    
-                    fullSizedHelperBuffer[nIndex] = interpolateCubicBSpline(getFractional(coordx), getFractional(coordy), xInterpolationIndices, yInterpolationIndices, entryImageBuffers);
-                }
-                else
-                {
-                    fullSizedHelperBuffer[nIndex] = 0.0;
-                }
-                // walk along the X-vector direction
-                coordx += xvecx;
-                coordy += xvecy;
-            }
-        }
-    }
+    
     private void resizeScaledRotationImageWithBsplineInterpolation(final int width, final int height, final int targetwidth, final int targetheight, double currentoffsetx, double currentoffsety, double currentangle, double currentscale)
     {
         /*
@@ -655,6 +614,51 @@ public class PlainJavaCPUAligner extends CPUAligner
             coordx = currentoffsetx + ((double)i) * yvecx;
             coordy = currentoffsety + ((double)i) * yvecy;
             for(int n = 0;n < targetwidth;n++,nIndex++)
+            {
+                mskx = (int)Math.round(coordx);
+                msky = (int)Math.round(coordy);
+                if((mskx >= 0)&&(mskx < width)&&(msky >= 0)&&(msky < height))
+                {
+                    computeXInterpolationIndices(coordx, doubleWidth, width, xInterpolationIndices);
+                    computeYInterpolationIndices(coordy, doubleHeight, height, width, yInterpolationIndices);
+                    
+                    fullSizedHelperBuffer[nIndex] = interpolateCubicBSpline(getFractional(coordx), getFractional(coordy), xInterpolationIndices, yInterpolationIndices, entryImageBuffers);
+                }
+                else
+                {
+                    fullSizedHelperBuffer[nIndex] = 0.0;
+                }
+                // walk along the X-vector direction
+                coordx += xvecx;
+                coordy += xvecy;
+            }
+        }
+    }
+    
+    private void transformAffineWithBsplineInterpolation(final int width, final int height, double currentoffsetx, double currentoffsety, double currenta11, double currenta12, double currenta21, double currenta22)
+    {
+        /*
+        Requires the coefficients to be in entryImageBuffers and the output
+        will be in fullSizedHelperBuffer
+        */
+        int doubleWidth = width*2;
+        int doubleHeight = height*2;
+        int nIndex = 0;
+        double xvecx = currenta11;
+        double xvecy = currenta21;
+        double yvecx = currenta12;
+        double yvecy = currenta22;
+        double coordx;
+        double coordy;
+        int mskx;
+        int msky;
+        for(int i = 0;i < height;i++)
+        {
+            // First walk along the Y-vector direction and reset the X-position (otherwise the
+            // y position is initially correct and then lagging behind by one all the time)
+            coordx = currentoffsetx + ((double)i) * yvecx;
+            coordy = currentoffsety + ((double)i) * yvecy;
+            for(int n = 0;n < width;n++,nIndex++)
             {
                 mskx = (int)Math.round(coordx);
                 msky = (int)Math.round(coordy);
@@ -2210,7 +2214,6 @@ public class PlainJavaCPUAligner extends CPUAligner
                     /*
                      * Residual: r_i = f(x_i) - g(T_p(x_i))
                      * where f is the source image and g is the B-spline-interpolated target.
-                     * We reuse rescoordx to store the residual (same as translation/rigid body).
                      */
                     double diff = source[nIndex] - s;
                     msqe += diff * diff;

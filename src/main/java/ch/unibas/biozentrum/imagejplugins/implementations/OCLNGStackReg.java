@@ -626,13 +626,16 @@ public class OCLNGStackReg extends RegistrationAndTransformation
             	}
                 break;
             }
-        	for(int l = 0;l < 2;l++)
+            if(parallelSumReductionBuffers != null)
             {
-        		if(parallelSumReductionBuffers[l] != null)
-        		{
-        			parallelSumReductionBuffers[l].release();
-        			parallelSumReductionBuffers[l] = null;
-        		}
+	        	for(int l = 0;l < parallelSumReductionBuffers.length;l++)
+	            {
+	        		if(parallelSumReductionBuffers[l] != null)
+	        		{
+	        			parallelSumReductionBuffers[l].release();
+	        			parallelSumReductionBuffers[l] = null;
+	        		}
+	            }
             }
             for(int j = 0;j < pyramidDepth; j++)
             {
@@ -841,11 +844,12 @@ public class OCLNGStackReg extends RegistrationAndTransformation
                 hessian55 = null;
                 break;
             }
-            for(int l = 0;l < 2;l++)
+            for(int l = 0;l < parallelSumReductionBuffers.length;l++)
             {
                 parallelSumReductionBuffers[l].release();
                 parallelSumReductionBuffers[l] = null;
             }
+            parallelSumReductionBuffers = null;
             for(int j = 0;j < pyramidDepth; j++)
             {
                 sourcePyramid[j].Image.release();
@@ -1101,13 +1105,6 @@ public class OCLNGStackReg extends RegistrationAndTransformation
                         }
                         break;
                     case AFFINE:
-                    	/*
-                    	 * On the small GPU setup I tested this on the large number of buffers seems
-                    	 * to break the compilation of the kernel so I will use flattened buffers
-                    	 * and sub-buffers instead. I will only combine two buffers, but this will
-                    	 * limit the maximum image size that can be processed on the GPU because of 
-                    	 * the maximum buffer size.
-                    	 */
                         maskBuffer = context.createFloatBuffer((int)(width*height), GPURESIDENTRW);
                         //maskBuffer.getCLSize();
                         gradient0 = context.createFloatBuffer((int) (width*height), GPURESIDENTRW);
@@ -1273,13 +1270,6 @@ public class OCLNGStackReg extends RegistrationAndTransformation
                         }
                         break;
                     case AFFINE:
-                    	/*
-                    	 * On the small GPU setup I tested this on the large number of buffers seems
-                    	 * to break the compilation of the kernel so I will use flattened buffers
-                    	 * and sub-buffers instead. I will only combine two buffers, but this will
-                    	 * limit the maximum image size that can be processed on the GPU because of 
-                    	 * the maximum buffer size.
-                    	 */                    	
                         maskBuffer = context.createDoubleBuffer((int)(width*height), GPURESIDENTRW);
                         //maskBuffer.getCLSize();
                         gradient0 = context.createDoubleBuffer((int) (width*height), GPURESIDENTRW);
@@ -1453,7 +1443,7 @@ public class OCLNGStackReg extends RegistrationAndTransformation
 					uniformBSplineTransformProgram = context.createProgram(getClass().getResourceAsStream("/ch/unibas/biozentrum/imagejplugins/opencl/UniformBSplineTransform.cl")).build("-D SCALEDROTATION", device);
 					break;
 				case AFFINE:
-					uniformBSplineTransformProgram = context.createProgram(getClass().getResourceAsStream("/ch/unibas/biozentrum/imagejplugins/opencl/UniformBSplineTransformAffine.cl")).build("-D AFFINE", device);
+					uniformBSplineTransformProgram = context.createProgram(getClass().getResourceAsStream("/ch/unibas/biozentrum/imagejplugins/opencl/UniformBSplineTransform.cl")).build("-D AFFINE", device);
 					break;
             	}
             }
@@ -1470,7 +1460,7 @@ public class OCLNGStackReg extends RegistrationAndTransformation
 					uniformBSplineTransformProgram = context.createProgram(getClass().getResourceAsStream("/ch/unibas/biozentrum/imagejplugins/opencl/UniformBSplineTransform.cl")).build("-D SCALEDROTATION -D USE_DOUBLE", device);
 					break;
 				case AFFINE:
-					uniformBSplineTransformProgram = context.createProgram(getClass().getResourceAsStream("/ch/unibas/biozentrum/imagejplugins/opencl/UniformBSplineTransformAffine.cl")).build("-D AFFINE -D USE_DOUBLE", device);
+					uniformBSplineTransformProgram = context.createProgram(getClass().getResourceAsStream("/ch/unibas/biozentrum/imagejplugins/opencl/UniformBSplineTransform.cl")).build("-D AFFINE -D USE_DOUBLE", device);
 					/*
 					 * TODO:
 					 * Potentially use SPIR-V precompiled programs
@@ -1576,6 +1566,7 @@ public class OCLNGStackReg extends RegistrationAndTransformation
             optimalMultiples[KERNEL_TargetedCubicBSplinePrefilter2Dpremulhp] = uniformBSplineTransformProgramKernels[KERNEL_TargetedCubicBSplinePrefilter2Dpremulhp].getPreferredWorkGroupSizeMultiple(device);
             optimalMultiples[KERNEL_sumInLocalMemory] = uniformBSplineTransformProgramKernels[KERNEL_sumInLocalMemory].getPreferredWorkGroupSizeMultiple(device);
             optimalMultiples[KERNEL_parallelGroupedSumReduction] = uniformBSplineTransformProgramKernels[KERNEL_parallelGroupedSumReduction].getPreferredWorkGroupSizeMultiple(device);
+            optimalMultiples[KERNEL_resizeTransformImageWithBsplineInterpolation] = uniformBSplineTransformProgramKernels[KERNEL_resizeTransformImageWithBsplineInterpolation].getPreferredWorkGroupSizeMultiple(device);
             
             switch(sharedContext.transformationType) {
             case TRANSLATION:
@@ -1583,7 +1574,6 @@ public class OCLNGStackReg extends RegistrationAndTransformation
                 optimalMultiples[KERNEL_translationErrorWithGradAndHess] = uniformBSplineTransformProgramKernels[KERNEL_translationErrorWithGradAndHess].getPreferredWorkGroupSizeMultiple(device);
                 optimalMultiples[KERNEL_translationErrorWithGradAndHessBrent] = uniformBSplineTransformProgramKernels[KERNEL_translationErrorWithGradAndHessBrent].getPreferredWorkGroupSizeMultiple(device);
                 optimalMultiples[KERNEL_translationTransformImageWithBsplineInterpolation] = uniformBSplineTransformProgramKernels[KERNEL_translationTransformImageWithBsplineInterpolation].getPreferredWorkGroupSizeMultiple(device);
-                optimalMultiples[KERNEL_resizeTransformImageWithBsplineInterpolation] = uniformBSplineTransformProgramKernels[KERNEL_resizeTransformImageWithBsplineInterpolation].getPreferredWorkGroupSizeMultiple(device);
                 optimalMultiples[KERNEL_translationSumInLocalMemoryCombined] = uniformBSplineTransformProgramKernels[KERNEL_translationSumInLocalMemoryCombined].getPreferredWorkGroupSizeMultiple(device);
                 
                 blockSizesParallel = (int)Math.min(Math.min(uniformBSplineTransformProgramKernels[KERNEL_translationErrorWithGradAndHessBrent].getWorkGroupSize(device), (device.getLocalMemSize() - uniformBSplineTransformProgramKernels[KERNEL_translationErrorWithGradAndHessBrent].getLocalMemorySize(device))/((usesFloatGPU?4:8)*7/*7 buffers are needed*/)), blocksizeMultiplier*optimalMultiples[KERNEL_translationErrorWithGradAndHessBrent]);
@@ -1600,7 +1590,6 @@ public class OCLNGStackReg extends RegistrationAndTransformation
                 optimalMultiples[KERNEL_rigidBodyErrorWithGradAndHess] = uniformBSplineTransformProgramKernels[KERNEL_rigidBodyErrorWithGradAndHess].getPreferredWorkGroupSizeMultiple(device);
                 optimalMultiples[KERNEL_rigidBodyErrorWithGradAndHessBrent] = uniformBSplineTransformProgramKernels[KERNEL_rigidBodyErrorWithGradAndHessBrent].getPreferredWorkGroupSizeMultiple(device);
                 optimalMultiples[KERNEL_transformImageWithBsplineInterpolation] = uniformBSplineTransformProgramKernels[KERNEL_transformImageWithBsplineInterpolation].getPreferredWorkGroupSizeMultiple(device);
-                optimalMultiples[KERNEL_resizeTransformImageWithBsplineInterpolation] = uniformBSplineTransformProgramKernels[KERNEL_resizeTransformImageWithBsplineInterpolation].getPreferredWorkGroupSizeMultiple(device);
                 optimalMultiples[KERNEL_sumInLocalMemoryCombined] = uniformBSplineTransformProgramKernels[KERNEL_sumInLocalMemoryCombined].getPreferredWorkGroupSizeMultiple(device);
                 
                 blockSizesParallel = (int)Math.min(Math.min(uniformBSplineTransformProgramKernels[KERNEL_rigidBodyErrorWithGradAndHessBrent].getWorkGroupSize(device), (device.getLocalMemSize() - uniformBSplineTransformProgramKernels[KERNEL_rigidBodyErrorWithGradAndHessBrent].getLocalMemorySize(device))/((usesFloatGPU?4:8)*11/*11 buffers are needed*/)), blocksizeMultiplier*optimalMultiples[KERNEL_rigidBodyErrorWithGradAndHessBrent]);
@@ -1617,7 +1606,6 @@ public class OCLNGStackReg extends RegistrationAndTransformation
                 optimalMultiples[KERNEL_scaledRotationErrorWithGradAndHess] = uniformBSplineTransformProgramKernels[KERNEL_scaledRotationErrorWithGradAndHess].getPreferredWorkGroupSizeMultiple(device);
                 optimalMultiples[KERNEL_scaledRotationErrorWithGradAndHessBrent] = uniformBSplineTransformProgramKernels[KERNEL_scaledRotationErrorWithGradAndHessBrent].getPreferredWorkGroupSizeMultiple(device);
                 optimalMultiples[KERNEL_scaledRotationTransformImageWithBsplineInterpolation] = uniformBSplineTransformProgramKernels[KERNEL_scaledRotationTransformImageWithBsplineInterpolation].getPreferredWorkGroupSizeMultiple(device);
-                optimalMultiples[KERNEL_resizeTransformImageWithBsplineInterpolation] = uniformBSplineTransformProgramKernels[KERNEL_resizeTransformImageWithBsplineInterpolation].getPreferredWorkGroupSizeMultiple(device);
                 optimalMultiples[KERNEL_scaledRotationSumInLocalMemoryCombined] = uniformBSplineTransformProgramKernels[KERNEL_scaledRotationSumInLocalMemoryCombined].getPreferredWorkGroupSizeMultiple(device);
                 
                 blockSizesParallel = (int)Math.min(Math.min(uniformBSplineTransformProgramKernels[KERNEL_scaledRotationErrorWithGradAndHessBrent].getWorkGroupSize(device), (device.getLocalMemSize() - uniformBSplineTransformProgramKernels[KERNEL_scaledRotationErrorWithGradAndHessBrent].getLocalMemorySize(device))/((usesFloatGPU?4:8)*16/*16 buffers are needed*/)), blocksizeMultiplier*optimalMultiples[KERNEL_scaledRotationErrorWithGradAndHessBrent]);
@@ -1634,7 +1622,6 @@ public class OCLNGStackReg extends RegistrationAndTransformation
                 optimalMultiples[KERNEL_affineErrorWithGradAndHess] = uniformBSplineTransformProgramKernels[KERNEL_affineErrorWithGradAndHess].getPreferredWorkGroupSizeMultiple(device);
                 optimalMultiples[KERNEL_affineErrorWithGradAndHessBrent] = uniformBSplineTransformProgramKernels[KERNEL_affineErrorWithGradAndHessBrent].getPreferredWorkGroupSizeMultiple(device);
                 optimalMultiples[KERNEL_affineTransformImageWithBsplineInterpolation] = uniformBSplineTransformProgramKernels[KERNEL_affineTransformImageWithBsplineInterpolation].getPreferredWorkGroupSizeMultiple(device);
-                optimalMultiples[KERNEL_resizeTransformImageWithBsplineInterpolation] = uniformBSplineTransformProgramKernels[KERNEL_resizeTransformImageWithBsplineInterpolation].getPreferredWorkGroupSizeMultiple(device);
                 optimalMultiples[KERNEL_affineSumInLocalMemoryCombined] = uniformBSplineTransformProgramKernels[KERNEL_affineSumInLocalMemoryCombined].getPreferredWorkGroupSizeMultiple(device);
                 
                 blockSizesParallel = (int)Math.min(Math.min(uniformBSplineTransformProgramKernels[KERNEL_affineErrorWithGradAndHessBrent].getWorkGroupSize(device), (device.getLocalMemSize() - uniformBSplineTransformProgramKernels[KERNEL_affineErrorWithGradAndHessBrent].getLocalMemorySize(device))/((usesFloatGPU?4:8)*29/*29 buffers are needed*/)), blocksizeMultiplier*optimalMultiples[KERNEL_affineErrorWithGradAndHessBrent]);
@@ -1944,13 +1931,9 @@ public class OCLNGStackReg extends RegistrationAndTransformation
             cleanup();
         }
         
-        private void transformImageTranslation()
+        private void convertToBSplineCoeff(final int width, final int height, int localWorkSize, int globalWorkSize)
         {
-            int width = (int)sharedContext.img.dimension(0);
-            int height = (int)sharedContext.img.dimension(1);
-            int localWorkSize = (int)uniformBSplineTransformProgramKernels[KERNEL_CubicBSplinePrefilter2Dpremulhp].getWorkGroupSize(device);  // Local work size dimensions
-            int globalWorkSize = StaticUtility.roundUp(localWorkSize, optimalMultiples[KERNEL_CubicBSplinePrefilter2Dpremulhp], width*height);   // rounded up to the nearest multiple of the localWorkSize
-            // pre-multiply the image
+        	// pre-multiply the image
             uniformBSplineTransformProgramKernels[KERNEL_CubicBSplinePrefilter2Dpremulhp].putArg(entryImageBuffer).putArg(width*height);
             queue.put1DRangeKernel(uniformBSplineTransformProgramKernels[KERNEL_CubicBSplinePrefilter2Dpremulhp],0,globalWorkSize,localWorkSize);
             localWorkSize = (int)uniformBSplineTransformProgramKernels[KERNEL_CubicBSplinePrefilter2DXhp].getWorkGroupSize(device);
@@ -1959,7 +1942,7 @@ public class OCLNGStackReg extends RegistrationAndTransformation
             globalWorkSize = StaticUtility.roundUp(localWorkSize, optimalMultiples[KERNEL_CubicBSplinePrefilter2DXhp], height);
             queue.put1DRangeKernel(uniformBSplineTransformProgramKernels[KERNEL_CubicBSplinePrefilter2DXhp],0,globalWorkSize,localWorkSize);
             uniformBSplineTransformProgramKernels[KERNEL_CubicBSplinePrefilter2DXhp].rewind();
-            // Now along Y-axis
+            // Now along the Y-axis
             // Has to be pre-multiplied by lambda again!!!
             localWorkSize = (int)uniformBSplineTransformProgramKernels[KERNEL_CubicBSplinePrefilter2Dpremulhp].getWorkGroupSize(device);
             globalWorkSize = StaticUtility.roundUp(localWorkSize, optimalMultiples[KERNEL_CubicBSplinePrefilter2Dpremulhp], width*height);
@@ -1971,6 +1954,15 @@ public class OCLNGStackReg extends RegistrationAndTransformation
             globalWorkSize = StaticUtility.roundUp(localWorkSize, optimalMultiples[KERNEL_CubicBSplinePrefilter2DYhp], width);
             queue.put1DRangeKernel(uniformBSplineTransformProgramKernels[KERNEL_CubicBSplinePrefilter2DYhp],0,globalWorkSize,localWorkSize);
             uniformBSplineTransformProgramKernels[KERNEL_CubicBSplinePrefilter2DYhp].rewind();
+        }
+        
+        private void transformImageTranslation()
+        {
+            int width = (int)sharedContext.img.dimension(0);
+            int height = (int)sharedContext.img.dimension(1);
+            int localWorkSize = (int)uniformBSplineTransformProgramKernels[KERNEL_CubicBSplinePrefilter2Dpremulhp].getWorkGroupSize(device);  // Local work size dimensions
+            int globalWorkSize = StaticUtility.roundUp(localWorkSize, optimalMultiples[KERNEL_CubicBSplinePrefilter2Dpremulhp], width*height);   // rounded up to the nearest multiple of the localWorkSize
+            convertToBSplineCoeff(width, height, localWorkSize, globalWorkSize);
             
             if(sharedContext.getResizeAfterRegistration())
             {
@@ -2060,27 +2052,7 @@ public class OCLNGStackReg extends RegistrationAndTransformation
             int height = (int)sharedContext.img.dimension(1);
             int localWorkSize = (int)uniformBSplineTransformProgramKernels[KERNEL_CubicBSplinePrefilter2Dpremulhp].getWorkGroupSize(device);  // Local work size dimensions
             int globalWorkSize = StaticUtility.roundUp(localWorkSize, optimalMultiples[KERNEL_CubicBSplinePrefilter2Dpremulhp], width*height);   // rounded up to the nearest multiple of the localWorkSize
-            // pre-multiply the image
-            uniformBSplineTransformProgramKernels[KERNEL_CubicBSplinePrefilter2Dpremulhp].putArg(entryImageBuffer).putArg(width*height);
-            queue.put1DRangeKernel(uniformBSplineTransformProgramKernels[KERNEL_CubicBSplinePrefilter2Dpremulhp],0,globalWorkSize,localWorkSize);
-            localWorkSize = (int)uniformBSplineTransformProgramKernels[KERNEL_CubicBSplinePrefilter2DXhp].getWorkGroupSize(device);
-            uniformBSplineTransformProgramKernels[KERNEL_CubicBSplinePrefilter2DXhp].putArg(entryImageBuffer).putArg(width).putArg(height);
-            // Conversion to B-spline coefficients along X axis (Group size must be >= height)
-            globalWorkSize = StaticUtility.roundUp(localWorkSize, optimalMultiples[KERNEL_CubicBSplinePrefilter2DXhp], height);
-            queue.put1DRangeKernel(uniformBSplineTransformProgramKernels[KERNEL_CubicBSplinePrefilter2DXhp],0,globalWorkSize,localWorkSize);
-            uniformBSplineTransformProgramKernels[KERNEL_CubicBSplinePrefilter2DXhp].rewind();
-            // Now along the Y-axis
-            // Has to be pre-multiplied by lambda again!!!
-            localWorkSize = (int)uniformBSplineTransformProgramKernels[KERNEL_CubicBSplinePrefilter2Dpremulhp].getWorkGroupSize(device);
-            globalWorkSize = StaticUtility.roundUp(localWorkSize, optimalMultiples[KERNEL_CubicBSplinePrefilter2Dpremulhp], width*height);
-            queue.put1DRangeKernel(uniformBSplineTransformProgramKernels[KERNEL_CubicBSplinePrefilter2Dpremulhp],0,globalWorkSize,localWorkSize);
-            uniformBSplineTransformProgramKernels[KERNEL_CubicBSplinePrefilter2Dpremulhp].rewind();
-            uniformBSplineTransformProgramKernels[KERNEL_CubicBSplinePrefilter2DYhp].putArg(entryImageBuffer).putArg(width).putArg(height);
-            // Conversion to B-spline coefficients along Y axis (Group size must be >= width)
-            localWorkSize = (int)uniformBSplineTransformProgramKernels[KERNEL_CubicBSplinePrefilter2DYhp].getWorkGroupSize(device);
-            globalWorkSize = StaticUtility.roundUp(localWorkSize, optimalMultiples[KERNEL_CubicBSplinePrefilter2DYhp], width);
-            queue.put1DRangeKernel(uniformBSplineTransformProgramKernels[KERNEL_CubicBSplinePrefilter2DYhp],0,globalWorkSize,localWorkSize);
-            uniformBSplineTransformProgramKernels[KERNEL_CubicBSplinePrefilter2DYhp].rewind();
+            convertToBSplineCoeff(width, height, localWorkSize, globalWorkSize);
             
             if(sharedContext.getResizeAfterRegistration())
             {
@@ -2179,27 +2151,7 @@ public class OCLNGStackReg extends RegistrationAndTransformation
             int height = (int)sharedContext.img.dimension(1);
             int localWorkSize = (int)uniformBSplineTransformProgramKernels[KERNEL_CubicBSplinePrefilter2Dpremulhp].getWorkGroupSize(device);  // Local work size dimensions
             int globalWorkSize = StaticUtility.roundUp(localWorkSize, optimalMultiples[KERNEL_CubicBSplinePrefilter2Dpremulhp], width*height);   // rounded up to the nearest multiple of the localWorkSize
-            // pre-multiply the image
-            uniformBSplineTransformProgramKernels[KERNEL_CubicBSplinePrefilter2Dpremulhp].putArg(entryImageBuffer).putArg(width*height);
-            queue.put1DRangeKernel(uniformBSplineTransformProgramKernels[KERNEL_CubicBSplinePrefilter2Dpremulhp],0,globalWorkSize,localWorkSize);
-            localWorkSize = (int)uniformBSplineTransformProgramKernels[KERNEL_CubicBSplinePrefilter2DXhp].getWorkGroupSize(device);
-            uniformBSplineTransformProgramKernels[KERNEL_CubicBSplinePrefilter2DXhp].putArg(entryImageBuffer).putArg(width).putArg(height);
-            // Conversion to B-spline coefficients along X axis (Group size must be >= height)
-            globalWorkSize = StaticUtility.roundUp(localWorkSize, optimalMultiples[KERNEL_CubicBSplinePrefilter2DXhp], height);
-            queue.put1DRangeKernel(uniformBSplineTransformProgramKernels[KERNEL_CubicBSplinePrefilter2DXhp],0,globalWorkSize,localWorkSize);
-            uniformBSplineTransformProgramKernels[KERNEL_CubicBSplinePrefilter2DXhp].rewind();
-            // Now along Y-axis
-            // Has to be pre-multiplied by lambda again!!!
-            localWorkSize = (int)uniformBSplineTransformProgramKernels[KERNEL_CubicBSplinePrefilter2Dpremulhp].getWorkGroupSize(device);
-            globalWorkSize = StaticUtility.roundUp(localWorkSize, optimalMultiples[KERNEL_CubicBSplinePrefilter2Dpremulhp], width*height);
-            queue.put1DRangeKernel(uniformBSplineTransformProgramKernels[KERNEL_CubicBSplinePrefilter2Dpremulhp],0,globalWorkSize,localWorkSize);
-            uniformBSplineTransformProgramKernels[KERNEL_CubicBSplinePrefilter2Dpremulhp].rewind();
-            uniformBSplineTransformProgramKernels[KERNEL_CubicBSplinePrefilter2DYhp].putArg(entryImageBuffer).putArg(width).putArg(height);
-            // Conversion to B-spline coefficients along Y axis (Group size must be >= width)
-            localWorkSize = (int)uniformBSplineTransformProgramKernels[KERNEL_CubicBSplinePrefilter2DYhp].getWorkGroupSize(device);
-            globalWorkSize = StaticUtility.roundUp(localWorkSize, optimalMultiples[KERNEL_CubicBSplinePrefilter2DYhp], width);
-            queue.put1DRangeKernel(uniformBSplineTransformProgramKernels[KERNEL_CubicBSplinePrefilter2DYhp],0,globalWorkSize,localWorkSize);
-            uniformBSplineTransformProgramKernels[KERNEL_CubicBSplinePrefilter2DYhp].rewind();
+            convertToBSplineCoeff(width, height, localWorkSize, globalWorkSize);
             
             if(sharedContext.getResizeAfterRegistration())
             {
@@ -2301,27 +2253,7 @@ public class OCLNGStackReg extends RegistrationAndTransformation
             int height = (int)sharedContext.img.dimension(1);
             int localWorkSize = (int)uniformBSplineTransformProgramKernels[KERNEL_CubicBSplinePrefilter2Dpremulhp].getWorkGroupSize(device);  // Local work size dimensions
             int globalWorkSize = StaticUtility.roundUp(localWorkSize, optimalMultiples[KERNEL_CubicBSplinePrefilter2Dpremulhp], width*height);   // rounded up to the nearest multiple of the localWorkSize
-            // pre-multiply the image
-            uniformBSplineTransformProgramKernels[KERNEL_CubicBSplinePrefilter2Dpremulhp].putArg(entryImageBuffer).putArg(width*height);
-            queue.put1DRangeKernel(uniformBSplineTransformProgramKernels[KERNEL_CubicBSplinePrefilter2Dpremulhp],0,globalWorkSize,localWorkSize);
-            localWorkSize = (int)uniformBSplineTransformProgramKernels[KERNEL_CubicBSplinePrefilter2DXhp].getWorkGroupSize(device);
-            uniformBSplineTransformProgramKernels[KERNEL_CubicBSplinePrefilter2DXhp].putArg(entryImageBuffer).putArg(width).putArg(height);
-            // Conversion to B-spline coefficients along X axis (Group size must be >= height)
-            globalWorkSize = StaticUtility.roundUp(localWorkSize, optimalMultiples[KERNEL_CubicBSplinePrefilter2DXhp], height);
-            queue.put1DRangeKernel(uniformBSplineTransformProgramKernels[KERNEL_CubicBSplinePrefilter2DXhp],0,globalWorkSize,localWorkSize);
-            uniformBSplineTransformProgramKernels[KERNEL_CubicBSplinePrefilter2DXhp].rewind();
-            // Now along Y-axis
-            // Has to be pre-multiplied by lambda again!!!
-            localWorkSize = (int)uniformBSplineTransformProgramKernels[KERNEL_CubicBSplinePrefilter2Dpremulhp].getWorkGroupSize(device);
-            globalWorkSize = StaticUtility.roundUp(localWorkSize, optimalMultiples[KERNEL_CubicBSplinePrefilter2Dpremulhp], width*height);
-            queue.put1DRangeKernel(uniformBSplineTransformProgramKernels[KERNEL_CubicBSplinePrefilter2Dpremulhp],0,globalWorkSize,localWorkSize);
-            uniformBSplineTransformProgramKernels[KERNEL_CubicBSplinePrefilter2Dpremulhp].rewind();
-            uniformBSplineTransformProgramKernels[KERNEL_CubicBSplinePrefilter2DYhp].putArg(entryImageBuffer).putArg(width).putArg(height);
-            // Conversion to B-spline coefficients along Y axis (Group size must be >= width)
-            localWorkSize = (int)uniformBSplineTransformProgramKernels[KERNEL_CubicBSplinePrefilter2DYhp].getWorkGroupSize(device);
-            globalWorkSize = StaticUtility.roundUp(localWorkSize, optimalMultiples[KERNEL_CubicBSplinePrefilter2DYhp], width);
-            queue.put1DRangeKernel(uniformBSplineTransformProgramKernels[KERNEL_CubicBSplinePrefilter2DYhp],0,globalWorkSize,localWorkSize);
-            uniformBSplineTransformProgramKernels[KERNEL_CubicBSplinePrefilter2DYhp].rewind();
+            convertToBSplineCoeff(width, height, localWorkSize, globalWorkSize);
             
             if(sharedContext.getResizeAfterRegistration())
             {
