@@ -41,11 +41,14 @@ import com.jogamp.opencl.CLMemory;
 import com.jogamp.opencl.CLPlatform;
 import com.jogamp.opencl.CLProgram;
 import java.io.IOException;
+import java.io.InputStream;
 import java.nio.ByteBuffer;
 import java.nio.FloatBuffer;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.BrokenBarrierException;
 import net.imglib2.type.numeric.integer.ByteType;
 import net.imglib2.type.numeric.integer.IntType;
@@ -1248,22 +1251,105 @@ public class HybridPrecisionNGStackReg extends RegistrationAndTransformation
         {
             uniformBSplineTransformProgramKernels = new CLKernel[NR_OF_OPENCL_KERNELS];
             optimalMultiples = new long[NR_OF_OPENCL_KERNELS];
+            boolean spirvSupport = false;
+            boolean spir64Support = false;
+            if (device.isExtensionAvailable("cl_khr_il_program")) 
+            {
+            	spirvSupport = true;
+            }
+            if (spirvSupport) {
+                // Query CL_DEVICE_ADDRESS_BITS
+                spir64Support = (device.getAddressBits() == 64);
+            }
+            
             if(usesFloat)
             {
                 // only get the float part
                 //uniformBSplineTransformProgram = context.createProgram(getClass().getResourceAsStream("/ch/unibas/biozentrum/imagejplugins/opencl/HybridPrecisionBSplineTransform.cl")).build(device);
                 switch(sharedContext.transformationType) {
                 case TRANSLATION:
-                	uniformBSplineTransformProgram = context.createProgram(getClass().getResourceAsStream("/ch/unibas/biozentrum/imagejplugins/opencl/UniformBSplineTransform.cl")).build("-D HYBRID -D TRANSLATION", device);
+                	if (spirvSupport && spir64Support)
+					{
+						try (InputStream inpStream = getClass().getResourceAsStream("/ch/unibas/biozentrum/imagejplugins/opencl/UniformBSplineTransform_hybrid_translation_float_64.spv"))
+						{
+							Map<CLDevice, byte[]> binaries = new HashMap<>();
+							if (inpStream == null) {
+								throw new IOException("Could not find the spriv file for UniformBSplineTransform_hybrid_translation_float_64.spv");
+							}
+			            	//byte[] spvBytes = inpStream.readAllBytes(); only exists in Java 9 and later, so we do it manually for Java 8 compatibility
+			            	byte[] spvBytes = StaticUtility.readInputStream(inpStream);
+			            	inpStream.close();
+			            	binaries.put(device, spvBytes);
+			            	uniformBSplineTransformProgram = context.createProgram(binaries).build("-x spirv", device);
+						}
+					}
+					else
+					{
+						uniformBSplineTransformProgram = context.createProgram(getClass().getResourceAsStream("/ch/unibas/biozentrum/imagejplugins/opencl/UniformBSplineTransform.cl")).build("-D HYBRID -D TRANSLATION", device);
+					}
                 	break;
                 case RIGIDBODY:
-                	uniformBSplineTransformProgram = context.createProgram(getClass().getResourceAsStream("/ch/unibas/biozentrum/imagejplugins/opencl/UniformBSplineTransform.cl")).build("-D HYBRID -D RIGIDBODY", device);
+                	if (spirvSupport && spir64Support)
+					{
+						try (InputStream inpStream = getClass().getResourceAsStream("/ch/unibas/biozentrum/imagejplugins/opencl/UniformBSplineTransform_hybrid_rigidbody_float_64.spv"))
+						{
+							Map<CLDevice, byte[]> binaries = new HashMap<>();
+							if (inpStream == null) {
+								throw new IOException("Could not find the spriv file for UniformBSplineTransform_hybrid_rigidbody_float_64.spv");
+							}
+			            	//byte[] spvBytes = inpStream.readAllBytes(); only exists in Java 9 and later, so we do it manually for Java 8 compatibility
+			            	byte[] spvBytes = StaticUtility.readInputStream(inpStream);
+			            	inpStream.close();
+			            	binaries.put(device, spvBytes);
+			            	uniformBSplineTransformProgram = context.createProgram(binaries).build("-x spirv", device);
+						}
+					}
+					else
+					{
+						uniformBSplineTransformProgram = context.createProgram(getClass().getResourceAsStream("/ch/unibas/biozentrum/imagejplugins/opencl/UniformBSplineTransform.cl")).build("-D HYBRID -D RIGIDBODY", device);
+					}
                 	break;
                 case SCALEDROTATION:
-                	uniformBSplineTransformProgram = context.createProgram(getClass().getResourceAsStream("/ch/unibas/biozentrum/imagejplugins/opencl/UniformBSplineTransform.cl")).build("-D HYBRID -D SCALEDROTATION", device);
+                	if (spirvSupport && spir64Support)
+					{
+						try (InputStream inpStream = getClass().getResourceAsStream("/ch/unibas/biozentrum/imagejplugins/opencl/UniformBSplineTransform_hybrid_scaledrotation_float_64.spv"))
+						{
+							Map<CLDevice, byte[]> binaries = new HashMap<>();
+							if (inpStream == null) {
+								throw new IOException("Could not find the spriv file for UniformBSplineTransform_hybrid_scaledrotation_float_64.spv");
+							}
+			            	//byte[] spvBytes = inpStream.readAllBytes(); only exists in Java 9 and later, so we do it manually for Java 8 compatibility
+			            	byte[] spvBytes = StaticUtility.readInputStream(inpStream);
+			            	inpStream.close();
+			            	binaries.put(device, spvBytes);
+			            	uniformBSplineTransformProgram = context.createProgram(binaries).build("-x spirv", device);
+						}
+					}
+					else
+					{
+						uniformBSplineTransformProgram = context.createProgram(getClass().getResourceAsStream("/ch/unibas/biozentrum/imagejplugins/opencl/UniformBSplineTransform.cl")).build("-D HYBRID -D SCALEDROTATION", device);
+					}
 					break;
                 case AFFINE:
-                	uniformBSplineTransformProgram = context.createProgram(getClass().getResourceAsStream("/ch/unibas/biozentrum/imagejplugins/opencl/UniformBSplineTransform.cl")).build("-D HYBRID -D AFFINE", device);
+                	if (spirvSupport && spir64Support)
+					{
+						try (InputStream inpStream = getClass().getResourceAsStream("/ch/unibas/biozentrum/imagejplugins/opencl/UniformBSplineTransform_hybrid_affine_float_64.spv"))
+						{
+							Map<CLDevice, byte[]> binaries = new HashMap<>();
+							if (inpStream == null) {
+								throw new IOException("Could not find the spriv file for UniformBSplineTransform_hybrid_affine_float_64.spv");
+							}
+			            	//byte[] spvBytes = inpStream.readAllBytes(); only exists in Java 9 and later, so we do it manually for Java 8 compatibility
+			            	byte[] spvBytes = StaticUtility.readInputStream(inpStream);
+			            	inpStream.close();
+			            	binaries.put(device, spvBytes);
+			            	uniformBSplineTransformProgram = context.createProgram(binaries).build("-x spirv", device);
+						}
+					}
+					else
+					{
+						uniformBSplineTransformProgram = context.createProgram(getClass().getResourceAsStream("/ch/unibas/biozentrum/imagejplugins/opencl/UniformBSplineTransform.cl")).build("-D HYBRID -D AFFINE", device);
+					}
                 	break;
                 }
             }
@@ -1273,20 +1359,140 @@ public class HybridPrecisionNGStackReg extends RegistrationAndTransformation
             	//uniformBSplineTransformProgramDouble = context.createProgram(getClass().getResourceAsStream("/ch/unibas/biozentrum/imagejplugins/opencl/HybridPrecisionBSplineTransform.cl")).build("-D USE_DOUBLE",device);
             	switch(sharedContext.transformationType) {
                 case TRANSLATION:
-                	uniformBSplineTransformProgramDouble = context.createProgram(getClass().getResourceAsStream("/ch/unibas/biozentrum/imagejplugins/opencl/UniformBSplineTransform.cl")).build("-D HYBRID -D TRANSLATION -D USE_DOUBLE", device);
-                	uniformBSplineTransformProgram = context.createProgram(getClass().getResourceAsStream("/ch/unibas/biozentrum/imagejplugins/opencl/UniformBSplineTransform.cl")).build("-D HYBRID -D TRANSLATION", device);
+                	if (spirvSupport && spir64Support)
+					{
+						try (InputStream inpStream = getClass().getResourceAsStream("/ch/unibas/biozentrum/imagejplugins/opencl/UniformBSplineTransform_hybrid_translation_float_64.spv"))
+						{
+							Map<CLDevice, byte[]> binaries = new HashMap<>();
+							if (inpStream == null) {
+								throw new IOException("Could not find the spriv file for UniformBSplineTransform_hybrid_translation_float_64.spv");
+							}
+			            	//byte[] spvBytes = inpStream.readAllBytes(); only exists in Java 9 and later, so we do it manually for Java 8 compatibility
+			            	byte[] spvBytes = StaticUtility.readInputStream(inpStream);
+			            	inpStream.close();
+			            	binaries.put(device, spvBytes);
+			            	uniformBSplineTransformProgram = context.createProgram(binaries).build("-x spirv", device);
+						}
+						try (InputStream inpStream = getClass().getResourceAsStream("/ch/unibas/biozentrum/imagejplugins/opencl/UniformBSplineTransform_hybrid_translation_double_64.spv"))
+						{
+							Map<CLDevice, byte[]> binaries = new HashMap<>();
+							if (inpStream == null) {
+								throw new IOException("Could not find the spriv file for UniformBSplineTransform_hybrid_translation_double_64.spv");
+							}
+			            	//byte[] spvBytes = inpStream.readAllBytes(); only exists in Java 9 and later, so we do it manually for Java 8 compatibility
+			            	byte[] spvBytes = StaticUtility.readInputStream(inpStream);
+			            	inpStream.close();
+			            	binaries.put(device, spvBytes);
+			            	uniformBSplineTransformProgramDouble = context.createProgram(binaries).build("-x spirv", device);
+						}
+					}
+					else
+					{
+						uniformBSplineTransformProgramDouble = context.createProgram(getClass().getResourceAsStream("/ch/unibas/biozentrum/imagejplugins/opencl/UniformBSplineTransform.cl")).build("-D HYBRID -D TRANSLATION -D USE_DOUBLE", device);
+	                	uniformBSplineTransformProgram = context.createProgram(getClass().getResourceAsStream("/ch/unibas/biozentrum/imagejplugins/opencl/UniformBSplineTransform.cl")).build("-D HYBRID -D TRANSLATION", device);
+					}
                 	break;
                 case RIGIDBODY:
-                	uniformBSplineTransformProgramDouble = context.createProgram(getClass().getResourceAsStream("/ch/unibas/biozentrum/imagejplugins/opencl/UniformBSplineTransform.cl")).build("-D HYBRID -D RIGIDBODY -D USE_DOUBLE", device);
-                	uniformBSplineTransformProgram = context.createProgram(getClass().getResourceAsStream("/ch/unibas/biozentrum/imagejplugins/opencl/UniformBSplineTransform.cl")).build("-D HYBRID -D RIGIDBODY", device);
+                	if (spirvSupport && spir64Support)
+					{
+						try (InputStream inpStream = getClass().getResourceAsStream("/ch/unibas/biozentrum/imagejplugins/opencl/UniformBSplineTransform_hybrid_rigidbody_float_64.spv"))
+						{
+							Map<CLDevice, byte[]> binaries = new HashMap<>();
+							if (inpStream == null) {
+								throw new IOException("Could not find the spriv file for UniformBSplineTransform_hybrid_rigidbody_float_64.spv");
+							}
+			            	//byte[] spvBytes = inpStream.readAllBytes(); only exists in Java 9 and later, so we do it manually for Java 8 compatibility
+			            	byte[] spvBytes = StaticUtility.readInputStream(inpStream);
+			            	inpStream.close();
+			            	binaries.put(device, spvBytes);
+			            	uniformBSplineTransformProgram = context.createProgram(binaries).build("-x spirv", device);
+						}
+						try (InputStream inpStream = getClass().getResourceAsStream("/ch/unibas/biozentrum/imagejplugins/opencl/UniformBSplineTransform_hybrid_rigidbody_double_64.spv"))
+						{
+							Map<CLDevice, byte[]> binaries = new HashMap<>();
+							if (inpStream == null) {
+								throw new IOException("Could not find the spriv file for UniformBSplineTransform_hybrid_rigidbody_double_64.spv");
+							}
+			            	//byte[] spvBytes = inpStream.readAllBytes(); only exists in Java 9 and later, so we do it manually for Java 8 compatibility
+			            	byte[] spvBytes = StaticUtility.readInputStream(inpStream);
+			            	inpStream.close();
+			            	binaries.put(device, spvBytes);
+			            	uniformBSplineTransformProgramDouble = context.createProgram(binaries).build("-x spirv", device);
+						}
+					}
+					else
+					{
+						uniformBSplineTransformProgramDouble = context.createProgram(getClass().getResourceAsStream("/ch/unibas/biozentrum/imagejplugins/opencl/UniformBSplineTransform.cl")).build("-D HYBRID -D RIGIDBODY -D USE_DOUBLE", device);
+	                	uniformBSplineTransformProgram = context.createProgram(getClass().getResourceAsStream("/ch/unibas/biozentrum/imagejplugins/opencl/UniformBSplineTransform.cl")).build("-D HYBRID -D RIGIDBODY", device);
+					}
                 	break;
                 case SCALEDROTATION:
-                	uniformBSplineTransformProgramDouble = context.createProgram(getClass().getResourceAsStream("/ch/unibas/biozentrum/imagejplugins/opencl/UniformBSplineTransform.cl")).build("-D HYBRID -D SCALEDROTATION -D USE_DOUBLE", device);
-                	uniformBSplineTransformProgram = context.createProgram(getClass().getResourceAsStream("/ch/unibas/biozentrum/imagejplugins/opencl/UniformBSplineTransform.cl")).build("-D HYBRID -D SCALEDROTATION", device);
+                	if (spirvSupport && spir64Support)
+					{
+						try (InputStream inpStream = getClass().getResourceAsStream("/ch/unibas/biozentrum/imagejplugins/opencl/UniformBSplineTransform_hybrid_scaledrotation_float_64.spv"))
+						{
+							Map<CLDevice, byte[]> binaries = new HashMap<>();
+							if (inpStream == null) {
+								throw new IOException("Could not find the spriv file for UniformBSplineTransform_hybrid_scaledrotation_float_64.spv");
+							}
+			            	//byte[] spvBytes = inpStream.readAllBytes(); only exists in Java 9 and later, so we do it manually for Java 8 compatibility
+			            	byte[] spvBytes = StaticUtility.readInputStream(inpStream);
+			            	inpStream.close();
+			            	binaries.put(device, spvBytes);
+			            	uniformBSplineTransformProgram = context.createProgram(binaries).build("-x spirv", device);
+						}
+						try (InputStream inpStream = getClass().getResourceAsStream("/ch/unibas/biozentrum/imagejplugins/opencl/UniformBSplineTransform_hybrid_scaledrotation_double_64.spv"))
+						{
+							Map<CLDevice, byte[]> binaries = new HashMap<>();
+							if (inpStream == null) {
+								throw new IOException("Could not find the spriv file for UniformBSplineTransform_hybrid_scaledrotation_double_64.spv");
+							}
+			            	//byte[] spvBytes = inpStream.readAllBytes(); only exists in Java 9 and later, so we do it manually for Java 8 compatibility
+			            	byte[] spvBytes = StaticUtility.readInputStream(inpStream);
+			            	inpStream.close();
+			            	binaries.put(device, spvBytes);
+			            	uniformBSplineTransformProgramDouble = context.createProgram(binaries).build("-x spirv", device);
+						}
+					}
+					else
+					{
+						uniformBSplineTransformProgramDouble = context.createProgram(getClass().getResourceAsStream("/ch/unibas/biozentrum/imagejplugins/opencl/UniformBSplineTransform.cl")).build("-D HYBRID -D SCALEDROTATION -D USE_DOUBLE", device);
+	                	uniformBSplineTransformProgram = context.createProgram(getClass().getResourceAsStream("/ch/unibas/biozentrum/imagejplugins/opencl/UniformBSplineTransform.cl")).build("-D HYBRID -D SCALEDROTATION", device);
+					}
 					break;
                 case AFFINE:
-                	uniformBSplineTransformProgramDouble = context.createProgram(getClass().getResourceAsStream("/ch/unibas/biozentrum/imagejplugins/opencl/UniformBSplineTransform.cl")).build("-D HYBRID -D AFFINE -D USE_DOUBLE", device);
-                	uniformBSplineTransformProgram = context.createProgram(getClass().getResourceAsStream("/ch/unibas/biozentrum/imagejplugins/opencl/UniformBSplineTransform.cl")).build("-D HYBRID -D AFFINE", device);
+                	if (spirvSupport && spir64Support)
+					{
+						try (InputStream inpStream = getClass().getResourceAsStream("/ch/unibas/biozentrum/imagejplugins/opencl/UniformBSplineTransform_hybrid_affine_float_64.spv"))
+						{
+							Map<CLDevice, byte[]> binaries = new HashMap<>();
+							if (inpStream == null) {
+								throw new IOException("Could not find the spriv file for UniformBSplineTransform_hybrid_affine_float_64.spv");
+							}
+			            	//byte[] spvBytes = inpStream.readAllBytes(); only exists in Java 9 and later, so we do it manually for Java 8 compatibility
+			            	byte[] spvBytes = StaticUtility.readInputStream(inpStream);
+			            	inpStream.close();
+			            	binaries.put(device, spvBytes);
+			            	uniformBSplineTransformProgram = context.createProgram(binaries).build("-x spirv", device);
+						}
+						try (InputStream inpStream = getClass().getResourceAsStream("/ch/unibas/biozentrum/imagejplugins/opencl/UniformBSplineTransform_hybrid_affine_double_64.spv"))
+						{
+							Map<CLDevice, byte[]> binaries = new HashMap<>();
+							if (inpStream == null) {
+								throw new IOException("Could not find the spriv file for UniformBSplineTransform_hybrid_affine_double_64.spv");
+							}
+			            	//byte[] spvBytes = inpStream.readAllBytes(); only exists in Java 9 and later, so we do it manually for Java 8 compatibility
+			            	byte[] spvBytes = StaticUtility.readInputStream(inpStream);
+			            	inpStream.close();
+			            	binaries.put(device, spvBytes);
+			            	uniformBSplineTransformProgramDouble = context.createProgram(binaries).build("-x spirv", device);
+						}
+					}
+					else
+					{
+						uniformBSplineTransformProgramDouble = context.createProgram(getClass().getResourceAsStream("/ch/unibas/biozentrum/imagejplugins/opencl/UniformBSplineTransform.cl")).build("-D HYBRID -D AFFINE -D USE_DOUBLE", device);
+	                	uniformBSplineTransformProgram = context.createProgram(getClass().getResourceAsStream("/ch/unibas/biozentrum/imagejplugins/opencl/UniformBSplineTransform.cl")).build("-D HYBRID -D AFFINE", device);
+					}
                 	break;
                 }
                 uniformBSplineTransformProgramKernels[KERNEL_ConvertDoubleToFloat] = uniformBSplineTransformProgramDouble.createCLKernel("ConvertDoubleToFloat");
@@ -4348,12 +4554,17 @@ public class HybridPrecisionNGStackReg extends RegistrationAndTransformation
                         .putArg(gradient0)
                         .putArg(gradient1)
                         .putArg(gradient2)
+                        .putArg(gradient3)
                         .putArg(hessian00)
                         .putArg(hessian01)
                         .putArg(hessian02)
+                        .putArg(hessian03)
                         .putArg(hessian11)
                         .putArg(hessian12)
+                        .putArg(hessian13)
                         .putArg(hessian22)
+                        .putArg(hessian23)
+                        .putArg(hessian33)
                         .putArg(entryImageBuffer)
                         .putArg(maskBuffer);
                 

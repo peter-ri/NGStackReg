@@ -18,6 +18,10 @@
 
 package ch.unibas.biozentrum.imagejplugins.util;
 
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
+import java.io.InputStream;
+
 public final class StaticUtility {
 	private StaticUtility() { }
 	
@@ -124,4 +128,15 @@ public final class StaticUtility {
         }
         return (result);
     }
+    
+    public static byte[] readInputStream(InputStream inpStream) throws IOException {
+		ByteArrayOutputStream buffer = new ByteArrayOutputStream();
+		int nRead;
+		byte[] data = new byte[16384];
+		while ((nRead = inpStream.read(data, 0, data.length)) != -1) {
+		    buffer.write(data, 0, nRead);
+		}
+		byte[] spvBytes = buffer.toByteArray();
+		return spvBytes;
+	}
 }

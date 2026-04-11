@@ -19,11 +19,11 @@
 package ch.unibas.biozentrum.imagejplugins;
 
 import com.jogamp.opencl.CLPlatform;
-import static org.jocl.CL.*;
-import org.jocl.CL;
-import org.jocl.cl_context_properties;
-import org.jocl.cl_device_id;
-import org.jocl.cl_platform_id;
+//import static org.jocl.CL.*;
+//import org.jocl.CL;
+//import org.jocl.cl_context_properties;
+//import org.jocl.cl_device_id;
+//import org.jocl.cl_platform_id;
 import org.scijava.command.Command;
 import org.scijava.display.DisplayService;
 import org.scijava.log.LogService;

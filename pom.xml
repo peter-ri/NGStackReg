@@ -14,7 +14,7 @@
 
     <groupId>ch.unibas.biozentrum</groupId>
     <artifactId>NGStackReg_</artifactId>
-    <version>0.1.0</version>
+    <version>0.2.0</version>
 
     <name>NGStackReg</name>
     <description>NGStackReg provides a parallelized and OpenCL accelerated complete rewrite of the StackReg/TurboReg plugins.</description>
@@ -176,9 +176,9 @@
             <groupId>org.json</groupId>
             <artifactId>json</artifactId>
         </dependency>
-        <dependency>
+        <!-- <dependency>
 		    <groupId>org.jocl</groupId>
 		    <artifactId>jocl</artifactId>
-		</dependency>
+		</dependency> -->
     </dependencies>
 </project>
