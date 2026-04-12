@@ -1511,7 +1511,7 @@ public class HybridPrecisionNGStackReg extends RegistrationAndTransformation
                     uniformBSplineTransformProgramKernels[KERNEL_dtranslationErrorWithGradAndHess] = uniformBSplineTransformProgramDouble.createCLKernel("translationErrorWithGradAndHess");
                     uniformBSplineTransformProgramKernels[KERNEL_dtranslationSumInLocalMemoryCombined] = uniformBSplineTransformProgramDouble.createCLKernel("translationSumInLocalMemoryCombined");
                     uniformBSplineTransformProgramKernels[KERNEL_dtranslationErrorWithGradAndHessBrent] = uniformBSplineTransformProgramDouble.createCLKernel("translationErrorWithGradAndHessBrent");
-                    uniformBSplineTransformProgramKernels[KERNEL_dtranslationtransformImageWithBsplineInterpolation] = uniformBSplineTransformProgramDouble.createCLKernel("translationtransformImageWithBsplineInterpolation");
+                    uniformBSplineTransformProgramKernels[KERNEL_dtranslationtransformImageWithBsplineInterpolation] = uniformBSplineTransformProgramDouble.createCLKernel("translationTransformImageWithBsplineInterpolation");
                     uniformBSplineTransformProgramKernels[KERNEL_dresizingTransformImageWithBsplineInterpolation] = uniformBSplineTransformProgramDouble.createCLKernel("resizingTranslationTransformImageWithBsplineInterpolation");
                     break;
                 case RIGIDBODY:
