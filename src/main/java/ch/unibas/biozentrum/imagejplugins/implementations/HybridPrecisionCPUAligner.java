@@ -1316,13 +1316,17 @@ public class HybridPrecisionCPUAligner extends CPUAligner {
             }
             StaticUtility.invertGauss(pseudoHessian);
             update = StaticUtility.matrixMultiply(pseudoHessian, gradient);
-            currentscale = this.scale + update[0];
+            final double deltaKappa = update[0];
+            final double scaleFactor = Math.exp(deltaKappa);
+            currentscale = this.scale * scaleFactor;
             currentangle = this.angle - update[1];
-            displacement = Math.sqrt(update[2] * update[2] + update[3] * update[3]) + 0.25 * Math.sqrt((double)(targetPyramid[0].width * targetPyramid[0].width) + (double)(targetPyramid[0].height * targetPyramid[0].height)) * (Math.abs(update[0]) + Math.abs(update[1]));
+            displacement = Math.sqrt(update[2] * update[2] + update[3] * update[3]) + 0.25 * Math.sqrt((double)(targetPyramid[0].width * targetPyramid[0].width) + (double)(targetPyramid[0].height * targetPyramid[0].height)) * (Math.abs(deltaKappa) + Math.abs(update[1]));
             c = Math.cos(update[1]);
             s = Math.sin(update[1]);
-            currentoffsetx = ((offsetx + update[2]) * c - (offsety + update[3]) * s) * (1.0 + update[0]);
-            currentoffsety = ((offsetx + update[2]) * s + (offsety + update[3]) * c) * (1.0 + update[0]);
+            final double trialTx = offsetx + update[2];
+            final double trialTy = offsety + update[3];
+            currentoffsetx = scaleFactor * (trialTx * c - trialTy * s);
+            currentoffsety = scaleFactor * (trialTx * s + trialTy * c);
             meanSquares = getScaledRotationMeanSquaresDouble(currentoffsetx,currentoffsety,currentangle,currentscale);
 
             iteration++;
@@ -1340,12 +1344,16 @@ public class HybridPrecisionCPUAligner extends CPUAligner {
         } while ((iteration < (10 * iterationPower - 1)) && (0.001 <= displacement));
         StaticUtility.invertGauss(hessian);
         update = StaticUtility.matrixMultiply(hessian, gradient);
-        currentscale = this.scale + update[0];
+        final double deltaKappa = update[0];
+        final double scaleFactor = Math.exp(deltaKappa);
+        currentscale = this.scale * scaleFactor;
         currentangle = this.angle - update[1];
         c = Math.cos(update[1]);
         s = Math.sin(update[1]);
-        currentoffsetx = ((offsetx + update[2]) * c - (offsety + update[3]) * s) * (1.0 + update[0]);
-        currentoffsety = ((offsetx + update[2]) * s + (offsety + update[3]) * c) * (1.0 + update[0]);
+        final double trialTx = offsetx + update[2];
+        final double trialTy = offsety + update[3];
+        currentoffsetx = scaleFactor * (trialTx * c - trialTy * s);
+        currentoffsety = scaleFactor * (trialTx * s + trialTy * c);
         meanSquares = getScaledRotationMeanSquaresWithoutHessianDouble(currentoffsetx,currentoffsety,currentangle,currentscale);
         iteration++;
         if (meanSquares < bestMeanSquares) {
@@ -1421,18 +1429,20 @@ public class HybridPrecisionCPUAligner extends CPUAligner {
                     + 0.5 * (double)targetPyramid[0].height
                       * (Math.abs(update[1]) + Math.abs(update[3]));
 
-            /*
-             * Affine parameter update: purely additive, positive sign.
-             * Unlike rigid body where angle is SUBTRACTED and offsets are COMPOSED
-             * through a rotation matrix, affine parameters form a vector space
-             * and are simply incremented.
-             */
-            currenta11    = this.a11    + update[0];
-            currenta12    = this.a12    + update[1];
-            currenta21    = this.a21    + update[2];
-            currenta22    = this.a22    + update[3];
-            currentoffsetx = this.offsetx + update[4];
-            currentoffsety = this.offsety + update[5];
+            final double b11 = 1.0 + update[0];
+            final double b12 = update[1];
+            final double b21 = update[2];
+            final double b22 = 1.0 + update[3];
+
+            currenta11 = b11 * this.a11 + b12 * this.a21;
+            currenta12 = b11 * this.a12 + b12 * this.a22;
+            currenta21 = b21 * this.a11 + b22 * this.a21;
+            currenta22 = b21 * this.a12 + b22 * this.a22;
+
+            final double trialTx = this.offsetx + update[4];
+            final double trialTy = this.offsety + update[5];
+            currentoffsetx = b11 * trialTx + b12 * trialTy;
+            currentoffsety = b21 * trialTx + b22 * trialTy;
 
             /*
              * Evaluate the MSE at the trial point. This also recomputes gradient
@@ -1480,12 +1490,20 @@ public class HybridPrecisionCPUAligner extends CPUAligner {
         StaticUtility.invertGauss(hessian);
         update = StaticUtility.matrixMultiply(hessian, gradient);
 
-        currenta11     = this.a11     + update[0];
-        currenta12     = this.a12     + update[1];
-        currenta21     = this.a21     + update[2];
-        currenta22     = this.a22     + update[3];
-        currentoffsetx = this.offsetx + update[4];
-        currentoffsety = this.offsety + update[5];
+        final double b11 = 1.0 + update[0];
+        final double b12 = update[1];
+        final double b21 = update[2];
+        final double b22 = 1.0 + update[3];
+
+        currenta11 = b11 * this.a11 + b12 * this.a21;
+        currenta12 = b11 * this.a12 + b12 * this.a22;
+        currenta21 = b21 * this.a11 + b22 * this.a21;
+        currenta22 = b21 * this.a12 + b22 * this.a22;
+
+        final double trialTx = this.offsetx + update[4];
+        final double trialTy = this.offsety + update[5];
+        currentoffsetx = b11 * trialTx + b12 * trialTy;
+        currentoffsety = b21 * trialTx + b22 * trialTy;
 
         meanSquares = getAffineMeanSquaresWithoutHessianDouble(currentoffsetx, currentoffsety,
                                                           currenta11, currenta12, currenta21, currenta22);
@@ -1636,13 +1654,17 @@ public class HybridPrecisionCPUAligner extends CPUAligner {
             }
             StaticUtility.invertGauss(pseudoHessian);
             update = StaticUtility.matrixMultiply(pseudoHessian, gradient);
-            currentscale = this.scale + update[0];
+            final double deltaKappa = update[0];
+            final double scaleFactor = Math.exp(deltaKappa);
+            currentscale = this.scale * scaleFactor;
             currentangle = this.angle - update[1];
-            displacement = Math.sqrt(update[2] * update[2] + update[3] * update[3]) + 0.25 * Math.sqrt((double)(targetPyramid[pyramidIndex].width * targetPyramid[pyramidIndex].width) + (double)(targetPyramid[pyramidIndex].height * targetPyramid[pyramidIndex].height)) * (Math.abs(update[0]) + Math.abs(update[1]));
+            displacement = Math.sqrt(update[2] * update[2] + update[3] * update[3]) + 0.25 * Math.sqrt((double)(targetPyramid[pyramidIndex].width * targetPyramid[pyramidIndex].width) + (double)(targetPyramid[pyramidIndex].height * targetPyramid[pyramidIndex].height)) * (Math.abs(deltaKappa) + Math.abs(update[1]));
             c = Math.cos(update[1]);
             s = Math.sin(update[1]);
-            currentoffsetx = ((offsetx + update[2]) * c - (offsety + update[3]) * s) * (1.0 + update[0]);
-            currentoffsety = ((offsetx + update[2]) * s + (offsety + update[3]) * c) * (1.0 + update[0]);
+            final double trialTx = offsetx + update[2];
+            final double trialTy = offsety + update[3];
+            currentoffsetx = scaleFactor * (trialTx * c - trialTy * s);
+            currentoffsety = scaleFactor * (trialTx * s + trialTy * c);
             meanSquares = getScaledRotationMeanSquares(pyramidIndex,(float)currentoffsetx,(float)currentoffsety,(float)currentangle,(float)currentscale);
 
             iteration++;
@@ -1660,12 +1682,16 @@ public class HybridPrecisionCPUAligner extends CPUAligner {
         } while ((iteration < (10 * iterationPower - 1)) && (0.001 <= displacement));
         StaticUtility.invertGauss(hessian);
         update = StaticUtility.matrixMultiply(hessian, gradient);
-        currentscale = this.scale + update[0];
+        final double deltaKappa = update[0];
+        final double scaleFactor = Math.exp(deltaKappa);
+        currentscale = this.scale * scaleFactor;
         currentangle = this.angle - update[1];
         c = Math.cos(update[1]);
         s = Math.sin(update[1]);
-        currentoffsetx = ((offsetx + update[2]) * c - (offsety + update[3]) * s) * (1.0 + update[0]);
-        currentoffsety = ((offsetx + update[2]) * s + (offsety + update[3]) * c) * (1.0 + update[0]);
+        final double trialTx = offsetx + update[2];
+        final double trialTy = offsety + update[3];
+        currentoffsetx = scaleFactor * (trialTx * c - trialTy * s);
+        currentoffsety = scaleFactor * (trialTx * s + trialTy * c);
         meanSquares = getScaledRotationMeanSquaresWithoutHessian(pyramidIndex,(float)currentoffsetx,(float)currentoffsety,(float)currentangle,(float)currentscale);
         iteration++;
         if (meanSquares < bestMeanSquares) {
@@ -1712,39 +1738,30 @@ public class HybridPrecisionCPUAligner extends CPUAligner {
      * The full Hessian (with off-diagonals) is inverted only for the FINAL undamped
      * Gauss-Newton step after the LM loop converges.
      *
-     * Update signs: For affine, ALL parameters live in a vector space (unlike the SE(2)
-     * group for rigid body). The update is purely additive with POSITIVE sign:
-     *   a11_new = a11 + δa11
-     *   a12_new = a12 + δa12
-     *   ...
-     *   tx_new  = tx  + δtx
-     *   ty_new  = ty  + δty
+     * Accepted affine step is applied compositionally (group-correct), not component-wise:
      *
-     * This is correct because:
-     * - The gradient g_k = Σ r_i * (∂f/∂p_k) points in the direction that increases
-     *   the dot product of residual with the Jacobian column.
-     * - The Gauss-Newton step δp = H⁻¹ g directly gives the parameter increment
-     *   that reduces the least-squares error.
-     * - Unlike rigid body (where the angle update requires a MINUS sign due to the
-     *   inverse/compositional convention and subsequent SE(2) group composition),
-     *   affine parameters are simply linear coefficients with no such group structure.
+     *   B = I + dA, with dA = [[δa11, δa12], [δa21, δa22]]
+     *   A_new = B * A
+     *   t_new = B * (t + δt)
      *
-     * Contrast with rigid body:
-     * - Rigid body: angle update is SUBTRACTED (currentangle = angle - update[0])
-     *   because the angle parameterizes a rotation group, and the "inverse" Jacobian
-     *   convention means the gradient points opposite to the forward rotation direction.
-     *   The offsets are then COMPOSED through the incremental rotation matrix.
-     * - Affine: all 6 parameters are ADDED directly. No group composition is needed.
-     *   The affine matrix entries (a11, a12, a21, a22) are dimensionless linear
-     *   coefficients, and (tx, ty) are translations — all updated additively.
+     * where A = [[a11, a12], [a21, a22]] and t = (tx, ty).
+     *
+     * This matches the same left-composition convention used by the transformation
+     * classes and the stack-combiner workers:
+     *   T_new = ΔT ∘ T_current.
+     *
+     * Contrast with rigid body and scaled rotation:
+     * - Rigid body uses rotational composition with angle subtraction in this inverse
+     *   Jacobian convention, then composes translation through the incremental rotation.
+     * - Scaled rotation uses log-scale increment (κ = log s), multiplicative scale update,
+     *   and compositional translation update.
      *
      * Displacement convergence criterion:
      *   displacement = sqrt(δtx² + δty²)
-     *                + 0.25 * diagonal * (|δa11| + |δa12| + |δa21| + |δa22|)
-     * The matrix element updates are converted to approximate pixel displacements
-     * by multiplying by 0.25 × the image diagonal. This heuristic estimates the
-     * maximum pixel displacement caused by a small change in a matrix coefficient
-     * (analogous to the 0.25*diagonal*|δθ| term in rigid body).
+     *                + 0.5*width *(|δa11| + |δa21|)
+     *                + 0.5*height*(|δa12| + |δa22|)
+     * This is a first-order pixel-motion proxy derived from the maximal |x|,|y| in
+     * the image domain (about width/2 and height/2).
      */
     private void inverseMarquardtLevenbergAffineOptimization(int pyramidIndex)
     {
@@ -1811,18 +1828,20 @@ public class HybridPrecisionCPUAligner extends CPUAligner {
                     + 0.5 * (double)targetPyramid[pyramidIndex].height
                       * (Math.abs(update[1]) + Math.abs(update[3]));
 
-            /*
-             * Affine parameter update: purely additive, positive sign.
-             * Unlike rigid body where angle is SUBTRACTED and offsets are COMPOSED
-             * through a rotation matrix, affine parameters form a vector space
-             * and are simply incremented.
-             */
-            currenta11    = this.a11    + update[0];
-            currenta12    = this.a12    + update[1];
-            currenta21    = this.a21    + update[2];
-            currenta22    = this.a22    + update[3];
-            currentoffsetx = this.offsetx + update[4];
-            currentoffsety = this.offsety + update[5];
+            final double b11 = 1.0 + update[0];
+            final double b12 = update[1];
+            final double b21 = update[2];
+            final double b22 = 1.0 + update[3];
+
+            currenta11 = b11 * this.a11 + b12 * this.a21;
+            currenta12 = b11 * this.a12 + b12 * this.a22;
+            currenta21 = b21 * this.a11 + b22 * this.a21;
+            currenta22 = b21 * this.a12 + b22 * this.a22;
+
+            final double trialTx = this.offsetx + update[4];
+            final double trialTy = this.offsety + update[5];
+            currentoffsetx = b11 * trialTx + b12 * trialTy;
+            currentoffsety = b21 * trialTx + b22 * trialTy;
 
             /*
              * Evaluate the MSE at the trial point. This also recomputes gradient
@@ -1870,12 +1889,20 @@ public class HybridPrecisionCPUAligner extends CPUAligner {
         StaticUtility.invertGauss(hessian);
         update = StaticUtility.matrixMultiply(hessian, gradient);
 
-        currenta11     = this.a11     + update[0];
-        currenta12     = this.a12     + update[1];
-        currenta21     = this.a21     + update[2];
-        currenta22     = this.a22     + update[3];
-        currentoffsetx = this.offsetx + update[4];
-        currentoffsety = this.offsety + update[5];
+        final double b11 = 1.0 + update[0];
+        final double b12 = update[1];
+        final double b21 = update[2];
+        final double b22 = 1.0 + update[3];
+
+        currenta11 = b11 * this.a11 + b12 * this.a21;
+        currenta12 = b11 * this.a12 + b12 * this.a22;
+        currenta21 = b21 * this.a11 + b22 * this.a21;
+        currenta22 = b21 * this.a12 + b22 * this.a22;
+
+        final double trialTx = this.offsetx + update[4];
+        final double trialTy = this.offsety + update[5];
+        currentoffsetx = b11 * trialTx + b12 * trialTy;
+        currentoffsety = b21 * trialTx + b22 * trialTy;
 
         meanSquares = getAffineMeanSquaresWithoutHessian(pyramidIndex, (float)currentoffsetx, (float)currentoffsety,
                                                           (float)currenta11, (float)currenta12, (float)currenta21, (float)currenta22);
@@ -2087,7 +2114,8 @@ public class HybridPrecisionCPUAligner extends CPUAligner {
                     double diff = doubleSourceImage[nIndex] - s;
                     msqe += diff * diff;
                     double theta = doubleSourceyGradient[nIndex] * (double)n - doubleSourcexGradient[nIndex] * (double)i;
-                    double j_scale = (((double)n) * doubleSourcexGradient[nIndex] + ((double)i) * doubleSourceyGradient[nIndex]); // scale contribution to j
+                    final double j_scale = (((double)n) * doubleSourcexGradient[nIndex] + ((double)i) * doubleSourceyGradient[nIndex]);
+                    final double j_logScale = currentscale * j_scale;
                     /*
                     TODO/FIXME/KNOWN ISSUE:
                     The following summation is MUCH worse than the parallel sum reduction done on the GPU, because (relatively speaking)
@@ -2095,14 +2123,14 @@ public class HybridPrecisionCPUAligner extends CPUAligner {
                     I ignore this like the original implementation, but this is one of many reasons why the GPU version and the CPU version
                     will never yield the same results!
                     */
-                    gradient[0] += diff * j_scale;
+                    gradient[0] += diff * j_logScale;
                     gradient[1] += diff * theta;
                     gradient[2] += diff * doubleSourcexGradient[nIndex];
                     gradient[3] += diff * doubleSourceyGradient[nIndex];
-                    hessian[0][0] += j_scale * j_scale;
-                    hessian[0][1] += j_scale * theta;
-                    hessian[0][2] += j_scale * doubleSourcexGradient[nIndex];
-                    hessian[0][3] += j_scale * doubleSourceyGradient[nIndex];
+                    hessian[0][0] += j_logScale * j_logScale;
+                    hessian[0][1] += j_logScale * theta;
+                    hessian[0][2] += j_logScale * doubleSourcexGradient[nIndex];
+                    hessian[0][3] += j_logScale * doubleSourceyGradient[nIndex];
                     hessian[1][1] += theta * theta;
                     hessian[1][2] += theta * doubleSourcexGradient[nIndex];
                     hessian[1][3] += theta * doubleSourceyGradient[nIndex];
@@ -2121,7 +2149,8 @@ public class HybridPrecisionCPUAligner extends CPUAligner {
                 hessian[i][j] = hessian[j][i];
             }
         }
-        return msqe / ((double) area);
+        final double jacobianNorm = Math.max(currentscale * currentscale, 1.0e-12);
+        return msqe / (((double) area) * jacobianNorm);
     }
     
     
@@ -2275,7 +2304,9 @@ public class HybridPrecisionCPUAligner extends CPUAligner {
                 hessian[i][j] = hessian[j][i];
             }
         }
-        return msqe / ((double) area);
+        final double detA = Math.abs(currenta11 * currenta22 - currenta12 * currenta21);
+        final double jacobianNorm = Math.max(detA, 1.0e-12);
+        return msqe / (((double) area) * jacobianNorm);
     }
     
     
@@ -2642,7 +2673,8 @@ public class HybridPrecisionCPUAligner extends CPUAligner {
                     float diff = source[nIndex] - s;
                     msqe += diff * diff;
                     float theta = yGradient[nIndex] * (float)n - xGradient[nIndex] * (float)i;
-                    float j_scale = (((float)n) * xGradient[nIndex] + ((float)i) * yGradient[nIndex]); // scale contribution to j
+                    final float j_scale = (((float)n) * xGradient[nIndex] + ((float)i) * yGradient[nIndex]);
+                    final float j_logScale = currentscale * j_scale;
                     
                     /*
                      * TODO/FIXME/KNOWN ISSUE: The following summation is MUCH worse than the
@@ -2652,14 +2684,14 @@ public class HybridPrecisionCPUAligner extends CPUAligner {
                      * this is one of many reasons why the GPU version and the CPU version will
                      * never yield the same results!
                      */
-                    fgradient[0] += diff * j_scale;
+                    fgradient[0] += diff * j_logScale;
                     fgradient[1] += diff * theta;
                     fgradient[2] += diff * xGradient[nIndex];
                     fgradient[3] += diff * yGradient[nIndex];
-                    fhessian[0][0] += j_scale * j_scale;
-                    fhessian[0][1] += j_scale * theta;
-                    fhessian[0][2] += j_scale * xGradient[nIndex];
-                    fhessian[0][3] += j_scale * yGradient[nIndex];
+                    fhessian[0][0] += j_logScale * j_logScale;
+                    fhessian[0][1] += j_logScale * theta;
+                    fhessian[0][2] += j_logScale * xGradient[nIndex];
+                    fhessian[0][3] += j_logScale * yGradient[nIndex];
                     fhessian[1][1] += theta * theta;
                     fhessian[1][2] += theta * xGradient[nIndex];
                     fhessian[1][3] += theta * yGradient[nIndex];
@@ -2692,7 +2724,8 @@ public class HybridPrecisionCPUAligner extends CPUAligner {
                 hessian[i][j] = hessian[j][i];
             }
         }
-        return msqe / ((double) area);
+        final double jacobianNorm = Math.max((double)currentscale * (double)currentscale, 1.0e-12);
+        return msqe / (((double) area) * jacobianNorm);
     }
     
     private double getAffineMeanSquares(int pyramidIndex, float currentoffsetx, float currentoffsety,
@@ -2880,7 +2913,9 @@ public class HybridPrecisionCPUAligner extends CPUAligner {
                 hessian[i][j] = hessian[j][i];
             }
         }
-        return msqe / ((double) area);
+        final double detA = Math.abs((double)currenta11 * (double)currenta22 - (double)currenta12 * (double)currenta21);
+        final double jacobianNorm = Math.max(detA, 1.0e-12);
+        return msqe / (((double) area) * jacobianNorm);
     }
     
     private double getTranslationMeanSquaresWithoutHessianDouble(double currentoffsetx, double currentoffsety) {
@@ -3027,7 +3062,8 @@ public class HybridPrecisionCPUAligner extends CPUAligner {
                 coordy += xvecy;
             }
         }
-        return msqe / ((double) area);
+        final double jacobianNorm = Math.max(currentscale * currentscale, 1.0e-12);
+        return msqe / (((double) area) * jacobianNorm);
     }
     
     private double getAffineMeanSquaresWithoutHessianDouble(double currentoffsetx, double currentoffsety,
@@ -3079,7 +3115,9 @@ public class HybridPrecisionCPUAligner extends CPUAligner {
                 coordy += xvecy;
             }
         }
-        return msqe / ((double) area);
+        final double detA = Math.abs(currenta11 * currenta22 - currenta12 * currenta21);
+        final double jacobianNorm = Math.max(detA, 1.0e-12);
+        return msqe / (((double) area) * jacobianNorm);
     }
     
     private double getTranslationMeanSquaresWithoutHessian(int pyramidIndex, float currentoffsetx, float currentoffsety) {
@@ -3237,7 +3275,8 @@ public class HybridPrecisionCPUAligner extends CPUAligner {
                 coordy += xvecy;
             }
         }
-        return msqe / ((double) area);
+        final double jacobianNorm = Math.max((double)currentscale * (double)currentscale, 1.0e-12);
+        return msqe / (((double) area) * jacobianNorm);
     }
     
     private double getAffineMeanSquaresWithoutHessian(int pyramidIndex, float currentoffsetx, float currentoffsety,
@@ -3293,6 +3332,8 @@ public class HybridPrecisionCPUAligner extends CPUAligner {
                 coordy += xvecy;
             }
         }
-        return msqe / ((double) area);
+        final double detA = Math.abs((double)currenta11 * (double)currenta22 - (double)currenta12 * (double)currenta21);
+        final double jacobianNorm = Math.max(detA, 1.0e-12);
+        return msqe / (((double) area) * jacobianNorm);
     }
 }

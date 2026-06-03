@@ -40,6 +40,27 @@
 //TODO: MIN_SIZE is defined as 24 => any input data will never be smaller than 12 => a lot of multimirrored boundary conditions may be omitted => less branching!
 
 /*
+Commands to build SPIRV binaries for the kernels:
+
+clang -D USE_DOUBLE -D AFFINE -target spirv64 -cl-std=CL1.2 -Xclang -fdeclare-opencl-builtins -c -O3 UniformBSplineTransform.cl -o UniformBSplineTransform_affine_double_64.spv
+clang -D USE_DOUBLE -D SCALEDROTATION -target spirv64 -cl-std=CL1.2 -Xclang -fdeclare-opencl-builtins -c -O3 UniformBSplineTransform.cl -o UniformBSplineTransform_scaledrotation_double_64.spv
+clang -D USE_DOUBLE -D RIGIDBODY -target spirv64 -cl-std=CL1.2 -Xclang -fdeclare-opencl-builtins -c -O3 UniformBSplineTransform.cl -o UniformBSplineTransform_rigidbody_double_64.spv
+clang -D USE_DOUBLE -D TRANSLATION -target spirv64 -cl-std=CL1.2 -Xclang -fdeclare-opencl-builtins -c -O3 UniformBSplineTransform.cl -o UniformBSplineTransform_translation_double_64.spv
+clang -D TRANSLATION -target spirv64 -cl-std=CL1.2 -Xclang -fdeclare-opencl-builtins -c -O3 UniformBSplineTransform.cl -o UniformBSplineTransform_translation_float_64.spv
+clang -D RIGIDBODY -target spirv64 -cl-std=CL1.2 -Xclang -fdeclare-opencl-builtins -c -O3 UniformBSplineTransform.cl -o UniformBSplineTransform_rigidbody_float_64.spv
+clang -D SCALEDROTATION -target spirv64 -cl-std=CL1.2 -Xclang -fdeclare-opencl-builtins -c -O3 UniformBSplineTransform.cl -o UniformBSplineTransform_scaledrotation_float_64.spv
+clang -D AFFINE -target spirv64 -cl-std=CL1.2 -Xclang -fdeclare-opencl-builtins -c -O3 UniformBSplineTransform.cl -o UniformBSplineTransform_affine_float_64.spv
+clang -D HYBRID -D AFFINE -target spirv64 -cl-std=CL1.2 -Xclang -fdeclare-opencl-builtins -c -O3 UniformBSplineTransform.cl -o UniformBSplineTransform_hybrid_affine_float_64.spv
+clang -D HYBRID -D SCALEDROTATION -target spirv64 -cl-std=CL1.2 -Xclang -fdeclare-opencl-builtins -c -O3 UniformBSplineTransform.cl -o UniformBSplineTransform_hybrid_scaledrotation_float_64.spv
+clang -D HYBRID -D RIGIDBODY -target spirv64 -cl-std=CL1.2 -Xclang -fdeclare-opencl-builtins -c -O3 UniformBSplineTransform.cl -o UniformBSplineTransform_hybrid_rigidbody_float_64.spv
+clang -D HYBRID -D TRANSLATION -target spirv64 -cl-std=CL1.2 -Xclang -fdeclare-opencl-builtins -c -O3 UniformBSplineTransform.cl -o UniformBSplineTransform_hybrid_translation_float_64.spv
+clang -D HYBRID -D TRANSLATION -D USE_DOUBLE -target spirv64 -cl-std=CL1.2 -Xclang -fdeclare-opencl-builtins -c -O3 UniformBSplineTransform.cl -o UniformBSplineTransform_hybrid_translation_double_64.spv
+clang -D HYBRID -D RIGIDBODY -D USE_DOUBLE -target spirv64 -cl-std=CL1.2 -Xclang -fdeclare-opencl-builtins -c -O3 UniformBSplineTransform.cl -o UniformBSplineTransform_hybrid_rigidbody_double_64.spv
+clang -D HYBRID -D SCALEDROTATION -D USE_DOUBLE -target spirv64 -cl-std=CL1.2 -Xclang -fdeclare-opencl-builtins -c -O3 UniformBSplineTransform.cl -o UniformBSplineTransform_hybrid_scaledrotation_double_64.spv
+clang -D HYBRID -D AFFINE -D USE_DOUBLE -target spirv64 -cl-std=CL1.2 -Xclang -fdeclare-opencl-builtins -c -O3 UniformBSplineTransform.cl -o UniformBSplineTransform_hybrid_affine_double_64.spv
+*/
+
+/*
 Various constants were put into the constant memory zone because on some GPUs the
 number of registers is quite limited (even on high end hardware). Using
 preprocessor constants can then lead to very strange errors (mostly out of mem).
@@ -2699,23 +2720,32 @@ const FPT scale)
             __private FPT diff = source[nIndex] - s;
             //__private FPT Theta = yGradient[nIndex] * (FPT)column - xGradient[nIndex] * (FPT)row;
             __private FPT Theta = dot((FPTTWO)(yGradient[nIndex], -xGradient[nIndex]), (FPTTWO)((FPT)column, (FPT)row));
-            __private FPT j_scale = dot((FPTTWO)(xGradient[nIndex], yGradient[nIndex]), (FPTTWO)((FPT)column, (FPT)row));
+            
+            /*
+             * Switched to log scale for the scale parameter, which is more stable for optimization. 
+             * The original implementation used a linear scale parameter, but this can lead to large 
+             * updates and instability when the scale is far from 1. By optimizing in log space, 
+             * we ensure that updates are multiplicative and more stable across a wide range of scales.
+             */
+            //__private FPT j_scale = dot((FPTTWO)(xGradient[nIndex], yGradient[nIndex]), (FPTTWO)((FPT)column, (FPT)row));
+            __private FPT j_logScale = dot((FPTTWO)(xGradient[nIndex], yGradient[nIndex]), (FPTTWO)((FPT)column, (FPT)row)) * scale; //chain rule for log scale, this is the derivative of the error with respect to log(scale)
+            
             //diffout[nIndex] = pown(diff,2);
-            //grad0[nIndex] = diff * j_scale;
+            //grad0[nIndex] = diff * j_logScale;
             //grad1[nIndex] = diff * Theta;
             //grad2[nIndex] = diff * xGradient[nIndex];
             //grad3[nIndex] = diff * yGradient[nIndex];
             diffout[nIndex] = diff * diff;
-            __private FPTFOUR tmp4 = (FPTFOUR)(j_scale, Theta, xGradient[nIndex], yGradient[nIndex]) * diff; //Slightly less accurate
+            __private FPTFOUR tmp4 = (FPTFOUR)(j_logScale, Theta, xGradient[nIndex], yGradient[nIndex]) * diff; //Slightly less accurate
             grad0[nIndex] = tmp4.x;
             grad1[nIndex] = tmp4.y;
             grad2[nIndex] = tmp4.z;
             grad3[nIndex] = tmp4.w;
-            //hessian00[nIndex] = pown(j_scale,2); //this is more accurate
-            //hessian01[nIndex] = j_scale * Theta;
-            //hessian02[nIndex] = j_scale * xGradient[nIndex];
-            //hessian03[nIndex] = j_scale * yGradient[nIndex];
-            tmp4 = (FPTFOUR)(j_scale, Theta, xGradient[nIndex], yGradient[nIndex]) * j_scale; //Slightly less accurate
+            //hessian00[nIndex] = pown(j_logScale,2); //this is more accurate
+            //hessian01[nIndex] = j_logScale * Theta;
+            //hessian02[nIndex] = j_logScale * xGradient[nIndex];
+            //hessian03[nIndex] = j_logScale * yGradient[nIndex];
+            tmp4 = (FPTFOUR)(j_logScale, Theta, xGradient[nIndex], yGradient[nIndex]) * j_logScale; //Slightly less accurate
             hessian00[nIndex] = tmp4.x;
             hessian01[nIndex] = tmp4.y;
             hessian02[nIndex] = tmp4.z;
@@ -3409,7 +3439,8 @@ const int doubleTargetHeight)
         __private FPT s;
         __private FPT diff;
         __private FPT Theta;
-        __private FPT j_scale;
+        //__private FPT j_scale;
+        __private FPT j_logScale;
         
         __private int2 Msk = (int2)((int)round(coord.x), (int)round(coord.y));
         if ((Msk.x >= 0) && (Msk.x < targetwidth) && (Msk.y >= 0) && (Msk.y < targetheight))
@@ -3421,24 +3452,33 @@ const int doubleTargetHeight)
             diff = source[i] - s;
             //Theta = yGradient[i] * (FPT)column - xGradient[i] * (FPT)row;
             Theta = dot((FPTTWO)(yGradient[i], -xGradient[i]), (FPTTWO)((FPT)column, (FPT)row));
-            j_scale = dot((FPTTWO)(xGradient[i], yGradient[i]), (FPTTWO)((FPT)column, (FPT)row));
+            
+            /*
+             * Switched to log scale for the scale parameter, which is more stable for optimization. 
+             * The original implementation used a linear scale parameter, but this can lead to large 
+             * updates and instability when the scale is far from 1. By optimizing in log space, 
+             * we ensure that updates are multiplicative and more stable across a wide range of scales.
+             */
+            //j_scale = dot((FPTTWO)(xGradient[i], yGradient[i]), (FPTTWO)((FPT)column, (FPT)row));
+            j_logScale = dot((FPTTWO)(xGradient[i], yGradient[i]), (FPTTWO)((FPT)column, (FPT)row)) * scale; //chain rule for log scale, this is the derivative of the error with respect to log(scale)
+
             //ldiffout[nIndex] += pown(diff,2);
-            //lgrad0[nIndex] += diff * j_scale;
+            //lgrad0[nIndex] += diff * j_logScale;
             //lgrad1[nIndex] += diff * Theta;
             //lgrad2[nIndex] += diff * xGradient[nIndex];
             //lgrad3[nIndex] += diff * yGradient[nIndex];
             ldiffout[nIndex] += diff * diff;
-            __private FPTFOUR tmp4 = fma((FPTFOUR)(j_scale, Theta, xGradient[i], yGradient[i]), (FPTFOUR)diff, (FPTFOUR)(lgrad0[nIndex], lgrad1[nIndex], lgrad2[nIndex], lgrad3[nIndex])); //Slightly less accurate
+            __private FPTFOUR tmp4 = fma((FPTFOUR)(j_logScale, Theta, xGradient[i], yGradient[i]), (FPTFOUR)diff, (FPTFOUR)(lgrad0[nIndex], lgrad1[nIndex], lgrad2[nIndex], lgrad3[nIndex])); //Slightly less accurate
             lgrad0[nIndex] = tmp4.x;
             lgrad1[nIndex] = tmp4.y;
             lgrad2[nIndex] = tmp4.z;
             lgrad3[nIndex] = tmp4.w;
             
-            //lhessian00[nIndex] += pown(j_scale,2); //this is more accurate
-            //lhessian01[nIndex] += j_scale * Theta;
-            //lhessian02[nIndex] += j_scale * xGradient[nIndex];
-            //lhessian03[nIndex] += j_scale * yGradient[nIndex];
-            tmp4 = fma((FPTFOUR)(j_scale, Theta, xGradient[i], yGradient[i]), (FPTFOUR)j_scale, (FPTFOUR)(lhessian00[nIndex], lhessian01[nIndex], lhessian02[nIndex], lhessian03[nIndex])); //Slightly less accurate
+            //lhessian00[nIndex] += pown(j_logScale,2); //this is more accurate
+            //lhessian01[nIndex] += j_logScale * Theta;
+            //lhessian02[nIndex] += j_logScale * xGradient[nIndex];
+            //lhessian03[nIndex] += j_logScale * yGradient[nIndex];
+            tmp4 = fma((FPTFOUR)(j_logScale, Theta, xGradient[i], yGradient[i]), (FPTFOUR)j_logScale, (FPTFOUR)(lhessian00[nIndex], lhessian01[nIndex], lhessian02[nIndex], lhessian03[nIndex])); //Slightly less accurate
             lhessian00[nIndex] = tmp4.x;
             lhessian01[nIndex] = tmp4.y;
             lhessian02[nIndex] = tmp4.z;
@@ -3477,24 +3517,27 @@ const int doubleTargetHeight)
                 diff = source[lIdx] - s;
                 //Theta = yGradient[lIdx] * (FPT)column - xGradient[lIdx] * (FPT)row;
                 Theta = dot((FPTTWO)(yGradient[lIdx], -xGradient[lIdx]), (FPTTWO)((FPT)column, (FPT)row));
-                j_scale = dot((FPTTWO)(xGradient[lIdx], yGradient[lIdx]), (FPTTWO)((FPT)column, (FPT)row));
+                
+                //j_scale = dot((FPTTWO)(xGradient[lIdx], yGradient[lIdx]), (FPTTWO)((FPT)column, (FPT)row));
+                j_logScale = dot((FPTTWO)(xGradient[lIdx], yGradient[lIdx]), (FPTTWO)((FPT)column, (FPT)row)) * scale; //chain rule for log scale, this is the derivative of the error with respect to log(scale)
+                
                 //ldiffout[nIndex] += pown(diff,2);
-                //lgrad0[nIndex] += diff * j_scale;
+                //lgrad0[nIndex] += diff * j_logScale;
                 //lgrad1[nIndex] += diff * Theta;
                 //lgrad2[nIndex] += diff * xGradient[lIdx];
                 //lgrad3[nIndex] += diff * yGradient[lIdx];
                 ldiffout[nIndex] += diff * diff;
-                __private FPTFOUR tmp4 = fma((FPTFOUR)(j_scale, Theta, xGradient[lIdx], yGradient[lIdx]), (FPTFOUR)diff, (FPTFOUR)(lgrad0[nIndex], lgrad1[nIndex], lgrad2[nIndex], lgrad3[nIndex])); //Slightly less accurate
+                __private FPTFOUR tmp4 = fma((FPTFOUR)(j_logScale, Theta, xGradient[lIdx], yGradient[lIdx]), (FPTFOUR)diff, (FPTFOUR)(lgrad0[nIndex], lgrad1[nIndex], lgrad2[nIndex], lgrad3[nIndex])); //Slightly less accurate
                 lgrad0[nIndex] = tmp4.x;
                 lgrad1[nIndex] = tmp4.y;
                 lgrad2[nIndex] = tmp4.z;
                 lgrad3[nIndex] = tmp4.w;
                 
-                //lhessian00[nIndex] += pown(j_scale,2); //this is more accurate
-                //lhessian01[nIndex] += j_scale * Theta;
-                //lhessian02[nIndex] += j_scale * xGradient[lIdx];
-                //lhessian03[nIndex] += j_scale * yGradient[lIdx];
-                tmp4 = fma((FPTFOUR)(j_scale, Theta, xGradient[lIdx], yGradient[lIdx]), (FPTFOUR)j_scale, (FPTFOUR)(lhessian00[nIndex], lhessian01[nIndex], lhessian02[nIndex], lhessian03[nIndex])); //Slightly less accurate
+                //lhessian00[nIndex] += pown(j_logScale,2); //this is more accurate
+                //lhessian01[nIndex] += j_logScale * Theta;
+                //lhessian02[nIndex] += j_logScale * xGradient[lIdx];
+                //lhessian03[nIndex] += j_logScale * yGradient[lIdx];
+                tmp4 = fma((FPTFOUR)(j_logScale, Theta, xGradient[lIdx], yGradient[lIdx]), (FPTFOUR)j_logScale, (FPTFOUR)(lhessian00[nIndex], lhessian01[nIndex], lhessian02[nIndex], lhessian03[nIndex])); //Slightly less accurate
                 lhessian00[nIndex] = tmp4.x;
                 lhessian01[nIndex] = tmp4.y;
                 lhessian02[nIndex] = tmp4.z;

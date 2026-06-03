@@ -2793,13 +2793,26 @@ public class OCLNGStackReg extends RegistrationAndTransformation
                 }
                 StaticUtility.invertGauss(pseudoHessian);
                 update = StaticUtility.matrixMultiply(pseudoHessian, gradient);
-                currentscale = this.scale + update[0];
+                final double deltaKappa = update[0];
+                final double scaleFactor = Math.exp(deltaKappa);
+                /*
+                 * Fixed composition of the update: first scale, then rotate, then translate. 
+                 * It is important to keep this order for the optimization to work properly 
+                 * (the mean squares are calculated with this order in mind).
+                 */
+                //currentscale = this.scale + update[0];
+                currentscale = this.scale * scaleFactor;
                 currentangle = this.angle - update[1];
-                displacement = Math.sqrt(update[2] * update[2] + update[3] * update[3]) + 0.25 * Math.sqrt((double)(targetPyramid[pyramidIndex].width * targetPyramid[pyramidIndex].width) + (double)(targetPyramid[pyramidIndex].height * targetPyramid[pyramidIndex].height)) * (Math.abs(update[0]) + Math.abs(update[1]));
+                //displacement = Math.sqrt(update[2] * update[2] + update[3] * update[3]) + 0.25 * Math.sqrt((double)(targetPyramid[pyramidIndex].width * targetPyramid[pyramidIndex].width) + (double)(targetPyramid[pyramidIndex].height * targetPyramid[pyramidIndex].height)) * (Math.abs(update[0]) + Math.abs(update[1]));
+                displacement = Math.sqrt(update[2] * update[2] + update[3] * update[3]) + 0.25 * Math.sqrt((double)(targetPyramid[pyramidIndex].width * targetPyramid[pyramidIndex].width) + (double)(targetPyramid[pyramidIndex].height * targetPyramid[pyramidIndex].height)) * (Math.abs(deltaKappa) + Math.abs(update[1]));
                 c = Math.cos(update[1]);
                 s = Math.sin(update[1]);
-                currentoffsetx = ((offsetx + update[2]) * c - (offsety + update[3]) * s) * (1.0 + update[0]);
-                currentoffsety = ((offsetx + update[2]) * s + (offsety + update[3]) * c) * (1.0 + update[0]);
+                //currentoffsetx = ((offsetx + update[2]) * c - (offsety + update[3]) * s) * (1.0 + update[0]);
+                //currentoffsety = ((offsetx + update[2]) * s + (offsety + update[3]) * c) * (1.0 + update[0]);
+                final double trialTx = offsetx + update[2];
+                final double trialTy = offsety + update[3];
+                currentoffsetx = scaleFactor * (trialTx * c - trialTy * s);
+                currentoffsety = scaleFactor * (trialTx * s + trialTy * c);
                 meanSquares = getScaledRotationMeanSquares(pyramidIndex,currentoffsetx,currentoffsety,currentangle,currentscale);
 
                 iteration++;
@@ -2817,12 +2830,19 @@ public class OCLNGStackReg extends RegistrationAndTransformation
             } while ((iteration < (10 * iterationPower - 1)) && (0.001 <= displacement));
             StaticUtility.invertGauss(hessian);
             update = StaticUtility.matrixMultiply(hessian, gradient);
-            currentscale = this.scale + update[0];
+            //currentscale = this.scale + update[0];
+            final double deltaKappa = update[0];
+            final double scaleFactor = Math.exp(deltaKappa);
+            currentscale = this.scale * scaleFactor;
             currentangle = this.angle - update[1];
             c = Math.cos(update[1]);
             s = Math.sin(update[1]);
-            currentoffsetx = ((offsetx + update[2]) * c - (offsety + update[3]) * s) * (1.0 + update[0]);
-            currentoffsety = ((offsetx + update[2]) * s + (offsety + update[3]) * c) * (1.0 + update[0]);
+            //currentoffsetx = ((offsetx + update[2]) * c - (offsety + update[3]) * s) * (1.0 + update[0]);
+            //currentoffsety = ((offsetx + update[2]) * s + (offsety + update[3]) * c) * (1.0 + update[0]);
+            final double trialTx = offsetx + update[2];
+            final double trialTy = offsety + update[3];
+            currentoffsetx = scaleFactor * (trialTx * c - trialTy * s);
+            currentoffsety = scaleFactor * (trialTx * s + trialTy * c);
             meanSquares = getScaledRotationMeanSquaresWithoutHessian(pyramidIndex,currentoffsetx,currentoffsety,currentangle,currentscale);
             iteration++;
             if (meanSquares < bestMeanSquares) {
@@ -2904,12 +2924,28 @@ public class OCLNGStackReg extends RegistrationAndTransformation
                  * through a rotation matrix, affine parameters form a vector space
                  * and are simply incremented.
                  */
-                currenta11    = this.a11    + update[0];
+                /*currenta11    = this.a11    + update[0];
                 currenta12    = this.a12    + update[1];
                 currenta21    = this.a21    + update[2];
                 currenta22    = this.a22    + update[3];
                 currentoffsetx = this.offsetx + update[4];
-                currentoffsety = this.offsety + update[5];
+                currentoffsety = this.offsety + update[5];*/
+                
+                //Group-correct composition of the affine update: A_new = B * A, t_new = B * (t + δt)
+                final double b11 = 1.0 + update[0];
+                final double b12 = update[1];
+                final double b21 = update[2];
+                final double b22 = 1.0 + update[3];
+
+                currenta11 = b11 * this.a11 + b12 * this.a21;
+                currenta12 = b11 * this.a12 + b12 * this.a22;
+                currenta21 = b21 * this.a11 + b22 * this.a21;
+                currenta22 = b21 * this.a12 + b22 * this.a22;
+
+                final double trialTx = this.offsetx + update[4];
+                final double trialTy = this.offsety + update[5];
+                currentoffsetx = b11 * trialTx + b12 * trialTy;
+                currentoffsety = b21 * trialTx + b22 * trialTy;
                 
                 meanSquares = getAffineMeanSquares(pyramidIndex, currentoffsetx, currentoffsety,
                         currenta11, currenta12, currenta21, currenta22);
@@ -2950,12 +2986,29 @@ public class OCLNGStackReg extends RegistrationAndTransformation
             StaticUtility.invertGauss(hessian);
             update = StaticUtility.matrixMultiply(hessian, gradient);
 
+            /*
             currenta11     = this.a11     + update[0];
             currenta12     = this.a12     + update[1];
             currenta21     = this.a21     + update[2];
             currenta22     = this.a22     + update[3];
             currentoffsetx = this.offsetx + update[4];
             currentoffsety = this.offsety + update[5];
+            */
+            
+            final double b11 = 1.0 + update[0];
+            final double b12 = update[1];
+            final double b21 = update[2];
+            final double b22 = 1.0 + update[3];
+
+            currenta11 = b11 * this.a11 + b12 * this.a21;
+            currenta12 = b11 * this.a12 + b12 * this.a22;
+            currenta21 = b21 * this.a11 + b22 * this.a21;
+            currenta22 = b21 * this.a12 + b22 * this.a22;
+
+            final double trialTx = this.offsetx + update[4];
+            final double trialTy = this.offsety + update[5];
+            currentoffsetx = b11 * trialTx + b12 * trialTy;
+            currentoffsety = b21 * trialTx + b22 * trialTy;
 
             meanSquares = getAffineMeanSquaresWithoutHessian(pyramidIndex, currentoffsetx, currentoffsety,
                                                               currenta11, currenta12, currenta21, currenta22);
@@ -3819,7 +3872,18 @@ public class OCLNGStackReg extends RegistrationAndTransformation
                         hessian[i][j] = hessian[j][i];
                 }
             }
-            return mse/area;
+            
+            /*
+             * Normalize the MSE by the area and the square of the scale. 
+             * The original implementation only normalized by area, 
+             * but this can lead to issues when the scale is very small 
+             * or very large. By also normalizing by the square of the scale, 
+             * we ensure that the MSE is comparable across different 
+             * scales and that the optimization is more stable.
+             */
+            //return mse/area;
+            final double jacobianNorm = Math.max(currentscale * currentscale, 1.0e-12);
+            return mse / (area * jacobianNorm);
         }
         
         //TODO: this function uses OpenCL kernels with a huge number of arguments which may fail.
@@ -4394,7 +4458,10 @@ public class OCLNGStackReg extends RegistrationAndTransformation
                         hessian[i][j] = hessian[j][i];
                 }
             }
-            return mse/area;
+            //return mse/area;
+            final double detA = Math.abs(currenta11 * currenta22 - currenta12 * currenta21);
+            final double jacobianNorm = Math.max(detA, 1.0e-12);
+            return mse / (area * jacobianNorm);
         }
         
         private double getTranslationMeanSquaresWithoutHessian(int pyramidIndex, double currentoffsetx, double curentoffsety)
@@ -4738,7 +4805,9 @@ public class OCLNGStackReg extends RegistrationAndTransformation
                 asyncQueue.putUnmapMemory(parallelSumReductionBuffers[1], buffer);
                 asyncQueue.finish();
             }
-            return mse/area;
+            //return mse / ((double)area);
+            final double jacobianNorm = Math.max(scale * scale, 1.0e-12);
+            return mse / (area * jacobianNorm);
         }
         
         private double getAffineMeanSquaresWithoutHessian(int pyramidIndex, double currentoffsetx, double curentoffsety,
@@ -4858,7 +4927,10 @@ public class OCLNGStackReg extends RegistrationAndTransformation
                 asyncQueue.putUnmapMemory(parallelSumReductionBuffers[1], buffer);
                 asyncQueue.finish();
             }
-            return mse/area;
+            //return mse/area;
+            final double detA = Math.abs(currenta11 * currenta22 - currenta12 * currenta21);
+            final double jacobianNorm = Math.max(detA, 1.0e-12);
+            return mse / (area * jacobianNorm);
         }
         
         private void constructSourceImagePyramid()

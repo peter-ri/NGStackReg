@@ -111,6 +111,7 @@ Ringel (2018) Mechanisms of delivery and mode of action of type VI secretion sys
 
 ## Release notes for version 0.2.0
 
+* Fixed the composition order for the combination of the local transformations into global transformations
 * Fixed boundary condition miscalculations of the interpolation indices of a number of OpenCL kernels (later refactored for single point of error)
 * Fixed a number of spelling and reference mistakes in the exported transformations
 * Fixed erroneous alignment mode changes when a GPU is not available

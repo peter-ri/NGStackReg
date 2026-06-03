@@ -3294,13 +3294,17 @@ public class HybridPrecisionNGStackReg extends RegistrationAndTransformation
                 }
                 StaticUtility.invertGauss(pseudoHessian);
                 update = StaticUtility.matrixMultiply(pseudoHessian, gradient);
-                currentscale = this.scale + update[0];
+                final double deltaKappa = update[0];
+                final double scaleFactor = Math.exp(deltaKappa);
+                currentscale = this.scale * scaleFactor;
                 currentangle = this.angle - update[1];
-                displacement = Math.sqrt(update[2] * update[2] + update[3] * update[3]) + 0.25 * Math.sqrt((double)(targetPyramid[pyramidIndex].width * targetPyramid[pyramidIndex].width) + (double)(targetPyramid[pyramidIndex].height * targetPyramid[pyramidIndex].height)) * (Math.abs(update[0]) + Math.abs(update[1]));
+                displacement = Math.sqrt(update[2] * update[2] + update[3] * update[3]) + 0.25 * Math.sqrt((double)(targetPyramid[pyramidIndex].width * targetPyramid[pyramidIndex].width) + (double)(targetPyramid[pyramidIndex].height * targetPyramid[pyramidIndex].height)) * (Math.abs(deltaKappa) + Math.abs(update[1]));
                 c = Math.cos(update[1]);
                 s = Math.sin(update[1]);
-                currentoffsetx = ((offsetx + update[2]) * c - (offsety + update[3]) * s) * (1.0 + update[0]);
-                currentoffsety = ((offsetx + update[2]) * s + (offsety + update[3]) * c) * (1.0 + update[0]);
+                final double trialTx = offsetx + update[2];
+                final double trialTy = offsety + update[3];
+                currentoffsetx = scaleFactor * (trialTx * c - trialTy * s);
+                currentoffsety = scaleFactor * (trialTx * s + trialTy * c);
                 meanSquares = getScaledRotationMeanSquares(pyramidIndex,currentoffsetx,currentoffsety,currentangle,currentscale);
 
                 iteration++;
@@ -3318,12 +3322,16 @@ public class HybridPrecisionNGStackReg extends RegistrationAndTransformation
             } while ((iteration < (10 * iterationPower - 1)) && (0.001 <= displacement));
             StaticUtility.invertGauss(hessian);
             update = StaticUtility.matrixMultiply(hessian, gradient);
-            currentscale = this.scale + update[0];
+            final double deltaKappa = update[0];
+            final double scaleFactor = Math.exp(deltaKappa);
+            currentscale = this.scale * scaleFactor;
             currentangle = this.angle - update[1];
             c = Math.cos(update[1]);
             s = Math.sin(update[1]);
-            currentoffsetx = ((offsetx + update[2]) * c - (offsety + update[3]) * s) * (1.0 + update[0]);
-            currentoffsety = ((offsetx + update[2]) * s + (offsety + update[3]) * c) * (1.0 + update[0]);
+            final double trialTx = offsetx + update[2];
+            final double trialTy = offsety + update[3];
+            currentoffsetx = scaleFactor * (trialTx * c - trialTy * s);
+            currentoffsety = scaleFactor * (trialTx * s + trialTy * c);
             meanSquares = getScaledRotationMeanSquaresWithoutHessian(pyramidIndex,currentoffsetx,currentoffsety,currentangle,currentscale);
             iteration++;
             if (meanSquares < bestMeanSquares) {
@@ -3469,18 +3477,20 @@ public class HybridPrecisionNGStackReg extends RegistrationAndTransformation
                         + 0.5 * (double)targetPyramid[pyramidIndex].height
                           * (Math.abs(update[1]) + Math.abs(update[3]));
 
-                /*
-                 * Affine parameter update: purely additive, positive sign.
-                 * Unlike rigid body where angle is SUBTRACTED and offsets are COMPOSED
-                 * through a rotation matrix, affine parameters form a vector space
-                 * and are simply incremented.
-                 */
-                currenta11    = this.a11    + update[0];
-                currenta12    = this.a12    + update[1];
-                currenta21    = this.a21    + update[2];
-                currenta22    = this.a22    + update[3];
-                currentoffsetx = this.offsetx + update[4];
-                currentoffsety = this.offsety + update[5];
+                final double b11 = 1.0 + update[0];
+                final double b12 = update[1];
+                final double b21 = update[2];
+                final double b22 = 1.0 + update[3];
+
+                currenta11 = b11 * this.a11 + b12 * this.a21;
+                currenta12 = b11 * this.a12 + b12 * this.a22;
+                currenta21 = b21 * this.a11 + b22 * this.a21;
+                currenta22 = b21 * this.a12 + b22 * this.a22;
+
+                final double trialTx = this.offsetx + update[4];
+                final double trialTy = this.offsety + update[5];
+                currentoffsetx = b11 * trialTx + b12 * trialTy;
+                currentoffsety = b21 * trialTx + b22 * trialTy;
 
                 /*
                  * Evaluate the MSE at the trial point. This also recomputes gradient
@@ -3528,12 +3538,20 @@ public class HybridPrecisionNGStackReg extends RegistrationAndTransformation
             StaticUtility.invertGauss(hessian);
             update = StaticUtility.matrixMultiply(hessian, gradient);
 
-            currenta11     = this.a11     + update[0];
-            currenta12     = this.a12     + update[1];
-            currenta21     = this.a21     + update[2];
-            currenta22     = this.a22     + update[3];
-            currentoffsetx = this.offsetx + update[4];
-            currentoffsety = this.offsety + update[5];
+            final double b11 = 1.0 + update[0];
+            final double b12 = update[1];
+            final double b21 = update[2];
+            final double b22 = 1.0 + update[3];
+
+            currenta11 = b11 * this.a11 + b12 * this.a21;
+            currenta12 = b11 * this.a12 + b12 * this.a22;
+            currenta21 = b21 * this.a11 + b22 * this.a21;
+            currenta22 = b21 * this.a12 + b22 * this.a22;
+
+            final double trialTx = this.offsetx + update[4];
+            final double trialTy = this.offsety + update[5];
+            currentoffsetx = b11 * trialTx + b12 * trialTy;
+            currentoffsety = b21 * trialTx + b22 * trialTy;
 
             meanSquares = getAffineMeanSquaresWithoutHessian(pyramidIndex, currentoffsetx, currentoffsety,
                                                               currenta11, currenta12, currenta21, currenta22);
@@ -3684,13 +3702,17 @@ public class HybridPrecisionNGStackReg extends RegistrationAndTransformation
                 }
                 StaticUtility.invertGauss(pseudoHessian);
                 update = StaticUtility.matrixMultiply(pseudoHessian, gradient);
-                currentscale = this.scale + update[0];
+                final double deltaKappa = update[0];
+                final double scaleFactor = Math.exp(deltaKappa);
+                currentscale = this.scale * scaleFactor;
                 currentangle = this.angle - update[1];
-                displacement = Math.sqrt(update[2] * update[2] + update[3] * update[3]) + 0.25 * Math.sqrt((double)(targetPyramid[0].width * targetPyramid[0].width) + (double)(targetPyramid[0].height * targetPyramid[0].height)) * (Math.abs(update[0]) + Math.abs(update[1]));
+                displacement = Math.sqrt(update[2] * update[2] + update[3] * update[3]) + 0.25 * Math.sqrt((double)(targetPyramid[0].width * targetPyramid[0].width) + (double)(targetPyramid[0].height * targetPyramid[0].height)) * (Math.abs(deltaKappa) + Math.abs(update[1]));
                 c = Math.cos(update[1]);
                 s = Math.sin(update[1]);
-                currentoffsetx = ((offsetx + update[2]) * c - (offsety + update[3]) * s) * (1.0 + update[0]);
-                currentoffsety = ((offsetx + update[2]) * s + (offsety + update[3]) * c) * (1.0 + update[0]);
+                final double trialTx = offsetx + update[2];
+                final double trialTy = offsety + update[3];
+                currentoffsetx = scaleFactor * (trialTx * c - trialTy * s);
+                currentoffsety = scaleFactor * (trialTx * s + trialTy * c);
                 meanSquares = doubleGetScaledRotationMeanSquares(currentoffsetx,currentoffsety,currentangle,currentscale);
 
                 iteration++;
@@ -3708,12 +3730,16 @@ public class HybridPrecisionNGStackReg extends RegistrationAndTransformation
             } while ((iteration < (10 * iterationPower - 1)) && (0.001 <= displacement));
             StaticUtility.invertGauss(hessian);
             update = StaticUtility.matrixMultiply(hessian, gradient);
-            currentscale = this.scale + update[0];
+            final double deltaKappa = update[0];
+            final double scaleFactor = Math.exp(deltaKappa);
+            currentscale = this.scale * scaleFactor;
             currentangle = this.angle - update[1];
             c = Math.cos(update[1]);
             s = Math.sin(update[1]);
-            currentoffsetx = ((offsetx + update[2]) * c - (offsety + update[3]) * s) * (1.0 + update[0]);
-            currentoffsety = ((offsetx + update[2]) * s + (offsety + update[3]) * c) * (1.0 + update[0]);
+            final double trialTx = offsetx + update[2];
+            final double trialTy = offsety + update[3];
+            currentoffsetx = scaleFactor * (trialTx * c - trialTy * s);
+            currentoffsety = scaleFactor * (trialTx * s + trialTy * c);
             meanSquares = doubleGetScaledRotationMeanSquaresWithoutHessian(currentoffsetx,currentoffsety,currentangle,currentscale);
             iteration++;
             if (meanSquares < bestMeanSquares) {
@@ -3724,76 +3750,6 @@ public class HybridPrecisionNGStackReg extends RegistrationAndTransformation
             }
         }
         
-        /*
-         * ========================================================================================
-         * inverseMarquardtLevenbergAffineOptimization
-         * ========================================================================================
-         *
-         * Paper reference: Thévenaz et al., "A Pyramid Approach to Subpixel Registration Based
-         * on Intensity," IEEE TIP 1998, Section III-A.
-         *
-         * This implements the modified Levenberg-Marquardt optimizer for affine registration.
-         *
-         * The affine transformation maps output pixel (n, i) to source coordinates:
-         *   x' = a11*n + a12*i + tx
-         *   y' = a21*n + a22*i + ty
-         *
-         * Parameter vector: p = (a11, a12, a21, a22, tx, ty), dimension = 6.
-         *
-         * At identity: a11=1, a12=0, a21=0, a22=1, tx=0, ty=0.
-         *
-         * The optimization minimizes E(p) = (1/|Ω|) Σ [f(x) - g(T_p(x))]²
-         * using the "inverse" approach where the Jacobian is built from the SOURCE image
-         * gradients ∇f, which remain constant across iterations. This avoids recomputing
-         * the Hessian when the parameters change, as described in Section III-A of the paper.
-         *
-         * LM damping: The pseudoHessian is constructed by copying ONLY the diagonal of the
-         * Gauss-Newton Hessian H, scaled by (1+λ):
-         *   pseudoH[k][k] = (1+λ) * H[k][k]
-         * with all off-diagonal entries left at zero. This reduces the damped step to:
-         *   δp_k = g_k / ((1+λ) * H_kk)
-         * which is an independent damped gradient descent along each parameter axis.
-         * This is a deliberate simplification inherited from the original TurboReg design:
-         * - Computationally cheaper: O(n) diagonal inversion instead of O(n³) full inversion.
-         * - More numerically stable: avoids ill-conditioning from off-diagonal coupling.
-         * - For large λ (far from optimum), LM reduces to gradient descent anyway.
-         * The full Hessian (with off-diagonals) is inverted only for the FINAL undamped
-         * Gauss-Newton step after the LM loop converges.
-         *
-         * Update signs: For affine, ALL parameters live in a vector space (unlike the SE(2)
-         * group for rigid body). The update is purely additive with POSITIVE sign:
-         *   a11_new = a11 + δa11
-         *   a12_new = a12 + δa12
-         *   ...
-         *   tx_new  = tx  + δtx
-         *   ty_new  = ty  + δty
-         *
-         * This is correct because:
-         * - The gradient g_k = Σ r_i * (∂f/∂p_k) points in the direction that increases
-         *   the dot product of residual with the Jacobian column.
-         * - The Gauss-Newton step δp = H⁻¹ g directly gives the parameter increment
-         *   that reduces the least-squares error.
-         * - Unlike rigid body (where the angle update requires a MINUS sign due to the
-         *   inverse/compositional convention and subsequent SE(2) group composition),
-         *   affine parameters are simply linear coefficients with no such group structure.
-         *
-         * Contrast with rigid body:
-         * - Rigid body: angle update is SUBTRACTED (currentangle = angle - update[0])
-         *   because the angle parameterizes a rotation group, and the "inverse" Jacobian
-         *   convention means the gradient points opposite to the forward rotation direction.
-         *   The offsets are then COMPOSED through the incremental rotation matrix.
-         * - Affine: all 6 parameters are ADDED directly. No group composition is needed.
-         *   The affine matrix entries (a11, a12, a21, a22) are dimensionless linear
-         *   coefficients, and (tx, ty) are translations — all updated additively.
-         *
-         * Displacement convergence criterion:
-         *   displacement = sqrt(δtx² + δty²)
-         *                + 0.25 * diagonal * (|δa11| + |δa12| + |δa21| + |δa22|)
-         * The matrix element updates are converted to approximate pixel displacements
-         * by multiplying by 0.25 × the image diagonal. This heuristic estimates the
-         * maximum pixel displacement caused by a small change in a matrix coefficient
-         * (analogous to the 0.25*diagonal*|δθ| term in rigid body).
-         */
         private void doubleInverseMarquardtLevenbergAffineOptimization()
         {
             double[] update = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0};
@@ -3859,18 +3815,20 @@ public class HybridPrecisionNGStackReg extends RegistrationAndTransformation
                         + 0.5 * (double)targetPyramid[0].height
                           * (Math.abs(update[1]) + Math.abs(update[3]));
 
-                /*
-                 * Affine parameter update: purely additive, positive sign.
-                 * Unlike rigid body where angle is SUBTRACTED and offsets are COMPOSED
-                 * through a rotation matrix, affine parameters form a vector space
-                 * and are simply incremented.
-                 */
-                currenta11    = this.a11    + update[0];
-                currenta12    = this.a12    + update[1];
-                currenta21    = this.a21    + update[2];
-                currenta22    = this.a22    + update[3];
-                currentoffsetx = this.offsetx + update[4];
-                currentoffsety = this.offsety + update[5];
+                final double b11 = 1.0 + update[0];
+                final double b12 = update[1];
+                final double b21 = update[2];
+                final double b22 = 1.0 + update[3];
+
+                currenta11 = b11 * this.a11 + b12 * this.a21;
+                currenta12 = b11 * this.a12 + b12 * this.a22;
+                currenta21 = b21 * this.a11 + b22 * this.a21;
+                currenta22 = b21 * this.a12 + b22 * this.a22;
+
+                final double trialTx = this.offsetx + update[4];
+                final double trialTy = this.offsety + update[5];
+                currentoffsetx = b11 * trialTx + b12 * trialTy;
+                currentoffsety = b21 * trialTx + b22 * trialTy;
 
                 /*
                  * Evaluate the MSE at the trial point. This also recomputes gradient
@@ -3918,12 +3876,20 @@ public class HybridPrecisionNGStackReg extends RegistrationAndTransformation
             StaticUtility.invertGauss(hessian);
             update = StaticUtility.matrixMultiply(hessian, gradient);
 
-            currenta11     = this.a11     + update[0];
-            currenta12     = this.a12     + update[1];
-            currenta21     = this.a21     + update[2];
-            currenta22     = this.a22     + update[3];
-            currentoffsetx = this.offsetx + update[4];
-            currentoffsety = this.offsety + update[5];
+            final double b11 = 1.0 + update[0];
+            final double b12 = update[1];
+            final double b21 = update[2];
+            final double b22 = 1.0 + update[3];
+
+            currenta11 = b11 * this.a11 + b12 * this.a21;
+            currenta12 = b11 * this.a12 + b12 * this.a22;
+            currenta21 = b21 * this.a11 + b22 * this.a21;
+            currenta22 = b21 * this.a12 + b22 * this.a22;
+
+            final double trialTx = this.offsetx + update[4];
+            final double trialTy = this.offsety + update[5];
+            currentoffsetx = b11 * trialTx + b12 * trialTy;
+            currentoffsety = b21 * trialTx + b22 * trialTy;
 
             meanSquares = doubleGetAffineMeanSquaresWithoutHessian(currentoffsetx, currentoffsety,
                                                               currenta11, currenta12, currenta21, currenta22);
@@ -3997,7 +3963,7 @@ public class HybridPrecisionNGStackReg extends RegistrationAndTransformation
                         .putNullArg(localWorkSize*4 /*size in bytes of local mem allocation*/)
                         .putArg((int)(sourcePyramid[pyramidIndex].width * sourcePyramid[pyramidIndex].height));
                 queue.put1DRangeKernel(uniformBSplineTransformProgramKernels[KERNEL_ftranslationSumInLocalMemoryCombined],0,globalWorkSize,localWorkSize);
-                uniformBSplineTransformProgramKernels[KERNEL_sumInLocalMemoryCombined].rewind();
+                uniformBSplineTransformProgramKernels[KERNEL_ftranslationSumInLocalMemoryCombined].rewind();
                 
                 buffer = queue.putMapBuffer(maskBuffer, CLMemory.Map.READ, 0, 4, true);
                 buffer.rewind();
@@ -4718,7 +4684,8 @@ public class HybridPrecisionNGStackReg extends RegistrationAndTransformation
                         hessian[i][j] = hessian[j][i];
                 }
             }
-            return mse/area;
+            final double jacobianNorm = Math.max(currentscale * currentscale, 1.0e-12);
+            return mse / (area * jacobianNorm);
         }
         
         private double getAffineMeanSquares(int pyramidIndex, double currentoffsetx, double curentoffsety,
@@ -5262,7 +5229,9 @@ public class HybridPrecisionNGStackReg extends RegistrationAndTransformation
                         hessian[i][j] = hessian[j][i];
                 }
             }
-            return mse/area;
+            final double detA = Math.abs(currenta11 * currenta22 - currenta12 * currenta21);
+            final double jacobianNorm = Math.max(detA, 1.0e-12);
+            return mse / (area * jacobianNorm);
         }
         
         
@@ -5963,10 +5932,10 @@ public class HybridPrecisionNGStackReg extends RegistrationAndTransformation
                     buffer.rewind();
                     area = (double)buffer.asDoubleBuffer().get();
                     queue.putUnmapMemory(maskBuffer, buffer);
-                    buffer = queue.putMapBuffer(entryImageBuffer, CLMemory.Map.READ, 0, 8, true);
+                    buffer = queue.putMapBuffer(doubleEntryImageBuffer, CLMemory.Map.READ, 0, 8, true);
                     buffer.rewind();
                     mse = (double)buffer.asDoubleBuffer().get();
-                    queue.putUnmapMemory(entryImageBuffer, buffer);
+                    queue.putUnmapMemory(doubleEntryImageBuffer, buffer);
                     buffer = queue.putMapBuffer(gradient0, CLMemory.Map.READ, 0, 8, true);
                     buffer.rewind();
                     gradient[0] = (double)buffer.asDoubleBuffer().get();
@@ -6122,10 +6091,10 @@ public class HybridPrecisionNGStackReg extends RegistrationAndTransformation
                     area = (double)buffer.asDoubleBuffer().get();
                     queue.putUnmapMemory(maskBuffer, buffer);
                     
-                    buffer = queue.putMapBuffer(entryImageBuffer, CLMemory.Map.READ, 0, 8, true);
+                    buffer = queue.putMapBuffer(doubleEntryImageBuffer, CLMemory.Map.READ, 0, 8, true);
                     buffer.rewind();
                     mse = (double)buffer.asDoubleBuffer().get();
-                    queue.putUnmapMemory(entryImageBuffer, buffer);
+                    queue.putUnmapMemory(doubleEntryImageBuffer, buffer);
                             
                     buffer = queue.putMapBuffer(gradient0, CLMemory.Map.READ, 0, 8, true);
                     buffer.rewind();
@@ -6243,7 +6212,8 @@ public class HybridPrecisionNGStackReg extends RegistrationAndTransformation
                             double diff = sourceImageDoubleSlice[nIndex] - s;
                             mse += diff * diff;
                             double theta = sourceyGradientDoubleSlice[nIndex] * (double)n - sourcexGradientDoubleSlice[nIndex] * (double)i;
-                            double j_scale = (((double)n) * sourcexGradientDoubleSlice[nIndex] + ((double)i) * sourceyGradientDoubleSlice[nIndex]); // scale contribution to j
+                            final double j_scale = (((double)n) * sourcexGradientDoubleSlice[nIndex] + ((double)i) * sourceyGradientDoubleSlice[nIndex]);
+                            final double j_logScale = currentscale * j_scale;
                             /*
                             TODO/FIXME/KNOWN ISSUE:
                             The following summation is MUCH worse than the parallel sum reduction done on the GPU, because (relatively speaking)
@@ -6251,14 +6221,14 @@ public class HybridPrecisionNGStackReg extends RegistrationAndTransformation
                             I ignore this like the original implementation, but this is one of many reasons why the GPU version and the CPU version
                             will never yield the same results!
                             */
-                            gradient[0] += diff * j_scale;
+                            gradient[0] += diff * j_logScale;
                             gradient[1] += diff * theta;
                             gradient[2] += diff * sourcexGradientDoubleSlice[nIndex];
                             gradient[3] += diff * sourceyGradientDoubleSlice[nIndex];
-                            hessian[0][0] += j_scale * j_scale;
-                            hessian[0][1] += j_scale * theta;
-                            hessian[0][2] += j_scale * sourcexGradientDoubleSlice[nIndex];
-                            hessian[0][3] += j_scale * sourceyGradientDoubleSlice[nIndex];
+                            hessian[0][0] += j_logScale * j_logScale;
+                            hessian[0][1] += j_logScale * theta;
+                            hessian[0][2] += j_logScale * sourcexGradientDoubleSlice[nIndex];
+                            hessian[0][3] += j_logScale * sourceyGradientDoubleSlice[nIndex];
                             hessian[1][1] += theta * theta;
                             hessian[1][2] += theta * sourcexGradientDoubleSlice[nIndex];
                             hessian[1][3] += theta * sourceyGradientDoubleSlice[nIndex];
@@ -6279,7 +6249,8 @@ public class HybridPrecisionNGStackReg extends RegistrationAndTransformation
                         hessian[i][j] = hessian[j][i];
                 }
             }
-            return mse/area;
+            final double jacobianNorm = Math.max(currentscale * currentscale, 1.0e-12);
+            return mse / (area * jacobianNorm);
         }
         
         private double doubleGetAffineMeanSquares(double currentoffsetx, double currentoffsety,
@@ -6361,7 +6332,7 @@ public class HybridPrecisionNGStackReg extends RegistrationAndTransformation
                     globalWorkSize = localWorkSize;
                     uniformBSplineTransformProgramKernels[KERNEL_daffineSumInLocalMemoryCombined]
                     		.putArg(maskBuffer)
-                            .putArg(entryImageBuffer)
+                            .putArg(doubleEntryImageBuffer)
                             .putArg(gradient0)
                             .putArg(gradient1)
                             .putArg(gradient2)
@@ -6394,16 +6365,16 @@ public class HybridPrecisionNGStackReg extends RegistrationAndTransformation
                     queue.put1DRangeKernel(uniformBSplineTransformProgramKernels[KERNEL_daffineSumInLocalMemoryCombined],0,globalWorkSize,localWorkSize);
                     uniformBSplineTransformProgramKernels[KERNEL_daffineSumInLocalMemoryCombined].rewind();
 
-                  //TODO: the implicit if's for float/double can be reduced by separating the cases into two blocks using a single if statement
+                   //TODO: the implicit if's for float/double can be reduced by separating the cases into two blocks using a single if statement
                     buffer = queue.putMapBuffer(maskBuffer, CLMemory.Map.READ, 0, 8, true);
                     buffer.rewind();
                     area = (double)buffer.asDoubleBuffer().get();
                     queue.putUnmapMemory(maskBuffer, buffer);
                     
-                    buffer = queue.putMapBuffer(entryImageBuffer, CLMemory.Map.READ, 0, 8, true);
+                    buffer = queue.putMapBuffer(doubleEntryImageBuffer, CLMemory.Map.READ, 0, 8, true);
                     buffer.rewind();
                     mse = (double)buffer.asDoubleBuffer().get();
-                    queue.putUnmapMemory(entryImageBuffer, buffer);
+                    queue.putUnmapMemory(doubleEntryImageBuffer, buffer);
                     
                     buffer = queue.putMapBuffer(gradient0, CLMemory.Map.READ, 0, 8, true);
                     buffer.rewind();
@@ -6579,7 +6550,7 @@ public class HybridPrecisionNGStackReg extends RegistrationAndTransformation
                             .putArg(hessian44)
                             .putArg(hessian45)
                             .putArg(hessian55)
-                            .putArg(entryImageBuffer)
+                            .putArg(doubleEntryImageBuffer)
                             .putArg(maskBuffer);
 
 
@@ -6640,7 +6611,7 @@ public class HybridPrecisionNGStackReg extends RegistrationAndTransformation
                     globalWorkSize = localWorkSize;
                     uniformBSplineTransformProgramKernels[KERNEL_daffineSumInLocalMemoryCombined]
                     		.putArg(maskBuffer)
-                            .putArg(entryImageBuffer)
+                            .putArg(doubleEntryImageBuffer)
                             .putArg(gradient0)
                             .putArg(gradient1)
                             .putArg(gradient2)
@@ -6678,10 +6649,10 @@ public class HybridPrecisionNGStackReg extends RegistrationAndTransformation
                     area = (double)buffer.asDoubleBuffer().get();
                     queue.putUnmapMemory(maskBuffer, buffer);
                     
-                    buffer = queue.putMapBuffer(entryImageBuffer, CLMemory.Map.READ, 0, 8, true);
+                    buffer = queue.putMapBuffer(doubleEntryImageBuffer, CLMemory.Map.READ, 0, 8, true);
                     buffer.rewind();
                     mse = (double)buffer.asDoubleBuffer().get();
-                    queue.putUnmapMemory(entryImageBuffer, buffer);
+                    queue.putUnmapMemory(doubleEntryImageBuffer, buffer);
                             
                     buffer = queue.putMapBuffer(gradient0, CLMemory.Map.READ, 0, 8, true);
                     buffer.rewind();
@@ -6968,7 +6939,9 @@ public class HybridPrecisionNGStackReg extends RegistrationAndTransformation
                         hessian[i][j] = hessian[j][i];
                 }
             }
-            return mse/area;
+            final double detA = Math.abs(currenta11 * currenta22 - currenta12 * currenta21);
+            final double jacobianNorm = Math.max(detA, 1.0e-12);
+            return mse / (area * jacobianNorm);
         }
         
         private double doubleGetTranslationMeanSquaresWithoutHessian(double currentoffsetx, double currentoffsety)
@@ -7028,11 +7001,11 @@ public class HybridPrecisionNGStackReg extends RegistrationAndTransformation
                     asyncQueue.finish();
                     buffer = asyncQueue.putMapBuffer(maskBuffer, CLMemory.Map.READ, 0, 8, true);
                     buffer.rewind();
-                    area = (double)buffer.asFloatBuffer().get();
+                    area = (double)buffer.asDoubleBuffer().get();
                     asyncQueue.putUnmapMemory(maskBuffer, buffer);
                     buffer = asyncQueue.putMapBuffer(doubleEntryImageBuffer, CLMemory.Map.READ, 0, 8, true);
                     buffer.rewind();
-                    mse = (double)buffer.asFloatBuffer().get();
+                    mse = (double)buffer.asDoubleBuffer().get();
                     asyncQueue.putUnmapMemory(doubleEntryImageBuffer, buffer);
                     asyncQueue.finish();
                 }
@@ -7085,11 +7058,11 @@ public class HybridPrecisionNGStackReg extends RegistrationAndTransformation
                     // Download data
                     buffer = asyncQueue.putMapBuffer(parallelSumReductionBuffers[0], CLMemory.Map.READ, 0, 8, true);
                     buffer.rewind();
-                    area = (double)buffer.asFloatBuffer().get();
+                    area = (double)buffer.asDoubleBuffer().get();
                     asyncQueue.putUnmapMemory(parallelSumReductionBuffers[0], buffer);
                     buffer = asyncQueue.putMapBuffer(parallelSumReductionBuffers[1], CLMemory.Map.READ, 0, 8, true);
                     buffer.rewind();
-                    mse = (double)buffer.asFloatBuffer().get();
+                    mse = (double)buffer.asDoubleBuffer().get();
                     asyncQueue.putUnmapMemory(parallelSumReductionBuffers[1], buffer);
                     asyncQueue.finish();
                 }
@@ -7198,11 +7171,11 @@ public class HybridPrecisionNGStackReg extends RegistrationAndTransformation
                     asyncQueue.finish();
                     buffer = asyncQueue.putMapBuffer(maskBuffer, CLMemory.Map.READ, 0, 8, true);
                     buffer.rewind();
-                    area = (double)buffer.asFloatBuffer().get();
+                    area = (double)buffer.asDoubleBuffer().get();
                     asyncQueue.putUnmapMemory(maskBuffer, buffer);
                     buffer = asyncQueue.putMapBuffer(doubleEntryImageBuffer, CLMemory.Map.READ, 0, 8, true);
                     buffer.rewind();
-                    mse = (double)buffer.asFloatBuffer().get();
+                    mse = (double)buffer.asDoubleBuffer().get();
                     asyncQueue.putUnmapMemory(doubleEntryImageBuffer, buffer);
                     asyncQueue.finish();
                 }
@@ -7241,11 +7214,11 @@ public class HybridPrecisionNGStackReg extends RegistrationAndTransformation
                     // Download data
                     buffer = asyncQueue.putMapBuffer(parallelSumReductionBuffers[0], CLMemory.Map.READ, 0, 8, true);
                     buffer.rewind();
-                    area = (double)buffer.asFloatBuffer().get();
+                    area = (double)buffer.asDoubleBuffer().get();
                     asyncQueue.putUnmapMemory(parallelSumReductionBuffers[0], buffer);
                     buffer = asyncQueue.putMapBuffer(parallelSumReductionBuffers[1], CLMemory.Map.READ, 0, 8, true);
                     buffer.rewind();
-                    mse = (double)buffer.asFloatBuffer().get();
+                    mse = (double)buffer.asDoubleBuffer().get();
                     asyncQueue.putUnmapMemory(parallelSumReductionBuffers[1], buffer);
                     asyncQueue.finish();
                 }
@@ -7359,11 +7332,11 @@ public class HybridPrecisionNGStackReg extends RegistrationAndTransformation
                     asyncQueue.finish();
                     buffer = asyncQueue.putMapBuffer(maskBuffer, CLMemory.Map.READ, 0, 8, true);
                     buffer.rewind();
-                    area = (double)buffer.asFloatBuffer().get();
+                    area = (double)buffer.asDoubleBuffer().get();
                     asyncQueue.putUnmapMemory(maskBuffer, buffer);
                     buffer = asyncQueue.putMapBuffer(doubleEntryImageBuffer, CLMemory.Map.READ, 0, 8, true);
                     buffer.rewind();
-                    mse = (double)buffer.asFloatBuffer().get();
+                    mse = (double)buffer.asDoubleBuffer().get();
                     asyncQueue.putUnmapMemory(doubleEntryImageBuffer, buffer);
                     asyncQueue.finish();
                 }
@@ -7402,11 +7375,11 @@ public class HybridPrecisionNGStackReg extends RegistrationAndTransformation
                     // Download data
                     buffer = asyncQueue.putMapBuffer(parallelSumReductionBuffers[0], CLMemory.Map.READ, 0, 8, true);
                     buffer.rewind();
-                    area = (double)buffer.asFloatBuffer().get();
+                    area = (double)buffer.asDoubleBuffer().get();
                     asyncQueue.putUnmapMemory(parallelSumReductionBuffers[0], buffer);
                     buffer = asyncQueue.putMapBuffer(parallelSumReductionBuffers[1], CLMemory.Map.READ, 0, 8, true);
                     buffer.rewind();
-                    mse = (double)buffer.asFloatBuffer().get();
+                    mse = (double)buffer.asDoubleBuffer().get();
                     asyncQueue.putUnmapMemory(parallelSumReductionBuffers[1], buffer);
                     asyncQueue.finish();
                 }
@@ -7463,7 +7436,8 @@ public class HybridPrecisionNGStackReg extends RegistrationAndTransformation
                 }
                 area = (double)larea;
             }
-            return mse/area;
+            final double jacobianNorm = Math.max(currentscale * currentscale, 1.0e-12);
+            return mse / (area * jacobianNorm);
         }
         
         private double doubleGetAffineMeanSquaresWithoutHessian(double currentoffsetx, double currentoffsety,
@@ -7523,11 +7497,11 @@ public class HybridPrecisionNGStackReg extends RegistrationAndTransformation
                     asyncQueue.finish();
                     buffer = asyncQueue.putMapBuffer(maskBuffer, CLMemory.Map.READ, 0, 8, true);
                     buffer.rewind();
-                    area = (double)buffer.asFloatBuffer().get();
+                    area = (double)buffer.asDoubleBuffer().get();
                     asyncQueue.putUnmapMemory(maskBuffer, buffer);
                     buffer = asyncQueue.putMapBuffer(doubleEntryImageBuffer, CLMemory.Map.READ, 0, 8, true);
                     buffer.rewind();
-                    mse = (double)buffer.asFloatBuffer().get();
+                    mse = (double)buffer.asDoubleBuffer().get();
                     asyncQueue.putUnmapMemory(doubleEntryImageBuffer, buffer);
                     asyncQueue.finish();
                 }
@@ -7566,11 +7540,11 @@ public class HybridPrecisionNGStackReg extends RegistrationAndTransformation
                     // Download data
                     buffer = asyncQueue.putMapBuffer(parallelSumReductionBuffers[0], CLMemory.Map.READ, 0, 8, true);
                     buffer.rewind();
-                    area = (double)buffer.asFloatBuffer().get();
+                    area = (double)buffer.asDoubleBuffer().get();
                     asyncQueue.putUnmapMemory(parallelSumReductionBuffers[0], buffer);
                     buffer = asyncQueue.putMapBuffer(parallelSumReductionBuffers[1], CLMemory.Map.READ, 0, 8, true);
                     buffer.rewind();
-                    mse = (double)buffer.asFloatBuffer().get();
+                    mse = (double)buffer.asDoubleBuffer().get();
                     asyncQueue.putUnmapMemory(parallelSumReductionBuffers[1], buffer);
                     asyncQueue.finish();
                 }
@@ -7629,7 +7603,9 @@ public class HybridPrecisionNGStackReg extends RegistrationAndTransformation
                 }
                 area = (double)larea;
             }
-            return mse/area;
+            final double detA = Math.abs(currenta11 * currenta22 - currenta12 * currenta21);
+            final double jacobianNorm = Math.max(detA, 1.0e-12);
+            return mse / (area * jacobianNorm);
         }
         
         private double getTranslationMeanSquaresWithoutHessian(int pyramidIndex, double currentoffsetx, double curentoffsety)
@@ -7963,7 +7939,8 @@ public class HybridPrecisionNGStackReg extends RegistrationAndTransformation
                 asyncQueue.putUnmapMemory(parallelSumReductionBuffers[1], buffer);
                 asyncQueue.finish();
             }
-            return mse/area;
+            final double jacobianNorm = Math.max(currentscale * currentscale, 1.0e-12);
+            return mse / (area * jacobianNorm);
         }
         
         private double getAffineMeanSquaresWithoutHessian(int pyramidIndex, double currentoffsetx, double currentoffsety,
@@ -8072,7 +8049,9 @@ public class HybridPrecisionNGStackReg extends RegistrationAndTransformation
                 asyncQueue.putUnmapMemory(parallelSumReductionBuffers[1], buffer);
                 asyncQueue.finish();
             }
-            return mse/area;
+            final double detA = Math.abs(currenta11 * currenta22 - currenta12 * currenta21);
+            final double jacobianNorm = Math.max(detA, 1.0e-12);
+            return mse / (area * jacobianNorm);
         }
         
         private void constructSourceImagePyramid()
