@@ -215,7 +215,9 @@ public class SharedContext extends AbstractSharedContext {
                         for(int i = initializers[0];i < transformationExtents[0];i++)
                         {
                             transformations[j][k][i].invert();
-                            transformations[j][k][i].transformWith(transformations[j-previous[2]][k-previous[1]][i-previous[0]]);
+                            final Transformation composed = transformations[j-previous[2]][k-previous[1]][i-previous[0]].copy();
+                            composed.transformWith(transformations[j][k][i]);
+                            transformations[j][k][i] = composed;
                         }
                     }
                 }
@@ -230,7 +232,9 @@ public class SharedContext extends AbstractSharedContext {
                         for(int i = initializers[0];i < transformationExtents[0];i++)
                         {
                             transformations[j][k][i].invert();
-                            transformations[j][k][i].transformWith(transformations[j-previous[2]][k-previous[1]][i-previous[0]]);
+                            final Transformation composed = transformations[j-previous[2]][k-previous[1]][i-previous[0]].copy();
+                            composed.transformWith(transformations[j][k][i]);
+                            transformations[j][k][i] = composed;
                         }
                     }
                 }
@@ -246,7 +250,9 @@ public class SharedContext extends AbstractSharedContext {
                         for(int i = initializers[0];i >= 0;i--)
                         {
                             transformations[j][k][i].invert();
-                            transformations[j][k][i].transformWith(transformations[j+previous[2]][k+previous[1]][i+previous[0]]);
+                            final Transformation composed = transformations[j+previous[2]][k+previous[1]][i+previous[0]].copy();
+                            composed.transformWith(transformations[j][k][i]);
+                            transformations[j][k][i] = composed;
                         }
                     }
                 }
