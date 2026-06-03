@@ -1633,8 +1633,8 @@ public class HybridPrecisionNGStackReg extends RegistrationAndTransformation
             uniformBSplineTransformProgramKernels[KERNEL_BasicToCardinal2DXhp] = uniformBSplineTransformProgram.createCLKernel("BasicToCardinal2DXhp");
             uniformBSplineTransformProgramKernels[KERNEL_BasicToCardinal2DYhp] = uniformBSplineTransformProgram.createCLKernel("BasicToCardinal2DYhp");
             uniformBSplineTransformProgramKernels[KERNEL_CubicBSplinePrefilter2DDeg7premulhp] = uniformBSplineTransformProgram.createCLKernel("CubicBSplinePrefilter2DDeg7premulhp");
-            uniformBSplineTransformProgramKernels[KERNEL_CubicBSplinePrefilter2DXDeg7lp] = uniformBSplineTransformProgram.createCLKernel("fCubicBSplinePrefilter2DXDeg7lp");
-            uniformBSplineTransformProgramKernels[KERNEL_CubicBSplinePrefilter2DYDeg7lp] = uniformBSplineTransformProgram.createCLKernel("fCubicBSplinePrefilter2DYDeg7lp");
+                uniformBSplineTransformProgramKernels[KERNEL_CubicBSplinePrefilter2DXDeg7lp] = uniformBSplineTransformProgram.createCLKernel("CubicBSplinePrefilter2DXDeg7hp");
+                uniformBSplineTransformProgramKernels[KERNEL_CubicBSplinePrefilter2DYDeg7lp] = uniformBSplineTransformProgram.createCLKernel("CubicBSplinePrefilter2DYDeg7hp");
             uniformBSplineTransformProgramKernels[KERNEL_BasicToCardinal2DXhpDeg7] = uniformBSplineTransformProgram.createCLKernel("BasicToCardinal2DXhpDeg7");
             uniformBSplineTransformProgramKernels[KERNEL_BasicToCardinal2DYhpDeg7] = uniformBSplineTransformProgram.createCLKernel("BasicToCardinal2DYhpDeg7");
             uniformBSplineTransformProgramKernels[KERNEL_reduceDual1DX] = uniformBSplineTransformProgram.createCLKernel("reduceDual1DX");

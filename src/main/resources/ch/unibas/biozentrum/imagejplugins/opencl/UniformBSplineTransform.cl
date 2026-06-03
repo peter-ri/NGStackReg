@@ -471,7 +471,7 @@ __kernel void CubicBSplinePrefilter2DDeg7premulhp(__global FPT *image /* in glob
     }
 }
 
-#if defined(HYBRID) && !defined(USE_DOUBLE)
+#if 0
 //low precision variant with horizon for float precision (faster) based on 10.1093/comjnl/bxq086
 __kernel void fCubicBSplinePrefilter2DXDeg7lp(__global float *image, const int width, const int height)
 {
@@ -664,7 +664,7 @@ __kernel void CubicBSplinePrefilter2DXDeg7hp(__global FPT *image /* in global sp
 }
 #endif
 
-#if defined(HYBRID) && !defined(USE_DOUBLE)
+#if 0
 //low precision variant with horizon for float precision (faster) based on 10.1093/comjnl/bxq086
 __kernel void fCubicBSplinePrefilter2DYDeg7lp(__global float *image, const int width, const int height)
 {
