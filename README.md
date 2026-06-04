@@ -40,6 +40,12 @@ Unser et al. ([1993a](http://dx.doi.org/10.1109/78.193220), [1993b](http://dx.do
 in the laboratory of [Prof. Basler](https://www.biozentrum.unibas.ch/research/research-groups/research-groups-a-z/overview/unit/research-group-marek-basler) 
 at the Biozentrum of the University of Basel [(Ringel, 2018)](https://doi.org/10.5451/unibas-006805400).
 
+**NOTE:** In the new version 0.2.0 the image registration modes scaled rotation and affine have been added,
+however, these modes use a different parametrization than [TurboReg](http://bigwww.epfl.ch/thevenaz/turboreg/).
+While [TurboReg](http://bigwww.epfl.ch/thevenaz/turboreg/) uses a three reference point method for both scaled rotation 
+and affine transformations, NGStackReg only uses direct parametrization. This changes the optimization criterion
+landscape and normalization significantly as well as the Jacobians and displacement approximation. Thus it is not expected to yield the same results as [TurboReg](http://bigwww.epfl.ch/thevenaz/turboreg/). In fact, the optimization problem may be less well conditioned compared to the reference point method but this is the current implementation.
+
 The plugin allows selection of the channel, Z or time axis as the alignment axis. The currently selected 
 stack position is used as the alignment reference. In case an image in the center of 
 the stack is of particular interest, just select it and everything will be aligned to it. The transformations 
@@ -73,24 +79,24 @@ CPU as plain Java and for GPUs in OpenCL. Both implementations support double-pr
 Double precision is only used for images of type double or long/unsigned long. For other 
 datatypes the hybrid precision mode is used. In hybrid precision mode the image pyramids, coefficient pyramids 
 and all other required helper structures (such as the derivative pyramids) are calculated in single precision 
-floating point, because this is much faster on GPUs and requires less memory. This also enabled the use of 
-certain optimizations described by [Ruijters et al. (2012)](https://doi.org/10.1093/comjnl/bxq086). The results 
+floating point, because this is much faster on GPUs and requires less memory. The results 
 from the single precision stage are then used as optimal initial parameters for the final stage of the hybrid 
 precision mode, which uses double precision floating point numbers to reduce the errors as much as possible. 
 For cases where single precision floating point numbers are sufficiently accurate, there is a GPU single 
 precision only mode. For normal imaging with \<= 16 bits this mode is usually sufficient and quite fast. Although 
-the plugin was designed to run registration in parallel on both GPUs and CPUs for optimal 
+the plugin was designed to run registrations in parallel on both GPUs and CPUs for optimal 
 performance, it turns out that cross-synchronization and resource bottlenecks often make this approach slower 
-than the GPU only modes. Note that because of certain platform specific implementations (such as the cascaded 
+than the GPU only modes. Note: due to certain platform specific implementations (such as the cascaded 
 parallel tree sum reduction) the CPU and the GPU code will never produce exactly the same results. In case a 
 more reproducible registration is required it should be restricted to only CPU or only GPU.
-Please note that the number of cores in modern CPUs has increased significantly since the inception 
-of this project. Because the implementation will use all available cores when using one of the CPU 
+
+**CAVEAT:** Please note that the number of cores in modern CPUs has increased significantly since the inception 
+of this project. Because the implementation will use all available cores, when using one of the CPU 
 alignment modes, this may lead to memory exhaustion and render the system inoperable. This happens 
 because all of the buffers (such as derivative and B-spline coefficient pyramids) are allocated per core. 
 In a future version the available memory may be taken into account.
 
-Because the optimization criterion is minimization of the global MSQE, the software typically yields the best results 
+Because the optimization criterion is minimization of the normalized global MSQE, the software typically yields the best results 
 for Z-stacks or time series with small distances or timesteps respectively. In case the background contains
 features which could dominate the error function, the optimization will not yield satisfactory results.
 
@@ -120,9 +126,10 @@ Ringel (2018) Mechanisms of delivery and mode of action of type VI secretion sys
 * Added canvas resizing as an option. This resizes the canvas of the aligned images such that the entire aligned stack fits into the canvas. This is especially useful for large rotations and shearing transformations.
 * Added SPIR-V (64-bit) IL compiled binaries for the OpenCL programs to speed up the kernel loading and compilation time.
 * Refactored OpenCL code to reduce some of the code duplication
+* In the hybrid GPU mode switched from the faster horizon limited OpenCL kernels fCubicBSplinePrefilter2DXDeg7lp and fCubicBSplinePrefilter2DYDeg7lp to the full high precision implementation due to problems with the initialization of the parameters (see InitCausalCoeff in the paper by [(Ruijters et al., 2012)](https://doi.org/10.1093/comjnl/bxq086)).
 * Changed the OpenCL code to make explicit use of vectorized operations:
     - using dedicated vector and scalar math functions (dot, fma) to accelerate and consolidate some calculations (in part this also optimized some of the memory access)
-* Refactored the Java code to reduce some of the code duplication and to make it more modular and maintainable. This also included a refactor of the transformation export code to make it more robust and easier to extend in the future.
+* Refactored the Java code to reduce some of the code duplication and to make it more modular and maintainable. This also included a refactor of the transformation export code to make it more robust and easier to extend in the future. However, due to the development in steps and initial design choices there is still a large amount of code duplication which could be consolidated.
 
 ## Known limitations
 

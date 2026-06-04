@@ -445,6 +445,9 @@ public class SharedContextZT extends AbstractSharedContext {
             //we don't have to use the reference frame as initial position. Furthermore, the transformations array is in reverse
             //order of significance transformations[1][T][Z] and the previous T transform transformations[1][T][1]
             //or transformations[T][Z][1] and the previous T transform transformations[T][1][1]
+            initializers[0] = 0;
+            initializers[1] = 0;
+            initializers[2] = 0;
             if(transformationsT.length > 1)
             {
             	for(int j = initializers[2];j < transformationExtents[2];j++)

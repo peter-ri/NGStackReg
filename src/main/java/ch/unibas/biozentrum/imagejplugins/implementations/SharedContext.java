@@ -926,6 +926,7 @@ public class SharedContext extends AbstractSharedContext {
 	                                    finishedTransformations = true;
 	                                    return true;
 	                                }
+                                    break;
 	                            case 1:
 	                                // Done
 	                                finishedTransformations = true;
@@ -978,6 +979,7 @@ public class SharedContext extends AbstractSharedContext {
 	                                    finishedTransformations = true;
 	                                    return true;
 	                                }
+                                    break;
 	                            case 1:
 	                                // Possibly next level
 	                                if(currentPosition.getIntPosition(axisID+1) < currentPosition.dimension(axisID+1) - 1)
@@ -1002,6 +1004,7 @@ public class SharedContext extends AbstractSharedContext {
 	                                    finishedTransformations = true;
 	                                    return true;
 	                                }
+                                    break;
 	                            case 2:
 	                                // Done
 	                                finishedTransformations = true;
