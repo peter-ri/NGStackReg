@@ -19,8 +19,13 @@
 package ch.unibas.biozentrum.imagejplugins;
 
 import com.jogamp.opencl.CLPlatform;
-
+//import static org.jocl.CL.*;
+//import org.jocl.CL;
+//import org.jocl.cl_context_properties;
+//import org.jocl.cl_device_id;
+//import org.jocl.cl_platform_id;
 import org.scijava.command.Command;
+import org.scijava.display.DisplayService;
 import org.scijava.log.LogService;
 import org.scijava.plugin.Parameter;
 import org.scijava.plugin.Plugin;
@@ -41,12 +46,14 @@ import java.io.IOException;
 import java.io.PrintWriter;
 
 import net.imagej.Dataset;
+import net.imagej.DatasetService;
 import net.imagej.Extents;
 import net.imagej.ImgPlus;
 import net.imagej.Position;
 import net.imagej.axis.DefaultLinearAxis;
 import net.imagej.display.DataView;
 import net.imglib2.img.cell.CellImg;
+import net.imglib2.img.display.imagej.ImageJFunctions;
 import net.imglib2.img.planar.PlanarImg;
 import net.imglib2.type.numeric.integer.ByteType;
 import net.imglib2.type.numeric.integer.IntType;
@@ -60,6 +67,7 @@ import net.imglib2.type.numeric.real.DoubleType;
 import net.imglib2.type.numeric.real.FloatType;
 import org.apache.commons.lang3.SystemUtils;
 
+
 //TODO: not tested in headless mode
 
 /**
@@ -68,9 +76,10 @@ import org.apache.commons.lang3.SystemUtils;
  *
  */
 
-@Plugin(type = Command.class, headless = true, menuPath="Plugins>Registration>NGStackReg")
+@Plugin(type = Command.class, headless = true, menuPath="Plugins>Registration>NGStackReg>NGStackReg")
 public class NGStackReg implements Command
 {
+	final static boolean debug = false;
     public static final int MIN_SIZE = 24;
     public enum TransformationType
     {
@@ -92,13 +101,19 @@ public class NGStackReg implements Command
     @Parameter
     private LogService logService;
     @Parameter
+    private DatasetService datasetService;
+    @Parameter
+    private DisplayService displayService; //Not sure if this will interfere with the headless API
+    @Parameter
     private StatusService statusService;
-    @Parameter(label="Transformation:", choices={"Translation", "Rigid Body"/*,"Scaled Rotation","Affine"*/}) //The remaining options are not implemented yet
+    @Parameter(label="Transformation:", choices={"Translation", "Rigid Body", "Scaled Rotation","Affine"})
     private String sTransformationType;
     @Parameter(label="Alignment axis:", choices={"C","Z","T","Z -> T"})
     private String sAlignmentAxis;
     @Parameter(label="Alignment mode:", choices= {"GPU + CPU (hybrid prec.)", "GPU (hybrid prec.)", "CPU (hybrid prec.)", "CPU (double prec.)", "GPU (single prec.)", "GPU + CPU (double prec.)", "GPU (double prec.)"})
     private String alignmentMode;
+    @Parameter(label="Resize:")
+    private boolean resizeAfterRegistration;
     @Parameter(label="Save transformations to:", required = false)
     private File transformationOutput;
     @Parameter(persist = false)
@@ -152,24 +167,25 @@ public class NGStackReg implements Command
 	        switch(alignmentMode)
 	        {
 	            case "GPU + CPU (hybrid prec.)":
-	            	alignmentMode = "CPU";
+	            	alignmentMode = "CPU (hybrid prec.)";
 	                break;
 	            case "GPU (hybrid prec.)":
-	            	alignmentMode = "CPU";
+	            	alignmentMode = "CPU (hybrid prec.)";
 	                break;
 	            case "CPU (hybrid prec.)":
 	                break;
 	            case "CPU (double prec.)":
 	                break;
 	            case "GPU (single prec.)":
-	            	alignmentMode = "CPU";
+	            	//alignmentMode = "CPU"; // this would break in the next switch statement
+	            	alignmentMode = "CPU (hybrid prec.)";
 	                break;
 	            case "GPU + CPU (double prec.)":
-	            	alignmentMode = "CPU";
+	            	alignmentMode = "CPU (double prec.)";
 	            	forceDoublePrecisionRepr = true;
 	            	break;
 	            case "GPU (double prec.)":
-	            	alignmentMode = "CPU";
+	            	alignmentMode = "CPU (double prec.)";
 	            	forceDoublePrecisionRepr = true;
 	            	break;
 	            default:
@@ -222,7 +238,10 @@ public class NGStackReg implements Command
                 logService.error("The alignment mode is not supported");
                 return;
         }
-        
+        long startTime;
+        if(debug) {
+        	startTime = System.nanoTime();
+        }
         //Now populate the information structures to start the job
         img = dataset.getImgPlus();
         if((!(img.getImg() instanceof PlanarImg)) && (!(img.getImg() instanceof CellImg)))
@@ -326,12 +345,10 @@ public class NGStackReg implements Command
                 break;
             case "Scaled Rotation":
                 transformationType = TransformationType.SCALEDROTATION;
-                logService.error("Sorry currently only RIGIDBODY is supported.");
-                return;
+                break;
             case "Affine":
                 transformationType = TransformationType.AFFINE;
-                logService.error("Sorry currently only RIGIDBODY is supported.");
-                return;
+                break;
             default:
                 logService.error("No such transformation type is supported");
                 return;
@@ -496,11 +513,11 @@ public class NGStackReg implements Command
         {
         	if(alignmentAxis != AlignmentAxisType.ZANDT)
         	{
-        		sharedContext = new SharedContext(transformationType, img,currentPos,axisIndex,forceDoublePrecisionRepr,logService,statusService);        		
+        		sharedContext = new SharedContext(transformationType, img, currentPos, axisIndex, forceDoublePrecisionRepr, resizeAfterRegistration, logService, statusService);        		
         	}
         	else
         	{
-        		sharedContext = new SharedContextZT(transformationType, img,currentPos, axisIndex, taxis, forceDoublePrecisionRepr,logService,statusService);
+        		sharedContext = new SharedContextZT(transformationType, img, currentPos, axisIndex, taxis, forceDoublePrecisionRepr, resizeAfterRegistration, logService, statusService);
         	}
             if(img.dimension(axisIndex+2) > 1)
             {
@@ -578,6 +595,27 @@ public class NGStackReg implements Command
             }
             
         }
+        if(resizeAfterRegistration)
+        {
+        	if(dview != null)
+            {
+        		//ImageJFunctions.show(sharedContext.getResizedImgPlus());
+        		Dataset dset = datasetService.create(sharedContext.getResizedImgPlus());
+        		displayService.createDisplay(dset);
+            }
+        	else
+        	{
+        		//TODO: Not sure if this helps
+        		datasetService.create(sharedContext.getResizedImgPlus());
+        	}
+        	//
+        	//dataset.setImgPlus(sharedContext.getResizedImgPlus());
+        	//dataset.update();
+        }
+        if(debug) {
+        	long duration = System.nanoTime() - startTime;
+        	logService.error("Time: " + duration);
+        }
         statusService.clearStatus();
         dataset.update();
         //Now save the transformations if necessary
@@ -617,6 +655,58 @@ public class NGStackReg implements Command
         // will not be used.
         try
         {
+        	/*
+        	 * TODO: move to JOCL.org instead of JogAmp JOCL
+        	 * 
+        	
+        	{
+        	 
+	        	final int platformIndex = 0;
+	            final long deviceType = CL_DEVICE_TYPE_GPU;
+	            final int deviceIndex = 0;
+	        	CL.setExceptionsEnabled(true);
+	        	// Obtain the number of platforms
+	            int numPlatformsArray[] = new int[1];
+	            clGetPlatformIDs(0, null, numPlatformsArray);
+	            int numPlatforms = numPlatformsArray[0];
+	            if(debug) 
+	        	{
+	        		logService.info(numPlatforms + " OpenCL platforms detected.");
+	        	}
+	
+	            // Obtain a platform ID
+	            cl_platform_id platforms[] = new cl_platform_id[numPlatforms];
+	            clGetPlatformIDs(platforms.length, platforms, null);
+	            if(debug) 
+	        	{
+	            	for(cl_platform_id p: platforms)
+					{
+						logService.info("Platform ID" + p);
+					}
+	        	}
+	            cl_platform_id platform = platforms[platformIndex];
+	
+	            // Initialize the context properties
+	            cl_context_properties contextProperties = new cl_context_properties();
+	            contextProperties.addProperty(CL_CONTEXT_PLATFORM, platform);
+	            if(debug)
+	            {
+	            	logService.info("Context properties: " + contextProperties);
+					logService.info("Platform: " + platform);
+					logService.info("Device type: " + deviceType);
+	            }
+	            
+	            // Obtain the number of devices for the platform
+	            int numDevicesArray[] = new int[1];
+	            clGetDeviceIDs(platform, deviceType, 0, null, numDevicesArray);
+	            int numDevices = numDevicesArray[0];
+	            
+	            // Obtain a device ID 
+	            cl_device_id devices[] = new cl_device_id[numDevices];
+	            clGetDeviceIDs(platform, deviceType, numDevices, devices, null);
+	            cl_device_id device = devices[deviceIndex];
+        	}
+        	*/
             if(!CLPlatform.isAvailable())
             {
                 return false;
@@ -629,10 +719,19 @@ public class NGStackReg implements Command
                 {
                     if(d.getType() == CLDevice.Type.GPU)
                     {
+                    	if(debug) 
+                    	{
+                    		logService.info(d);
+                    		logService.info(d.getPreferredFloatVectorWidth());
+                    	}
                         if(useFloatGPUOnly == false || forceDoublePrecisionRepr == true)
                         {
                             if(d.isDoubleFPAvailable() == true)
                             {
+                            	if(debug)
+                            	{
+                            		logService.info(d.getPreferredDoubleVectorWidth());
+                            	}
                                 return true;
                             }
                         }

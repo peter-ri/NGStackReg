@@ -20,6 +20,8 @@ package ch.unibas.biozentrum.imagejplugins.abstracts;
 
 import org.json.JSONObject;
 
+import ch.unibas.biozentrum.imagejplugins.util.Square;
+
 /**
  * @author Peter D. Ringel
  * @version 1.0.0
@@ -30,4 +32,7 @@ public interface Transformation {
     public void invert();
     public JSONObject serialize();
     public Transformation copy();
+    public Square transform(Square square);
+    //Translate in output space!
+    public void translate(final double offsetx, final double offsety);
 }

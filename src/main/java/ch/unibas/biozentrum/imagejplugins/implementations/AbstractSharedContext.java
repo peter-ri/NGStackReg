@@ -22,7 +22,9 @@ import java.io.PrintWriter;
 import java.util.concurrent.CyclicBarrier;
 
 import ch.unibas.biozentrum.imagejplugins.NGStackReg;
+import ch.unibas.biozentrum.imagejplugins.util.Square;
 import net.imagej.ImgPlus;
+import net.imglib2.img.ImgFactory;
 
 /*
  * Must be in this package, because methods cannot be internal to another package
@@ -35,17 +37,38 @@ import net.imagej.ImgPlus;
  */
 public abstract class AbstractSharedContext
 {
-	NGStackReg.TransformationType transformationType;
+    NGStackReg.TransformationType transformationType;
     @SuppressWarnings("rawtypes")
-	ImgPlus img;
+    ImgPlus img;
+    @SuppressWarnings("rawtypes")
+    ImgPlus resizedTargetImage;
     CyclicBarrier workerSynchronizationBarrier = null;
     int nrOfGPUDevices = 0;//used later to determine the number of GPU feeding cores (yes the GPUs are hungry)
     boolean forceDoublePrecisionRepr;
     boolean finishedTransformations;//This will be used to stop the image transformation infinite loops so don't mess around with the variable
+    boolean resizeAfterRegistration;
+    int heightAfterResize;
+    int widthAfterResize;
     
-	public abstract int getNrOfGPUDevices();
-	abstract void addParties(int participants);
-	abstract boolean getNextAlignmentTarget(final SharedContextAlignmentTarget target);
-	abstract boolean getTransformationForCurrentPosition(final SharedContextAlignmentTarget target);
-	public abstract void serializeTransformations(final PrintWriter out);
+    abstract public int getNrOfGPUDevices();
+    abstract void addParties(int participants);
+    abstract boolean getNextAlignmentTarget(final SharedContextAlignmentTarget target);
+    abstract boolean getTransformationForCurrentPosition(final SharedContextAlignmentTarget target);
+    abstract public void serializeTransformations(final PrintWriter out);
+    int getHeightAfterResize()
+    {
+    	return heightAfterResize;
+    }
+    int getWidthAfterResize()
+    {
+    	return widthAfterResize;
+    }
+    boolean getResizeAfterRegistration()
+    {
+    	return resizeAfterRegistration;
+    }
+    public ImgPlus getResizedImgPlus()
+    {
+    	return resizedTargetImage;
+    }
 }

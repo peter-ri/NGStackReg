@@ -20,9 +20,13 @@ package ch.unibas.biozentrum.imagejplugins.implementations;
 
 import ch.unibas.biozentrum.imagejplugins.abstracts.CPUAligner;
 import ch.unibas.biozentrum.imagejplugins.abstracts.ImageConverter;
+import ch.unibas.biozentrum.imagejplugins.util.AffineTransformation;
 import ch.unibas.biozentrum.imagejplugins.util.RigidBodyTransformation;
+import ch.unibas.biozentrum.imagejplugins.util.ScaledRotationTransformation;
 import ch.unibas.biozentrum.imagejplugins.util.TranslationTransformation;
 import ch.unibas.biozentrum.imagejplugins.util.StaticUtility;
+
+import java.util.Arrays;
 import java.util.concurrent.BrokenBarrierException;
 
 /**
@@ -65,6 +69,11 @@ public class HybridPrecisionCPUAligner extends CPUAligner {
     private double offsetx = 0.0;
     private double offsety = 0.0;
     private double angle = 0.0;
+    private double scale = 1.0;
+    private double a11 = 1.0;
+    private double a12 = 0.0;
+    private double a21 = 0.0;
+    private double a22 = 1.0;
     private final double[][] hessian;
     private final float[][] fhessian;
     private final double[][] pseudoHessian;
@@ -72,10 +81,6 @@ public class HybridPrecisionCPUAligner extends CPUAligner {
     private final float[] fgradient;
     private final int[] xInterpolationIndices;
     private final int[] yInterpolationIndices;
-    private final double[] xWeights;
-    private final double[] yWeights;
-    private final float[] fxWeights;
-    private final float[] fyWeights;
     private int iterationPower;
 
     private FloatMTNGSourcePyramidSlice[] sourcePyramid;
@@ -97,10 +102,6 @@ public class HybridPrecisionCPUAligner extends CPUAligner {
     HybridPrecisionCPUAligner(final AbstractSharedContext sharedContext, final ImageConverter converter,
             final int pyramidDepth) {
         super(sharedContext, converter, pyramidDepth);
-        this.xWeights = new double[] { 0.0, 0.0, 0.0, 0.0 };
-        this.yWeights = new double[] { 0.0, 0.0, 0.0, 0.0 };
-        this.fxWeights = new float[] { 0.0f, 0.0f, 0.0f, 0.0f };
-        this.fyWeights = new float[] { 0.0f, 0.0f, 0.0f, 0.0f };
         this.xInterpolationIndices = new int[] { 0, 0, 0, 0 };
         this.yInterpolationIndices = new int[] { 0, 0, 0, 0 };
         
@@ -113,8 +114,26 @@ public class HybridPrecisionCPUAligner extends CPUAligner {
             this.pseudoHessian = new double[][]{{0.0,0.0}, {0.0,0.0}};
             break;
         case RIGIDBODY:
+            this.gradient = new double[]{0.0, 0.0, 0.0};
+            this.fgradient = new float[] { 0.0f, 0.0f, 0.0f };
+            this.hessian = new double[][]{{0.0,0.0,0.0}, {0.0,0.0,0.0}, {0.0,0.0,0.0}};
+            this.fhessian = new float[][] { { 0.0f, 0.0f, 0.0f }, { 0.0f, 0.0f, 0.0f }, { 0.0f, 0.0f, 0.0f } };
+            this.pseudoHessian = new double[][]{{0.0,0.0,0.0}, {0.0,0.0,0.0}, {0.0,0.0,0.0}};
+            break;
         case SCALEDROTATION:
+            this.gradient = new double[]{0.0, 0.0, 0.0, 0.0};
+            this.fgradient = new float[] { 0.0f, 0.0f, 0.0f, 0.0f };
+            this.hessian = new double[][]{{0.0,0.0,0.0,0.0}, {0.0,0.0,0.0,0.0}, {0.0,0.0,0.0,0.0}, {0.0,0.0,0.0,0.0}};
+            this.fhessian = new float[][] { { 0.0f, 0.0f, 0.0f, 0.0f }, { 0.0f, 0.0f, 0.0f, 0.0f }, { 0.0f, 0.0f, 0.0f, 0.0f }, { 0.0f, 0.0f, 0.0f, 0.0f } };
+            this.pseudoHessian = new double[][]{{0.0,0.0,0.0,0.0}, {0.0,0.0,0.0,0.0}, {0.0,0.0,0.0,0.0}, {0.0,0.0,0.0,0.0}};
+            break;
         case AFFINE:
+            this.gradient = new double[]{0.0, 0.0, 0.0, 0.0, 0.0, 0.0};
+            this.fgradient = new float[] { 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f };
+            this.hessian = new double[][]{{0.0,0.0,0.0,0.0,0.0,0.0}, {0.0,0.0,0.0,0.0,0.0,0.0}, {0.0,0.0,0.0,0.0,0.0,0.0}, {0.0,0.0,0.0,0.0,0.0,0.0}, {0.0,0.0,0.0,0.0,0.0,0.0}, {0.0,0.0,0.0,0.0,0.0,0.0}};
+            this.fhessian = new float[][] { { 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f }, { 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f }, { 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f }, { 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f }, { 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f }, { 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f } };
+            this.pseudoHessian = new double[][]{{0.0,0.0,0.0,0.0,0.0,0.0}, {0.0,0.0,0.0,0.0,0.0,0.0}, {0.0,0.0,0.0,0.0,0.0,0.0}, {0.0,0.0,0.0,0.0,0.0,0.0}, {0.0,0.0,0.0,0.0,0.0,0.0}, {0.0,0.0,0.0,0.0,0.0,0.0}};
+            break;
         default:
             this.gradient = new double[]{0.0, 0.0, 0.0};
             this.fgradient = new float[] { 0.0f, 0.0f, 0.0f };
@@ -130,6 +149,9 @@ public class HybridPrecisionCPUAligner extends CPUAligner {
     private void allocateMemory() {
         long width = sharedContext.img.dimension(0);
         long height = sharedContext.img.dimension(1);
+        if (width * height > Integer.MAX_VALUE) {
+            throw new RuntimeException("Cannot allocate more than " + Integer.MAX_VALUE);
+        }
         sourcePyramid = new FloatMTNGSourcePyramidSlice[pyramidDepth];
         targetPyramid = new FloatMTNGTargetPyramidSlice[pyramidDepth];
         entryImageBuffers = new float[(int) (width * height)];
@@ -140,9 +162,6 @@ public class HybridPrecisionCPUAligner extends CPUAligner {
         doubleSourceyGradient = new double[(int) (width * height)];
         doubleTargetCoefficients = new double[(int) (width * height)];
         doublefullSizedHelperBuffer2 = new double[(int) (width * height)];
-        if (width * height > Integer.MAX_VALUE) {
-            throw new RuntimeException("Cannot allocate more than " + Integer.MAX_VALUE);
-        }
         for (int j = 0; j < pyramidDepth; j++) {
             sourcePyramid[j] = new FloatMTNGSourcePyramidSlice();
             targetPyramid[j] = new FloatMTNGTargetPyramidSlice();
@@ -158,6 +177,29 @@ public class HybridPrecisionCPUAligner extends CPUAligner {
             height /= 2;
         }
     }
+    
+    private void resizeAllocatedBuffers() {
+        long width = sharedContext.resizedTargetImage.dimension(0);
+        long height = sharedContext.resizedTargetImage.dimension(1);
+        if (width * height > Integer.MAX_VALUE) {
+            throw new RuntimeException("Cannot allocate more than " + Integer.MAX_VALUE);
+        }
+        for (int j = 0; j < pyramidDepth; j++) {
+            sourcePyramid[j].Image = null;
+            sourcePyramid[j].xGradient = null;
+            sourcePyramid[j].yGradient = null;
+            targetPyramid[j].Coefficient = null;
+        }
+        sourcePyramid = null;
+        targetPyramid = null;
+        entryImageBuffers = null;
+        fullSizedHelperBuffer = null;
+        doubleSourceImage = null;
+        doubleSourcexGradient = null;
+        doubleSourceyGradient = null;
+        doubleTargetCoefficients = null;
+        doublefullSizedHelperBuffer2 = new double[(int) (width * height)];
+    }
 
     @Override
     public void run() {
@@ -172,22 +214,44 @@ public class HybridPrecisionCPUAligner extends CPUAligner {
             case TRANSLATION:
                 ((TranslationTransformation)scat.transformation).offsetx = offsetx;
                 ((TranslationTransformation)scat.transformation).offsety = offsety;
+                // Don't forget to reset the transformation values for the next image
+                offsetx = 0.0;
+                offsety = 0.0;
                 break;
             case RIGIDBODY:
                 ((RigidBodyTransformation) scat.transformation).angle = angle;
                 ((RigidBodyTransformation) scat.transformation).offsetx = offsetx;
                 ((RigidBodyTransformation) scat.transformation).offsety = offsety;
+                // Don't forget to reset the transformation values for the next image
+                offsetx = 0.0;
+                offsety = 0.0;
+                angle = 0.0;
                 break;
             case SCALEDROTATION:
+                ((ScaledRotationTransformation)scat.transformation).angle = angle;
+                ((ScaledRotationTransformation)scat.transformation).scale = scale;
+                ((ScaledRotationTransformation)scat.transformation).offsetx = offsetx;
+                ((ScaledRotationTransformation)scat.transformation).offsety = offsety;
+                // reset the transformation values for the next image
+                offsetx = 0.0;
+                offsety = 0.0;
+                angle = 0.0;
+                scale = 1.0;
                 break;
             case AFFINE:
+                ((AffineTransformation)scat.transformation).a11 = a11;
+                ((AffineTransformation)scat.transformation).a12 = a12;
+                ((AffineTransformation)scat.transformation).a21 = a21;
+                ((AffineTransformation)scat.transformation).a22 = a22;
+                ((AffineTransformation)scat.transformation).offsetx = offsetx;
+                ((AffineTransformation)scat.transformation).offsety = offsety;
+                // reset the transformation values for the next image
+                offsetx = 0.0;
+                offsety = 0.0;
+                a11 = a22 = 1.0;
+                a12 = a21 = 0.0;
                 break;
             }
-
-            // Don't forget to reset the transformation values for the next image
-            offsetx = 0.0;
-            offsety = 0.0;
-            angle = 0.0;
         }
         try {
             // Done calculating the transformations now wait until all threads are done
@@ -212,22 +276,45 @@ public class HybridPrecisionCPUAligner extends CPUAligner {
                 case TRANSLATION:
                     ((TranslationTransformation)scat.transformation).offsetx = offsetx;
                     ((TranslationTransformation)scat.transformation).offsety = offsety;
+                    // reset the transformation values for the next image
+                    offsetx = 0.0;
+                    offsety = 0.0;
+                    angle = 0.0;
                     break;
                 case RIGIDBODY:
-                    ((RigidBodyTransformation) scat.transformation).angle = angle;
-                    ((RigidBodyTransformation) scat.transformation).offsetx = offsetx;
-                    ((RigidBodyTransformation) scat.transformation).offsety = offsety;
+                    ((RigidBodyTransformation)scat.transformation).angle = angle;
+                    ((RigidBodyTransformation)scat.transformation).offsetx = offsetx;
+                    ((RigidBodyTransformation)scat.transformation).offsety = offsety;
+                    // reset the transformation values for the next image
+                    offsetx = 0.0;
+                    offsety = 0.0;
+                    angle = 0.0;
                     break;
                 case SCALEDROTATION:
+                    ((ScaledRotationTransformation)scat.transformation).angle = angle;
+                    ((ScaledRotationTransformation)scat.transformation).scale = scale;
+                    ((ScaledRotationTransformation)scat.transformation).offsetx = offsetx;
+                    ((ScaledRotationTransformation)scat.transformation).offsety = offsety;
+                    // reset the transformation values for the next image
+                    offsetx = 0.0;
+                    offsety = 0.0;
+                    angle = 0.0;
+                    scale = 1.0;
                     break;
                 case AFFINE:
+                    ((AffineTransformation)scat.transformation).a11 = a11;
+                    ((AffineTransformation)scat.transformation).a12 = a12;
+                    ((AffineTransformation)scat.transformation).a21 = a21;
+                    ((AffineTransformation)scat.transformation).a22 = a22;
+                    ((AffineTransformation)scat.transformation).offsetx = offsetx;
+                    ((AffineTransformation)scat.transformation).offsety = offsety;
+                    // reset the transformation values for the next image
+                    offsetx = 0.0;
+                    offsety = 0.0;
+                    a11 = a22 = 1.0;
+                    a12 = a21 = 0.0;
                     break;
                 }
-
-                // Don't forget to reset the transformation values for the next image
-                offsetx = 0.0;
-                offsety = 0.0;
-                angle = 0.0;
             }
             try {
                 // Done calculating the transformations now wait until all threads are done
@@ -239,36 +326,79 @@ public class HybridPrecisionCPUAligner extends CPUAligner {
                 throw new RuntimeException("Worker synchronization barrier is broken.");
             }
         }
-        // The following code requires the current position to have been reset to a 0vector
-        while (!sharedContext.getTransformationForCurrentPosition(scat)) {
-            int width = (int) sharedContext.img.dimension(0);
-            int height = (int) sharedContext.img.dimension(1);
-            converter.convertTo(scat.targetArray, doublefullSizedHelperBuffer);
-            // pre-multiply the image for cubic spline interpolation
-            PlainJavaCPUAligner.premultiplyCubicBSpline(doublefullSizedHelperBuffer, width * height);
-            // Conversion to B-spline coefficients along X axis
-            PlainJavaCPUAligner.cubicBSplinePrefilter2DXhp(doublefullSizedHelperBuffer, width, height);
-            // pre-multiply again
-            PlainJavaCPUAligner.premultiplyCubicBSpline(doublefullSizedHelperBuffer, width * height);
-            // Now along the Y-axis
-            PlainJavaCPUAligner.cubicBSplinePrefilter2DYhp(doublefullSizedHelperBuffer, width, height);
-            switch (sharedContext.transformationType) {
-            case TRANSLATION:
-                transformTranslateImageWithBsplineInterpolation(width, height, ((TranslationTransformation) scat.transformation).offsetx,
-                        ((TranslationTransformation) scat.transformation).offsety);
-                break;
-            case RIGIDBODY:
-                transformImageWithBsplineInterpolation(width, height, ((RigidBodyTransformation) scat.transformation).offsetx,
-                        ((RigidBodyTransformation) scat.transformation).offsety,
-                        ((RigidBodyTransformation) scat.transformation).angle);
-                break;
-            case SCALEDROTATION:
-                break;
-            case AFFINE:
-                break;
+        
+        if(sharedContext.getResizeAfterRegistration())
+        {
+            resizeAllocatedBuffers();
+            // The following code requires the current position to have been reset to a 0vector
+            while (!sharedContext.getTransformationForCurrentPosition(scat)) {
+                int width = (int) sharedContext.img.dimension(0);
+                int height = (int) sharedContext.img.dimension(1);
+                converter.convertTo(scat.targetArray, doublefullSizedHelperBuffer);
+                // pre-multiply the image for cubic spline interpolation
+                PlainJavaCPUAligner.premultiplyCubicBSpline(doublefullSizedHelperBuffer, width * height);
+                // Conversion to B-spline coefficients along X axis
+                PlainJavaCPUAligner.cubicBSplinePrefilter2DXhp(doublefullSizedHelperBuffer, width, height);
+                // pre-multiply again
+                PlainJavaCPUAligner.premultiplyCubicBSpline(doublefullSizedHelperBuffer, width * height);
+                // Now along the Y-axis
+                PlainJavaCPUAligner.cubicBSplinePrefilter2DYhp(doublefullSizedHelperBuffer, width, height);
+                switch (sharedContext.transformationType) {
+                    case TRANSLATION:
+                        resizeTransformTranslateImageWithBsplineInterpolation(width, height, (int) sharedContext.resizedTargetImage.dimension(0), (int) sharedContext.resizedTargetImage.dimension(1), ((TranslationTransformation) scat.transformation).offsetx,
+                                ((TranslationTransformation) scat.transformation).offsety);
+                        break;
+                    case RIGIDBODY:
+                        resizeTransformImageWithBsplineInterpolation(width, height, (int) sharedContext.resizedTargetImage.dimension(0), (int) sharedContext.resizedTargetImage.dimension(1), ((RigidBodyTransformation) scat.transformation).offsetx,
+                                ((RigidBodyTransformation) scat.transformation).offsety,
+                                ((RigidBodyTransformation) scat.transformation).angle);
+                        break;
+                    case SCALEDROTATION:
+                        resizeScaledRotationImageWithBsplineInterpolation(width, height, (int)sharedContext.resizedTargetImage.dimension(0), (int)sharedContext.resizedTargetImage.dimension(1), ((ScaledRotationTransformation)scat.transformation).offsetx, ((ScaledRotationTransformation)scat.transformation).offsety, ((ScaledRotationTransformation)scat.transformation).angle, ((ScaledRotationTransformation)scat.transformation).scale);
+                        break;
+                    case AFFINE:
+                        resizeAffineImageWithBsplineInterpolation(width, height, (int)sharedContext.resizedTargetImage.dimension(0), (int)sharedContext.resizedTargetImage.dimension(1), ((AffineTransformation)scat.transformation).offsetx, ((AffineTransformation)scat.transformation).offsety, ((AffineTransformation)scat.transformation).a11, ((AffineTransformation)scat.transformation).a12, ((AffineTransformation)scat.transformation).a21, ((AffineTransformation)scat.transformation).a22);
+                        break;
+                }
+                converter.deConvertTo(doublefullSizedHelperBuffer2, scat.sourceArray);
             }
-            converter.deConvertTo(doublefullSizedHelperBuffer2, scat.targetArray);
         }
+        else
+        {
+            // The following code requires the current position to have been reset to a 0vector
+            while (!sharedContext.getTransformationForCurrentPosition(scat)) {
+                int width = (int) sharedContext.img.dimension(0);
+                int height = (int) sharedContext.img.dimension(1);
+                converter.convertTo(scat.targetArray, doublefullSizedHelperBuffer);
+                // pre-multiply the image for cubic spline interpolation
+                PlainJavaCPUAligner.premultiplyCubicBSpline(doublefullSizedHelperBuffer, width * height);
+                // Conversion to B-spline coefficients along X axis
+                PlainJavaCPUAligner.cubicBSplinePrefilter2DXhp(doublefullSizedHelperBuffer, width, height);
+                // pre-multiply again
+                PlainJavaCPUAligner.premultiplyCubicBSpline(doublefullSizedHelperBuffer, width * height);
+                // Now along the Y-axis
+                PlainJavaCPUAligner.cubicBSplinePrefilter2DYhp(doublefullSizedHelperBuffer, width, height);
+                switch (sharedContext.transformationType) {
+                case TRANSLATION:
+                    transformTranslateImageWithBsplineInterpolation(width, height, ((TranslationTransformation) scat.transformation).offsetx,
+                            ((TranslationTransformation) scat.transformation).offsety);
+                    break;
+                case RIGIDBODY:
+                    transformImageWithBsplineInterpolation(width, height, ((RigidBodyTransformation) scat.transformation).offsetx,
+                            ((RigidBodyTransformation) scat.transformation).offsety,
+                            ((RigidBodyTransformation) scat.transformation).angle);
+                    break;
+                case SCALEDROTATION:
+                    transformScaledRotationWithBsplineInterpolation(width,height, ((ScaledRotationTransformation)scat.transformation).offsetx, ((ScaledRotationTransformation)scat.transformation).offsety, ((ScaledRotationTransformation)scat.transformation).angle, ((ScaledRotationTransformation)scat.transformation).scale);
+                    break;
+                case AFFINE:
+                    transformAffineWithBsplineInterpolation(width,height, ((AffineTransformation)scat.transformation).offsetx, ((AffineTransformation)scat.transformation).offsety, ((AffineTransformation)scat.transformation).a11, ((AffineTransformation)scat.transformation).a12, ((AffineTransformation)scat.transformation).a21, ((AffineTransformation)scat.transformation).a22);
+                    break;
+                }
+                converter.deConvertTo(doublefullSizedHelperBuffer2, scat.targetArray);
+            }
+        }
+        
     }
     
     private void transformTranslateImageWithBsplineInterpolation(final int width, final int height, double currentoffsetx,
@@ -280,14 +410,8 @@ public class HybridPrecisionCPUAligner extends CPUAligner {
         int doubleWidth = width * 2;
         int doubleHeight = height * 2;
         int nIndex = 0;
-        int p;
-        int q;
-        int tmpindex;
-        double s;
         double coordx;
-        double rescoordx;
         double coordy;
-        double rescoordy;
         int mskx;
         int msky;
         for (int i = 0; i < height; i++) {
@@ -299,56 +423,45 @@ public class HybridPrecisionCPUAligner extends CPUAligner {
                 mskx = (int) Math.round(coordx);
                 msky = (int) Math.round(coordy);
                 if ((mskx >= 0) && (mskx < width) && (msky >= 0) && (msky < height)) {
-                    // Calculate X-interpolation indices
-                    p = (coordx >= 0) ? (((int) coordx) + 2) : (((int) coordx) + 1);
-                    for (int c = 0; c < 4; c++, p--) {
-                        q = (p < 0) ? (-1 - p) : p;
-                        if (q >= doubleWidth) {
-                            q -= (doubleWidth) * (q / (doubleWidth)); // Warning this is an integer division it doesn't
-                                                                      // yield q
-                        }
-                        xInterpolationIndices[c] = q >= width ? (doubleWidth - 1 - q) : q;
-                    }
-                    // calculate Y-interpolation indices
-                    p = (coordy >= 0) ? (((int) coordy) + 2) : (((int) coordy) + 1);
-                    for (int c = 0; c < 4; c++, p--) {
-                        q = (p < 0) ? (-1 - p) : p;
-                        if (q >= doubleHeight) {
-                            q -= (doubleHeight) * (q / (doubleHeight)); // Warning this is an integer division it
-                                                                        // doesn't yield q
-                        }
-                        // calculate linearized coordinates of the coefficient array
-                        yInterpolationIndices[c] = q >= height ? (doubleHeight - 1 - q) * width : q * width;
-                    }
-                    // get the residuals of the coordinates
-                    rescoordx = coordx - (coordx >= 0.0 ? ((double) ((int) coordx)) : ((double) (((int) coordx) - 1)));
-                    rescoordy = coordy - (coordy >= 0.0 ? ((double) ((int) coordy)) : ((double) (((int) coordy) - 1)));
-                    // calculate the X-weights
-                    s = 1.0 - rescoordx;
-                    xWeights[3] = Math.pow(s, 3.0) / 6.0;
-                    s = rescoordx * rescoordx;
-                    xWeights[2] = (2.0 / 3.0) - 0.5 * s * (2.0 - rescoordx);
-                    xWeights[0] = s * rescoordx / 6.0;
-                    xWeights[1] = 1.0 - xWeights[0] - xWeights[2] - xWeights[3];
-                    // calculate the Y-weights
-                    s = 1.0 - rescoordy;
-                    yWeights[3] = Math.pow(s, 3.0) / 6.0;
-                    s = rescoordy * rescoordy;
-                    yWeights[2] = (2.0 / 3.0) - 0.5 * s * (2.0 - rescoordy);
-                    yWeights[0] = s * rescoordy / 6.0;
-                    yWeights[1] = 1.0 - yWeights[0] - yWeights[2] - yWeights[3];
-
-                    // calculate the interpolated value from the target coefficients
-                    s = 0.0;
-                    for (int y = 0; y < 4; y++) {
-                        rescoordx = 0.0;// To avoid using too many variables this one will be repurposed
-                        tmpindex = yInterpolationIndices[y];
-                        for (int x = 0; x < 4; x++) {
-                            rescoordx += xWeights[x] * doublefullSizedHelperBuffer[tmpindex + xInterpolationIndices[x]];
-                        }
-                        s += yWeights[y] * rescoordx;
-                    }
-                    doublefullSizedHelperBuffer2[nIndex] = s;
+                    PlainJavaCPUAligner.computeXInterpolationIndices(coordx, doubleWidth, width, xInterpolationIndices);
+                    PlainJavaCPUAligner.computeYInterpolationIndices(coordy, doubleHeight, height, width, yInterpolationIndices);
+                    
+                    doublefullSizedHelperBuffer2[nIndex] = PlainJavaCPUAligner.interpolateCubicBSpline(PlainJavaCPUAligner.getFractional(coordx), PlainJavaCPUAligner.getFractional(coordy), xInterpolationIndices, yInterpolationIndices, doublefullSizedHelperBuffer);
+                } else {
+                    doublefullSizedHelperBuffer2[nIndex] = 0.0;
+                }
+                // now walk along the X-vector direction
+                coordx += 1.0;
+            }
+        }
+    }
+    
+    private void resizeTransformTranslateImageWithBsplineInterpolation(final int width, final int height, final int targetwidth, final int targetheight, double currentoffsetx,
+            double currentoffsety) {
+        /*
+         * Requires the coefficients to be in entryImageBuffers and the output will be
+         * in fullSizedHelperBuffer
+         */
+        int doubleWidth = width * 2;
+        int doubleHeight = height * 2;
+        int nIndex = 0;
+        double coordx;
+        double coordy;
+        int mskx;
+        int msky;
+        for (int i = 0; i < targetheight; i++) {
+            // First walk along the Y-vector direction and reset the X-position (otherwise the
+            // y position is initially correct and then lagging behind by one all the time)
+            coordx = currentoffsetx;
+            coordy = currentoffsety + ((double) i);
+            for (int n = 0; n < targetwidth; n++, nIndex++) {
+                mskx = (int) Math.round(coordx);
+                msky = (int) Math.round(coordy);
+                if ((mskx >= 0) && (mskx < width) && (msky >= 0) && (msky < height)) {
+                	PlainJavaCPUAligner.computeXInterpolationIndices(coordx, doubleWidth, width, xInterpolationIndices);
+                    PlainJavaCPUAligner.computeYInterpolationIndices(coordy, doubleHeight, height, width, yInterpolationIndices);
+                    
+                    doublefullSizedHelperBuffer2[nIndex] = PlainJavaCPUAligner.interpolateCubicBSpline(PlainJavaCPUAligner.getFractional(coordx), PlainJavaCPUAligner.getFractional(coordy), xInterpolationIndices, yInterpolationIndices, doublefullSizedHelperBuffer);
                 } else {
                     doublefullSizedHelperBuffer2[nIndex] = 0.0;
                 }
@@ -367,18 +480,12 @@ public class HybridPrecisionCPUAligner extends CPUAligner {
         int doubleWidth = width * 2;
         int doubleHeight = height * 2;
         int nIndex = 0;
-        int p;
-        int q;
-        int tmpindex;
-        double s;
         double xvecx = Math.cos(currentangle);
         double xvecy = -Math.sin(currentangle);
         double yvecx = -xvecy;
         double yvecy = xvecx;
         double coordx;
-        double rescoordx;
         double coordy;
-        double rescoordy;
         int mskx;
         int msky;
         for (int i = 0; i < height; i++) {
@@ -390,56 +497,10 @@ public class HybridPrecisionCPUAligner extends CPUAligner {
                 mskx = (int) Math.round(coordx);
                 msky = (int) Math.round(coordy);
                 if ((mskx >= 0) && (mskx < width) && (msky >= 0) && (msky < height)) {
-                    // Calculate X-interpolation indices
-                    p = (coordx >= 0) ? (((int) coordx) + 2) : (((int) coordx) + 1);
-                    for (int c = 0; c < 4; c++, p--) {
-                        q = (p < 0) ? (-1 - p) : p;
-                        if (q >= doubleWidth) {
-                            q -= (doubleWidth) * (q / (doubleWidth)); // Warning this is an integer division it doesn't
-                                                                      // yield q
-                        }
-                        xInterpolationIndices[c] = q >= width ? (doubleWidth - 1 - q) : q;
-                    }
-                    // calculate Y-interpolation indices
-                    p = (coordy >= 0) ? (((int) coordy) + 2) : (((int) coordy) + 1);
-                    for (int c = 0; c < 4; c++, p--) {
-                        q = (p < 0) ? (-1 - p) : p;
-                        if (q >= doubleHeight) {
-                            q -= (doubleHeight) * (q / (doubleHeight)); // Warning this is an integer division it
-                                                                        // doesn't yield q
-                        }
-                        // calculate linearized coordinates of the coefficient array
-                        yInterpolationIndices[c] = q >= height ? (doubleHeight - 1 - q) * width : q * width;
-                    }
-                    // get the residuals of the coordinates
-                    rescoordx = coordx - (coordx >= 0.0 ? ((double) ((int) coordx)) : ((double) (((int) coordx) - 1)));
-                    rescoordy = coordy - (coordy >= 0.0 ? ((double) ((int) coordy)) : ((double) (((int) coordy) - 1)));
-                    // calculate the X-weights
-                    s = 1.0 - rescoordx;
-                    xWeights[3] = Math.pow(s, 3.0) / 6.0;
-                    s = rescoordx * rescoordx;
-                    xWeights[2] = (2.0 / 3.0) - 0.5 * s * (2.0 - rescoordx);
-                    xWeights[0] = s * rescoordx / 6.0;
-                    xWeights[1] = 1.0 - xWeights[0] - xWeights[2] - xWeights[3];
-                    // calculate the Y-weights
-                    s = 1.0 - rescoordy;
-                    yWeights[3] = Math.pow(s, 3.0) / 6.0;
-                    s = rescoordy * rescoordy;
-                    yWeights[2] = (2.0 / 3.0) - 0.5 * s * (2.0 - rescoordy);
-                    yWeights[0] = s * rescoordy / 6.0;
-                    yWeights[1] = 1.0 - yWeights[0] - yWeights[2] - yWeights[3];
-
-                    // calculate the interpolated value from the target coefficients
-                    s = 0.0;
-                    for (int y = 0; y < 4; y++) {
-                        rescoordx = 0.0;// To avoid using too many variables this one will be repurposed
-                        tmpindex = yInterpolationIndices[y];
-                        for (int x = 0; x < 4; x++) {
-                            rescoordx += xWeights[x] * doublefullSizedHelperBuffer[tmpindex + xInterpolationIndices[x]];
-                        }
-                        s += yWeights[y] * rescoordx;
-                    }
-                    doublefullSizedHelperBuffer2[nIndex] = s;
+                	PlainJavaCPUAligner.computeXInterpolationIndices(coordx, doubleWidth, width, xInterpolationIndices);
+                    PlainJavaCPUAligner.computeYInterpolationIndices(coordy, doubleHeight, height, width, yInterpolationIndices);
+                    
+                    doublefullSizedHelperBuffer2[nIndex] = PlainJavaCPUAligner.interpolateCubicBSpline(PlainJavaCPUAligner.getFractional(coordx), PlainJavaCPUAligner.getFractional(coordy), xInterpolationIndices, yInterpolationIndices, doublefullSizedHelperBuffer);
                 } else {
                     doublefullSizedHelperBuffer2[nIndex] = 0.0;
                 }
@@ -449,7 +510,208 @@ public class HybridPrecisionCPUAligner extends CPUAligner {
             }
         }
     }
-
+    
+    private void resizeTransformImageWithBsplineInterpolation(final int width, final int height, final int targetwidth, final int targetheight, double currentoffsetx,
+            double currentoffsety, double currentangle) {
+        /*
+         * Requires the coefficients to be in entryImageBuffers and the output will be
+         * in fullSizedHelperBuffer
+         */
+        int doubleWidth = width * 2;
+        int doubleHeight = height * 2;
+        int nIndex = 0;
+        double xvecx = Math.cos(currentangle);
+        double xvecy = -Math.sin(currentangle);
+        double yvecx = -xvecy;
+        double yvecy = xvecx;
+        double coordx;
+        double coordy;
+        int mskx;
+        int msky;
+        for (int i = 0; i < targetheight; i++) {
+            // First walk along the Y-vector direction and reset the X-position (otherwise the
+            // y position is initially correct and then lagging behind by one all the time)
+            coordx = currentoffsetx + ((double) i) * yvecx;
+            coordy = currentoffsety + ((double) i) * yvecy;
+            for (int n = 0; n < targetwidth; n++, nIndex++) {
+                mskx = (int) Math.round(coordx);
+                msky = (int) Math.round(coordy);
+                if ((mskx >= 0) && (mskx < width) && (msky >= 0) && (msky < height)) {
+                	PlainJavaCPUAligner.computeXInterpolationIndices(coordx, doubleWidth, width, xInterpolationIndices);
+                    PlainJavaCPUAligner.computeYInterpolationIndices(coordy, doubleHeight, height, width, yInterpolationIndices);
+                    
+                    doublefullSizedHelperBuffer2[nIndex] = PlainJavaCPUAligner.interpolateCubicBSpline(PlainJavaCPUAligner.getFractional(coordx), PlainJavaCPUAligner.getFractional(coordy), xInterpolationIndices, yInterpolationIndices, doublefullSizedHelperBuffer);
+                } else {
+                    doublefullSizedHelperBuffer2[nIndex] = 0.0;
+                }
+                // now walk along the X-vector direction
+                coordx += xvecx;
+                coordy += xvecy;
+            }
+        }
+    }
+    
+    private void transformScaledRotationWithBsplineInterpolation(final int width, final int height, double currentoffsetx,
+            double currentoffsety, double currentangle, double currentscale) {
+        /*
+         * Requires the coefficients to be in entryImageBuffers and the output will be
+         * in fullSizedHelperBuffer
+         */
+        int doubleWidth = width * 2;
+        int doubleHeight = height * 2;
+        int nIndex = 0;
+        double xvecx = Math.cos(currentangle) * currentscale;
+        double xvecy = -Math.sin(currentangle) * currentscale;
+        double yvecx = -xvecy;
+        double yvecy = xvecx;
+        double coordx;
+        double coordy;
+        int mskx;
+        int msky;
+        for (int i = 0; i < height; i++) {
+            // First walk along the Y-vector direction and reset the X-position (otherwise the
+            // y position is initially correct and then lagging behind by one all the time)
+            coordx = currentoffsetx + ((double) i) * yvecx;
+            coordy = currentoffsety + ((double) i) * yvecy;
+            for (int n = 0; n < width; n++, nIndex++) {
+                mskx = (int) Math.round(coordx);
+                msky = (int) Math.round(coordy);
+                if ((mskx >= 0) && (mskx < width) && (msky >= 0) && (msky < height)) {
+                	PlainJavaCPUAligner.computeXInterpolationIndices(coordx, doubleWidth, width, xInterpolationIndices);
+                    PlainJavaCPUAligner.computeYInterpolationIndices(coordy, doubleHeight, height, width, yInterpolationIndices);
+                    
+                    doublefullSizedHelperBuffer2[nIndex] = PlainJavaCPUAligner.interpolateCubicBSpline(PlainJavaCPUAligner.getFractional(coordx), PlainJavaCPUAligner.getFractional(coordy), xInterpolationIndices, yInterpolationIndices, doublefullSizedHelperBuffer);
+                } else {
+                    doublefullSizedHelperBuffer2[nIndex] = 0.0;
+                }
+                // now walk along the X-vector direction
+                coordx += xvecx;
+                coordy += xvecy;
+            }
+        }
+    }
+    
+    private void resizeScaledRotationImageWithBsplineInterpolation(final int width, final int height, final int targetwidth, final int targetheight, double currentoffsetx,
+            double currentoffsety, double currentangle, double currentscale) {
+        /*
+         * Requires the coefficients to be in entryImageBuffers and the output will be
+         * in fullSizedHelperBuffer
+         */
+        int doubleWidth = width * 2;
+        int doubleHeight = height * 2;
+        int nIndex = 0;
+        double xvecx = Math.cos(currentangle) * currentscale;
+        double xvecy = -Math.sin(currentangle) * currentscale;
+        double yvecx = -xvecy;
+        double yvecy = xvecx;
+        double coordx;
+        double coordy;
+        int mskx;
+        int msky;
+        for (int i = 0; i < targetheight; i++) {
+            // First walk along the Y-vector direction and reset the X-position (otherwise the
+            // y position is initially correct and then lagging behind by one all the time)
+            coordx = currentoffsetx + ((double) i) * yvecx;
+            coordy = currentoffsety + ((double) i) * yvecy;
+            for (int n = 0; n < targetwidth; n++, nIndex++) {
+                mskx = (int) Math.round(coordx);
+                msky = (int) Math.round(coordy);
+                if ((mskx >= 0) && (mskx < width) && (msky >= 0) && (msky < height)) {
+                	PlainJavaCPUAligner.computeXInterpolationIndices(coordx, doubleWidth, width, xInterpolationIndices);
+                    PlainJavaCPUAligner.computeYInterpolationIndices(coordy, doubleHeight, height, width, yInterpolationIndices);
+                    
+                    doublefullSizedHelperBuffer2[nIndex] = PlainJavaCPUAligner.interpolateCubicBSpline(PlainJavaCPUAligner.getFractional(coordx), PlainJavaCPUAligner.getFractional(coordy), xInterpolationIndices, yInterpolationIndices, doublefullSizedHelperBuffer);
+                } else {
+                    doublefullSizedHelperBuffer2[nIndex] = 0.0;
+                }
+                // now walk along the X-vector direction
+                coordx += xvecx;
+                coordy += xvecy;
+            }
+        }
+    }
+    
+    
+    private void transformAffineWithBsplineInterpolation(final int width, final int height, double currentoffsetx,
+            double currentoffsety, double currenta11, double currenta12, double currenta21, double currenta22) {
+        /*
+         * Requires the coefficients to be in entryImageBuffers and the output will be
+         * in fullSizedHelperBuffer
+         */
+        int doubleWidth = width * 2;
+        int doubleHeight = height * 2;
+        int nIndex = 0;
+        double xvecx = currenta11;
+        double xvecy = currenta21;
+        double yvecx = currenta12;
+        double yvecy = currenta22;
+        double coordx;
+        double coordy;
+        int mskx;
+        int msky;
+        for (int i = 0; i < height; i++) {
+            // First walk along the Y-vector direction and reset the X-position (otherwise the
+            // y position is initially correct and then lagging behind by one all the time)
+            coordx = currentoffsetx + ((double) i) * yvecx;
+            coordy = currentoffsety + ((double) i) * yvecy;
+            for (int n = 0; n < width; n++, nIndex++) {
+                mskx = (int) Math.round(coordx);
+                msky = (int) Math.round(coordy);
+                if ((mskx >= 0) && (mskx < width) && (msky >= 0) && (msky < height)) {
+                	PlainJavaCPUAligner.computeXInterpolationIndices(coordx, doubleWidth, width, xInterpolationIndices);
+                    PlainJavaCPUAligner.computeYInterpolationIndices(coordy, doubleHeight, height, width, yInterpolationIndices);
+                    
+                    doublefullSizedHelperBuffer2[nIndex] = PlainJavaCPUAligner.interpolateCubicBSpline(PlainJavaCPUAligner.getFractional(coordx), PlainJavaCPUAligner.getFractional(coordy), xInterpolationIndices, yInterpolationIndices, doublefullSizedHelperBuffer);
+                } else {
+                    doublefullSizedHelperBuffer2[nIndex] = 0.0;
+                }
+                // now walk along the X-vector direction
+                coordx += xvecx;
+                coordy += xvecy;
+            }
+        }
+    }
+    
+    private void resizeAffineImageWithBsplineInterpolation(final int width, final int height, final int targetwidth, final int targetheight, double currentoffsetx,
+            double currentoffsety, double currenta11, double currenta12, double currenta21, double currenta22) {
+        /*
+         * Requires the coefficients to be in entryImageBuffers and the output will be
+         * in fullSizedHelperBuffer
+         */
+        int doubleWidth = width * 2;
+        int doubleHeight = height * 2;
+        int nIndex = 0;
+        double xvecx = currenta11;
+        double xvecy = currenta21;
+        double yvecx = currenta12;
+        double yvecy = currenta22;
+        double coordx;
+        double coordy;
+        int mskx;
+        int msky;
+        for (int i = 0; i < targetheight; i++) {
+            // First walk along the Y-vector direction and reset the X-position (otherwise the
+            // y position is initially correct and then lagging behind by one all the time)
+            coordx = currentoffsetx + ((double) i) * yvecx;
+            coordy = currentoffsety + ((double) i) * yvecy;
+            for (int n = 0; n < targetwidth; n++, nIndex++) {
+                mskx = (int) Math.round(coordx);
+                msky = (int) Math.round(coordy);
+                if ((mskx >= 0) && (mskx < width) && (msky >= 0) && (msky < height)) {
+                	PlainJavaCPUAligner.computeXInterpolationIndices(coordx, doubleWidth, width, xInterpolationIndices);
+                    PlainJavaCPUAligner.computeYInterpolationIndices(coordy, doubleHeight, height, width, yInterpolationIndices);
+                    
+                    doublefullSizedHelperBuffer2[nIndex] = PlainJavaCPUAligner.interpolateCubicBSpline(PlainJavaCPUAligner.getFractional(coordx), PlainJavaCPUAligner.getFractional(coordy), xInterpolationIndices, yInterpolationIndices, doublefullSizedHelperBuffer);
+                } else {
+                    doublefullSizedHelperBuffer2[nIndex] = 0.0;
+                }
+                // now walk along the X-vector direction
+                coordx += xvecx;
+                coordy += xvecy;
+            }
+        }
+    }
+    
     private static void premultiplyCubicBSplineDeg7(final float target[], final int nrOfElements) {
         for (int i = 0; i < nrOfElements; i++) {
             target[i] *= lambda7;
@@ -560,7 +822,7 @@ public class HybridPrecisionCPUAligner extends CPUAligner {
 
     private static void basicToCardinal2DYhpDeg7(final float input[], final float output[], final int width,
             final int height) {
-    	// Mirroring conditions can safely be ignored because width >6 is guaranteed.
+        // Mirroring conditions can safely be ignored because width >6 is guaranteed.
         // symmetricFirMirrorOffBounds1D
         for (int i = 0; i < width; i++) {
             int nIndex = 3 * width + i;
@@ -897,14 +1159,34 @@ public class HybridPrecisionCPUAligner extends CPUAligner {
             doubleInverseMarquardtLevenbergRigidBodyOptimization();
             break;
         case SCALEDROTATION:
+        	for(int i = pyramidDepth - 1;i > 0;i--)
+            {
+                iterationPower /= 2;
+                inverseMarquardtLevenbergScaledRotationOptimization(i);
+                // scale up (but the rotation and scale are not scale dependent)
+                offsetx *= 2.0;
+                offsety *= 2.0;
+            }
+            iterationPower /= 2;
+            doubleInverseMarquardtLevenbergScaledRotationOptimization();
             break;
         case AFFINE:
+        	for(int i = pyramidDepth - 1;i > 0;i--)
+            {
+                iterationPower /= 2;
+                inverseMarquardtLevenbergAffineOptimization(i);
+                // scale up (but the rotation and scale are not scale dependent)
+                offsetx *= 2.0;
+                offsety *= 2.0;
+            }
+            iterationPower /= 2;
+            doubleInverseMarquardtLevenbergAffineOptimization();
             break;
         }
     }
 
     private void doubleInverseMarquardtLevenbergTranslationOptimization() {
-        double[] update = { 0.0, 0.0 };
+    	double[] update = { 0.0, 0.0 };
         double bestMeanSquares = 0.0;
         double meanSquares = 0.0;
         double lambda = 1.0;
@@ -918,6 +1200,7 @@ public class HybridPrecisionCPUAligner extends CPUAligner {
         do {
             // calculate the pseudo hessian from the hessian
             for (int k = 0; (k < 2); k++) {
+            	Arrays.fill(pseudoHessian[k], 0.0);
                 pseudoHessian[k][k] = (1.0 + lambda) * hessian[k][k];
             }
             StaticUtility.invertGauss(pseudoHessian);
@@ -967,6 +1250,7 @@ public class HybridPrecisionCPUAligner extends CPUAligner {
         do {
             // calculate the pseudo hessian from the hessian
             for (int k = 0; (k < 3); k++) {
+            	Arrays.fill(pseudoHessian[k], 0.0);
                 pseudoHessian[k][k] = (1.0 + lambda) * hessian[k][k];
             }
             StaticUtility.invertGauss(pseudoHessian);
@@ -1007,6 +1291,232 @@ public class HybridPrecisionCPUAligner extends CPUAligner {
             this.angle = currentangle;
         }
     }
+    
+    private void doubleInverseMarquardtLevenbergScaledRotationOptimization() {
+        double[] update = {0.0,0.0,0.0,0.0};
+        double bestMeanSquares = 0.0;
+        double meanSquares = 0.0;
+        double lambda = 1.0;
+        double displacement;
+        int iteration = 0;
+        double c;
+        double s;
+        // first initialize the matrix with the current transformation (upscaling between the steps)
+        double currentoffsetx;
+        double currentoffsety;
+        double currentangle;
+        double currentscale;
+        bestMeanSquares = getScaledRotationMeanSquaresDouble(offsetx,offsety,this.angle,this.scale);
+        iteration++;
+        do {
+            // calculate the pseudo hessian from the hessian
+            for (int k = 0; (k < 4); k++) {
+            	Arrays.fill(pseudoHessian[k], 0.0);
+                pseudoHessian[k][k] = (1.0 + lambda) * hessian[k][k];
+            }
+            StaticUtility.invertGauss(pseudoHessian);
+            update = StaticUtility.matrixMultiply(pseudoHessian, gradient);
+            final double deltaKappa = update[0];
+            final double scaleFactor = Math.exp(deltaKappa);
+            currentscale = this.scale * scaleFactor;
+            currentangle = this.angle - update[1];
+            displacement = Math.sqrt(update[2] * update[2] + update[3] * update[3]) + 0.25 * Math.sqrt((double)(targetPyramid[0].width * targetPyramid[0].width) + (double)(targetPyramid[0].height * targetPyramid[0].height)) * (Math.abs(deltaKappa) + Math.abs(update[1]));
+            c = Math.cos(update[1]);
+            s = Math.sin(update[1]);
+            final double trialTx = offsetx + update[2];
+            final double trialTy = offsety + update[3];
+            currentoffsetx = scaleFactor * (trialTx * c - trialTy * s);
+            currentoffsety = scaleFactor * (trialTx * s + trialTy * c);
+            meanSquares = getScaledRotationMeanSquaresDouble(currentoffsetx,currentoffsety,currentangle,currentscale);
+
+            iteration++;
+            if (meanSquares < bestMeanSquares) {
+                bestMeanSquares = meanSquares;
+                lambda /= 4.0;
+                offsetx = currentoffsetx;
+                offsety = currentoffsety;
+                this.angle = currentangle;
+                this.scale = currentscale;
+            }
+            else {
+                lambda *= 4.0;
+            }
+        } while ((iteration < (10 * iterationPower - 1)) && (0.001 <= displacement));
+        StaticUtility.invertGauss(hessian);
+        update = StaticUtility.matrixMultiply(hessian, gradient);
+        final double deltaKappa = update[0];
+        final double scaleFactor = Math.exp(deltaKappa);
+        currentscale = this.scale * scaleFactor;
+        currentangle = this.angle - update[1];
+        c = Math.cos(update[1]);
+        s = Math.sin(update[1]);
+        final double trialTx = offsetx + update[2];
+        final double trialTy = offsety + update[3];
+        currentoffsetx = scaleFactor * (trialTx * c - trialTy * s);
+        currentoffsety = scaleFactor * (trialTx * s + trialTy * c);
+        meanSquares = getScaledRotationMeanSquaresWithoutHessianDouble(currentoffsetx,currentoffsety,currentangle,currentscale);
+        iteration++;
+        if (meanSquares < bestMeanSquares) {
+            offsetx = currentoffsetx;
+            offsety = currentoffsety;
+            this.angle = currentangle;
+            this.scale = currentscale;
+        }
+    }
+    
+    private void doubleInverseMarquardtLevenbergAffineOptimization()
+    {
+        double[] update = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0};
+        double bestMeanSquares = 0.0;
+        double meanSquares = 0.0;
+        double lambda = 1.0;
+        double displacement;
+        int iteration = 0;
+
+        // Trial parameters for each LM step
+        double currenta11;
+        double currenta12;
+        double currenta21;
+        double currenta22;
+        double currentoffsetx;
+        double currentoffsety;
+
+        /*
+         * Initial evaluation: compute E(p₀), gradient g, and Hessian H
+         * at the current parameter values. The gradient and Hessian are
+         * stored in the class fields gradient[] and hessian[][].
+         */
+        bestMeanSquares = getAffineMeanSquaresDouble(offsetx, offsety, a11, a12, a21, a22);
+        iteration++;
+
+        do {
+            /*
+             * Construct the LM-damped pseudoHessian.
+             * Only the diagonal is set: pseudoH[k][k] = (1+λ) * H[k][k].
+             * Off-diagonals remain zero (the pseudoHessian arrays are reused
+             * and the off-diagonals were never set to non-zero values).
+             * Inverting this diagonal matrix and multiplying by the gradient
+             * yields: δp_k = g_k / ((1+λ) * H_kk).
+             */
+            for (int k = 0; (k < 6); k++) {
+            	Arrays.fill(pseudoHessian[k], 0.0);
+                pseudoHessian[k][k] = (1.0 + lambda) * hessian[k][k];
+            }
+            StaticUtility.invertGauss(pseudoHessian);
+            update = StaticUtility.matrixMultiply(pseudoHessian, gradient);
+
+            /*
+             * Compute the displacement for convergence testing.
+             * The translational displacement is the Euclidean norm of (δtx, δty).
+             * The matrix-element displacement is heuristically converted to pixels
+             * by multiplying by 0.25 × image diagonal, analogous to the rigid body
+             * angle-to-pixel conversion.
+             */
+            /*double diag = Math.sqrt((double)(targetPyramid[pyramidIndex].width * targetPyramid[pyramidIndex].width)
+                                  + (double)(targetPyramid[0].height * targetPyramid[0].height));
+            displacement = Math.sqrt(update[4] * update[4] + update[5] * update[5])
+                         + 0.25 * diag * (Math.abs(update[0]) + Math.abs(update[1]) + Math.abs(update[2]) + Math.abs(update[3]));*/
+            
+            /*
+             * A change δa11 causes a displacement of approximately |δa11| * |x| at pixel position x. 
+             * The maximum |x| is approximately width/2 (measuring from center). 
+             * Similarly, δa12 causes |δa12| * |y| where max |y| ≈ height/2. 
+             * So a tighter heuristic would be:
+             */
+            displacement = Math.sqrt(update[4] * update[4] + update[5] * update[5])
+                    + 0.5 * (double)targetPyramid[0].width
+                      * (Math.abs(update[0]) + Math.abs(update[2]))
+                    + 0.5 * (double)targetPyramid[0].height
+                      * (Math.abs(update[1]) + Math.abs(update[3]));
+
+            final double b11 = 1.0 + update[0];
+            final double b12 = update[1];
+            final double b21 = update[2];
+            final double b22 = 1.0 + update[3];
+
+            currenta11 = b11 * this.a11 + b12 * this.a21;
+            currenta12 = b11 * this.a12 + b12 * this.a22;
+            currenta21 = b21 * this.a11 + b22 * this.a21;
+            currenta22 = b21 * this.a12 + b22 * this.a22;
+
+            final double trialTx = this.offsetx + update[4];
+            final double trialTy = this.offsety + update[5];
+            currentoffsetx = b11 * trialTx + b12 * trialTy;
+            currentoffsety = b21 * trialTx + b22 * trialTy;
+
+            /*
+             * Evaluate the MSE at the trial point. This also recomputes gradient
+             * and Hessian for the next iteration (the "accelerated" variant from
+             * the paper always recomputes, since the source gradients are constant
+             * but the B-spline interpolation coordinates change).
+             */
+            meanSquares = getAffineMeanSquaresDouble(currentoffsetx, currentoffsety,
+                                               currenta11, currenta12, currenta21, currenta22);
+
+            iteration++;
+            if (meanSquares < bestMeanSquares) {
+                /*
+                 * Accept the step: the MSE decreased.
+                 * Reduce λ (shift toward Gauss-Newton / larger steps).
+                 */
+                bestMeanSquares = meanSquares;
+                lambda /= 4.0;
+                this.a11    = currenta11;
+                this.a12    = currenta12;
+                this.a21    = currenta21;
+                this.a22    = currenta22;
+                this.offsetx = currentoffsetx;
+                this.offsety = currentoffsety;
+            }
+            else {
+                /*
+                 * Reject the step: the MSE did not decrease.
+                 * Increase λ (shift toward gradient descent / smaller steps).
+                 * The gradient and Hessian from the PREVIOUS accepted point
+                 * are still valid (they were overwritten by getAffineMeanSquares
+                 * but will be recomputed at the accepted point on the next
+                 * iteration if the step is accepted).
+                 */
+                lambda *= 4.0;
+            }
+        } while ((iteration < (10 * iterationPower - 1)) && (0.001 <= displacement));
+
+        /*
+         * Final undamped Gauss-Newton step: invert the FULL Hessian (with
+         * off-diagonals) and apply one pure quadratic step. This gives the
+         * best local quadratic approximation without LM damping.
+         * Accept only if it improves the MSE.
+         */
+        StaticUtility.invertGauss(hessian);
+        update = StaticUtility.matrixMultiply(hessian, gradient);
+
+        final double b11 = 1.0 + update[0];
+        final double b12 = update[1];
+        final double b21 = update[2];
+        final double b22 = 1.0 + update[3];
+
+        currenta11 = b11 * this.a11 + b12 * this.a21;
+        currenta12 = b11 * this.a12 + b12 * this.a22;
+        currenta21 = b21 * this.a11 + b22 * this.a21;
+        currenta22 = b21 * this.a12 + b22 * this.a22;
+
+        final double trialTx = this.offsetx + update[4];
+        final double trialTy = this.offsety + update[5];
+        currentoffsetx = b11 * trialTx + b12 * trialTy;
+        currentoffsety = b21 * trialTx + b22 * trialTy;
+
+        meanSquares = getAffineMeanSquaresWithoutHessianDouble(currentoffsetx, currentoffsety,
+                                                          currenta11, currenta12, currenta21, currenta22);
+        iteration++;
+        if (meanSquares < bestMeanSquares) {
+            this.a11     = currenta11;
+            this.a12     = currenta12;
+            this.a21     = currenta21;
+            this.a22     = currenta22;
+            this.offsetx = currentoffsetx;
+            this.offsety = currentoffsety;
+        }
+    }
 
     private void inverseMarquardtLevenbergTranslationOptimization(int pyramidIndex) {
         double[] update = { 0.0, 0.0 };
@@ -1023,6 +1533,7 @@ public class HybridPrecisionCPUAligner extends CPUAligner {
         do {
             // calculate the pseudo hessian from the hessian
             for (int k = 0; (k < 2); k++) {
+            	Arrays.fill(pseudoHessian[k], 0.0);
                 pseudoHessian[k][k] = (1.0 + lambda) * hessian[k][k];
             }
             StaticUtility.invertGauss(pseudoHessian);
@@ -1044,6 +1555,7 @@ public class HybridPrecisionCPUAligner extends CPUAligner {
         } while ((iteration < (10 * iterationPower - 1)) && (0.001 <= displacement));
         StaticUtility.invertGauss(hessian);
         update = StaticUtility.matrixMultiply(hessian, gradient);
+        
         currentoffsetx = offsetx + update[0];
         currentoffsety = offsety + update[1];
         meanSquares = getTranslationMeanSquaresWithoutHessian(pyramidIndex, (float) currentoffsetx, (float) currentoffsety);
@@ -1072,6 +1584,7 @@ public class HybridPrecisionCPUAligner extends CPUAligner {
         do {
             // calculate the pseudo hessian from the hessian
             for (int k = 0; (k < 3); k++) {
+            	Arrays.fill(pseudoHessian[k], 0.0);
                 pseudoHessian[k][k] = (1.0 + lambda) * hessian[k][k];
             }
             StaticUtility.invertGauss(pseudoHessian);
@@ -1115,27 +1628,377 @@ public class HybridPrecisionCPUAligner extends CPUAligner {
             this.angle = currentangle;
         }
     }
+    
+    private void inverseMarquardtLevenbergScaledRotationOptimization(int pyramidIndex)
+    {
+        double[] update = {0.0,0.0,0.0,0.0};
+        double bestMeanSquares = 0.0;
+        double meanSquares = 0.0;
+        double lambda = 1.0;
+        double displacement;
+        int iteration = 0;
+        double c;
+        double s;
+        // first initialize the matrix with the current transformation (upscaling between the steps)
+        double currentoffsetx;
+        double currentoffsety;
+        double currentangle;
+        double currentscale;
+        bestMeanSquares = getScaledRotationMeanSquares(pyramidIndex,(float)offsetx,(float)offsety,(float)this.angle,(float)this.scale);
+        iteration++;
+        do {
+            // calculate the pseudo hessian from the hessian
+            for (int k = 0; (k < 4); k++) {
+            	Arrays.fill(pseudoHessian[k], 0.0);
+                pseudoHessian[k][k] = (1.0 + lambda) * hessian[k][k];
+            }
+            StaticUtility.invertGauss(pseudoHessian);
+            update = StaticUtility.matrixMultiply(pseudoHessian, gradient);
+            final double deltaKappa = update[0];
+            final double scaleFactor = Math.exp(deltaKappa);
+            currentscale = this.scale * scaleFactor;
+            currentangle = this.angle - update[1];
+            displacement = Math.sqrt(update[2] * update[2] + update[3] * update[3]) + 0.25 * Math.sqrt((double)(targetPyramid[pyramidIndex].width * targetPyramid[pyramidIndex].width) + (double)(targetPyramid[pyramidIndex].height * targetPyramid[pyramidIndex].height)) * (Math.abs(deltaKappa) + Math.abs(update[1]));
+            c = Math.cos(update[1]);
+            s = Math.sin(update[1]);
+            final double trialTx = offsetx + update[2];
+            final double trialTy = offsety + update[3];
+            currentoffsetx = scaleFactor * (trialTx * c - trialTy * s);
+            currentoffsety = scaleFactor * (trialTx * s + trialTy * c);
+            meanSquares = getScaledRotationMeanSquares(pyramidIndex,(float)currentoffsetx,(float)currentoffsety,(float)currentangle,(float)currentscale);
 
-    private double getRigidBodyMeanSquaresDouble(double currentoffsetx, double currentoffsety, double currentangle) {
+            iteration++;
+            if (meanSquares < bestMeanSquares) {
+                bestMeanSquares = meanSquares;
+                lambda /= 4.0;
+                offsetx = currentoffsetx;
+                offsety = currentoffsety;
+                this.angle = currentangle;
+                this.scale = currentscale;
+            }
+            else {
+                lambda *= 4.0;
+            }
+        } while ((iteration < (10 * iterationPower - 1)) && (0.001 <= displacement));
+        StaticUtility.invertGauss(hessian);
+        update = StaticUtility.matrixMultiply(hessian, gradient);
+        final double deltaKappa = update[0];
+        final double scaleFactor = Math.exp(deltaKappa);
+        currentscale = this.scale * scaleFactor;
+        currentangle = this.angle - update[1];
+        c = Math.cos(update[1]);
+        s = Math.sin(update[1]);
+        final double trialTx = offsetx + update[2];
+        final double trialTy = offsety + update[3];
+        currentoffsetx = scaleFactor * (trialTx * c - trialTy * s);
+        currentoffsety = scaleFactor * (trialTx * s + trialTy * c);
+        meanSquares = getScaledRotationMeanSquaresWithoutHessian(pyramidIndex,(float)currentoffsetx,(float)currentoffsety,(float)currentangle,(float)currentscale);
+        iteration++;
+        if (meanSquares < bestMeanSquares) {
+            offsetx = currentoffsetx;
+            offsety = currentoffsety;
+            this.angle = currentangle;
+            this.scale = currentscale;
+        }
+    }
+    
+    /*
+     * ========================================================================================
+     * inverseMarquardtLevenbergAffineOptimization
+     * ========================================================================================
+     *
+     * Paper reference: Thévenaz et al., "A Pyramid Approach to Subpixel Registration Based
+     * on Intensity," IEEE TIP 1998, Section III-A.
+     *
+     * This implements the modified Levenberg-Marquardt optimizer for affine registration.
+     *
+     * The affine transformation maps output pixel (n, i) to source coordinates:
+     *   x' = a11*n + a12*i + tx
+     *   y' = a21*n + a22*i + ty
+     *
+     * Parameter vector: p = (a11, a12, a21, a22, tx, ty), dimension = 6.
+     *
+     * At identity: a11=1, a12=0, a21=0, a22=1, tx=0, ty=0.
+     *
+     * The optimization minimizes E(p) = (1/|Ω|) Σ [f(x) - g(T_p(x))]²
+     * using the "inverse" approach where the Jacobian is built from the SOURCE image
+     * gradients ∇f, which remain constant across iterations. This avoids recomputing
+     * the Hessian when the parameters change, as described in Section III-A of the paper.
+     *
+     * LM damping: The pseudoHessian is constructed by copying ONLY the diagonal of the
+     * Gauss-Newton Hessian H, scaled by (1+λ):
+     *   pseudoH[k][k] = (1+λ) * H[k][k]
+     * with all off-diagonal entries left at zero. This reduces the damped step to:
+     *   δp_k = g_k / ((1+λ) * H_kk)
+     * which is an independent damped gradient descent along each parameter axis.
+     * This is a deliberate simplification inherited from the original TurboReg design:
+     * - Computationally cheaper: O(n) diagonal inversion instead of O(n³) full inversion.
+     * - More numerically stable: avoids ill-conditioning from off-diagonal coupling.
+     * - For large λ (far from optimum), LM reduces to gradient descent anyway.
+     * The full Hessian (with off-diagonals) is inverted only for the FINAL undamped
+     * Gauss-Newton step after the LM loop converges.
+     *
+     * Accepted affine step is applied compositionally (group-correct), not component-wise:
+     *
+     *   B = I + dA, with dA = [[δa11, δa12], [δa21, δa22]]
+     *   A_new = B * A
+     *   t_new = B * (t + δt)
+     *
+     * where A = [[a11, a12], [a21, a22]] and t = (tx, ty).
+     *
+     * This matches the same left-composition convention used by the transformation
+     * classes and the stack-combiner workers:
+     *   T_new = ΔT ∘ T_current.
+     *
+     * Contrast with rigid body and scaled rotation:
+     * - Rigid body uses rotational composition with angle subtraction in this inverse
+     *   Jacobian convention, then composes translation through the incremental rotation.
+     * - Scaled rotation uses log-scale increment (κ = log s), multiplicative scale update,
+     *   and compositional translation update.
+     *
+     * Displacement convergence criterion:
+     *   displacement = sqrt(δtx² + δty²)
+     *                + 0.5*width *(|δa11| + |δa21|)
+     *                + 0.5*height*(|δa12| + |δa22|)
+     * This is a first-order pixel-motion proxy derived from the maximal |x|,|y| in
+     * the image domain (about width/2 and height/2).
+     */
+    private void inverseMarquardtLevenbergAffineOptimization(int pyramidIndex)
+    {
+        double[] update = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0};
+        double bestMeanSquares = 0.0;
+        double meanSquares = 0.0;
+        double lambda = 1.0;
+        double displacement;
+        int iteration = 0;
+
+        // Trial parameters for each LM step
+        double currenta11;
+        double currenta12;
+        double currenta21;
+        double currenta22;
+        double currentoffsetx;
+        double currentoffsety;
+
+        /*
+         * Initial evaluation: compute E(p₀), gradient g, and Hessian H
+         * at the current parameter values. The gradient and Hessian are
+         * stored in the class fields gradient[] and hessian[][].
+         */
+        bestMeanSquares = getAffineMeanSquares(pyramidIndex, (float)offsetx, (float)offsety, (float)a11, (float)a12, (float)a21, (float)a22);
+        iteration++;
+
+        do {
+            /*
+             * Construct the LM-damped pseudoHessian.
+             * Only the diagonal is set: pseudoH[k][k] = (1+λ) * H[k][k].
+             * Off-diagonals remain zero (the pseudoHessian arrays are reused
+             * and the off-diagonals were never set to non-zero values).
+             * Inverting this diagonal matrix and multiplying by the gradient
+             * yields: δp_k = g_k / ((1+λ) * H_kk).
+             */
+            for (int k = 0; (k < 6); k++) {
+            	Arrays.fill(pseudoHessian[k], 0.0);
+                pseudoHessian[k][k] = (1.0 + lambda) * hessian[k][k];
+            }
+            StaticUtility.invertGauss(pseudoHessian);
+            update = StaticUtility.matrixMultiply(pseudoHessian, gradient);
+
+            /*
+             * Compute the displacement for convergence testing.
+             * The translational displacement is the Euclidean norm of (δtx, δty).
+             * The matrix-element displacement is heuristically converted to pixels
+             * by multiplying by 0.25 × image diagonal, analogous to the rigid body
+             * angle-to-pixel conversion.
+             */
+            /*double diag = Math.sqrt((double)(targetPyramid[pyramidIndex].width * targetPyramid[pyramidIndex].width)
+                                  + (double)(targetPyramid[pyramidIndex].height * targetPyramid[pyramidIndex].height));
+            displacement = Math.sqrt(update[4] * update[4] + update[5] * update[5])
+                         + 0.25 * diag * (Math.abs(update[0]) + Math.abs(update[1]) + Math.abs(update[2]) + Math.abs(update[3]));*/
+            
+            /*
+             * A change δa11 causes a displacement of approximately |δa11| * |x| at pixel position x. 
+             * The maximum |x| is approximately width/2 (measuring from center). 
+             * Similarly, δa12 causes |δa12| * |y| where max |y| ≈ height/2. 
+             * So a tighter heuristic would be:
+             */
+            displacement = Math.sqrt(update[4] * update[4] + update[5] * update[5])
+                    + 0.5 * (double)targetPyramid[pyramidIndex].width
+                      * (Math.abs(update[0]) + Math.abs(update[2]))
+                    + 0.5 * (double)targetPyramid[pyramidIndex].height
+                      * (Math.abs(update[1]) + Math.abs(update[3]));
+
+            final double b11 = 1.0 + update[0];
+            final double b12 = update[1];
+            final double b21 = update[2];
+            final double b22 = 1.0 + update[3];
+
+            currenta11 = b11 * this.a11 + b12 * this.a21;
+            currenta12 = b11 * this.a12 + b12 * this.a22;
+            currenta21 = b21 * this.a11 + b22 * this.a21;
+            currenta22 = b21 * this.a12 + b22 * this.a22;
+
+            final double trialTx = this.offsetx + update[4];
+            final double trialTy = this.offsety + update[5];
+            currentoffsetx = b11 * trialTx + b12 * trialTy;
+            currentoffsety = b21 * trialTx + b22 * trialTy;
+
+            /*
+             * Evaluate the MSE at the trial point. This also recomputes gradient
+             * and Hessian for the next iteration (the "accelerated" variant from
+             * the paper always recomputes, since the source gradients are constant
+             * but the B-spline interpolation coordinates change).
+             */
+            meanSquares = getAffineMeanSquares(pyramidIndex, (float)currentoffsetx, (float)currentoffsety,
+                                               (float)currenta11, (float)currenta12, (float)currenta21, (float)currenta22);
+
+            iteration++;
+            if (meanSquares < bestMeanSquares) {
+                /*
+                 * Accept the step: the MSE decreased.
+                 * Reduce λ (shift toward Gauss-Newton / larger steps).
+                 */
+                bestMeanSquares = meanSquares;
+                lambda /= 4.0;
+                this.a11    = currenta11;
+                this.a12    = currenta12;
+                this.a21    = currenta21;
+                this.a22    = currenta22;
+                this.offsetx = currentoffsetx;
+                this.offsety = currentoffsety;
+            }
+            else {
+                /*
+                 * Reject the step: the MSE did not decrease.
+                 * Increase λ (shift toward gradient descent / smaller steps).
+                 * The gradient and Hessian from the PREVIOUS accepted point
+                 * are still valid (they were overwritten by getAffineMeanSquares
+                 * but will be recomputed at the accepted point on the next
+                 * iteration if the step is accepted).
+                 */
+                lambda *= 4.0;
+            }
+        } while ((iteration < (10 * iterationPower - 1)) && (0.001 <= displacement));
+
+        /*
+         * Final undamped Gauss-Newton step: invert the FULL Hessian (with
+         * off-diagonals) and apply one pure quadratic step. This gives the
+         * best local quadratic approximation without LM damping.
+         * Accept only if it improves the MSE.
+         */
+        StaticUtility.invertGauss(hessian);
+        update = StaticUtility.matrixMultiply(hessian, gradient);
+
+        final double b11 = 1.0 + update[0];
+        final double b12 = update[1];
+        final double b21 = update[2];
+        final double b22 = 1.0 + update[3];
+
+        currenta11 = b11 * this.a11 + b12 * this.a21;
+        currenta12 = b11 * this.a12 + b12 * this.a22;
+        currenta21 = b21 * this.a11 + b22 * this.a21;
+        currenta22 = b21 * this.a12 + b22 * this.a22;
+
+        final double trialTx = this.offsetx + update[4];
+        final double trialTy = this.offsety + update[5];
+        currentoffsetx = b11 * trialTx + b12 * trialTy;
+        currentoffsety = b21 * trialTx + b22 * trialTy;
+
+        meanSquares = getAffineMeanSquaresWithoutHessian(pyramidIndex, (float)currentoffsetx, (float)currentoffsety,
+                                                          (float)currenta11, (float)currenta12, (float)currenta21, (float)currenta22);
+        iteration++;
+        if (meanSquares < bestMeanSquares) {
+            this.a11     = currenta11;
+            this.a12     = currenta12;
+            this.a21     = currenta21;
+            this.a22     = currenta22;
+            this.offsetx = currentoffsetx;
+            this.offsety = currentoffsety;
+        }
+    }
+    
+    private double getTranslationMeanSquaresDouble(double currentoffsetx, double currentoffsety) {
         // First reset the global values which will not be reset in the loop
-        gradient[0] = 0.0;
-        gradient[1] = 0.0;
-        gradient[2] = 0.0;
-        hessian[0][0] = 0.0;
-        hessian[0][1] = 0.0;
-        hessian[0][2] = 0.0;
-        hessian[1][1] = 0.0;
-        hessian[1][2] = 0.0;
-        hessian[2][2] = 0.0;
+    	Arrays.fill(gradient, 0.0);
+        for (int i = 0; (i < 2); i++) {
+            Arrays.fill(hessian[i], 0.0);
+        }
+        
         final int width = (int) sharedContext.img.dimension(0);
         final int height = (int) sharedContext.img.dimension(1);
         final int doubletargetwidth = width * 2;
         final int doubletargetheight = height * 2;
         int nIndex = 0;
         int area = 0;
-        int p;
-        int q;
-        int tmpindex;
+        double s;
+        double msqe = 0.0;// mean square error
+        double coordx;
+        double rescoordx;
+        double coordy;
+        double rescoordy;
+        int mskx;
+        int msky;
+        for (int i = 0; i < height; i++) {
+            // First walk along the Y-vector direction and reset the X-position (otherwise the
+            // y position is initially correct and then lagging behind by one all the time)
+            coordx = currentoffsetx;
+            coordy = currentoffsety + ((double) i);
+            for (int n = 0; n < width; n++, nIndex++) {
+                mskx = (int) Math.round(coordx);
+                msky = (int) Math.round(coordy);
+                if ((mskx >= 0) && (mskx < width) && (msky >= 0) && (msky < height)) {
+                    area++;
+                    PlainJavaCPUAligner.computeXInterpolationIndices(coordx, doubletargetwidth, width, xInterpolationIndices);
+                    PlainJavaCPUAligner.computeYInterpolationIndices(coordy, doubletargetheight, height, width, yInterpolationIndices);
+
+                    rescoordx = PlainJavaCPUAligner.getFractional(coordx);
+                    rescoordy = PlainJavaCPUAligner.getFractional(coordy);
+                    
+                    s = PlainJavaCPUAligner.interpolateCubicBSpline(rescoordx, rescoordy, xInterpolationIndices, yInterpolationIndices, doubleTargetCoefficients);
+
+                    // now calculate the return value
+                    double diff = doubleSourceImage[nIndex] - s;
+                    msqe += diff * diff;
+                    /*
+                     * TODO/FIXME/KNOWN ISSUE: The following summation is MUCH worse than the
+                     * parallel sum reduction done on the GPU, because (relatively speaking) small
+                     * numbers are added to an ever growing larger number reducing the precision in
+                     * the outcome. Currently I ignore this like the original implementation, but
+                     * this is one of many reasons why the GPU version and the CPU version will
+                     * never yield the same results!
+                     */
+                    gradient[0] += diff * doubleSourcexGradient[nIndex];
+                    gradient[1] += diff * doubleSourceyGradient[nIndex];
+                    hessian[0][0] += doubleSourcexGradient[nIndex] * doubleSourcexGradient[nIndex];
+                    hessian[0][1] += doubleSourcexGradient[nIndex] * doubleSourceyGradient[nIndex];
+                    hessian[1][1] += doubleSourceyGradient[nIndex] * doubleSourceyGradient[nIndex];
+                }
+                // walk along the X-vector direction
+                coordx += 1.0;
+            }
+        }
+        // symmetrize hessian
+        for (int i = 1; (i < 2); i++) {
+            for (int j = 0; (j < i); j++) {
+                hessian[i][j] = hessian[j][i];
+            }
+        }
+        return msqe / ((double) area);
+    }
+
+    private double getRigidBodyMeanSquaresDouble(double currentoffsetx, double currentoffsety, double currentangle) {
+        // First reset the global values which will not be reset in the loop
+        Arrays.fill(gradient, 0.0);
+        for (int i = 0; (i < 3); i++) {
+            Arrays.fill(hessian[i], 0.0);
+        }
+        
+        final int width = (int) sharedContext.img.dimension(0);
+        final int height = (int) sharedContext.img.dimension(1);
+        final int doubletargetwidth = width * 2;
+        final int doubletargetheight = height * 2;
+        int nIndex = 0;
+        int area = 0;
         double s;
         double msqe = 0.0;// mean square error
         double xvecx = Math.cos(currentangle);
@@ -1158,55 +2021,19 @@ public class HybridPrecisionCPUAligner extends CPUAligner {
                 msky = (int) Math.round(coordy);
                 if ((mskx >= 0) && (mskx < width) && (msky >= 0) && (msky < height)) {
                     area++;
-                    // Calculate X-interpolation indices
-                    p = (coordx >= 0) ? (((int) coordx) + 2) : (((int) coordx) + 1);
-                    for (int c = 0; c < 4; c++, p--) {
-                        q = (p < 0) ? (-1 - p) : p;
-                        q = (q < doubletargetwidth) ? q : q % doubletargetwidth;
-                        xInterpolationIndices[c] = q >= width ? (doubletargetwidth - 1 - q) : q;
-                    }
-                    // calculate Y-interpolation indices
-                    p = (coordy >= 0) ? (((int) coordy) + 2) : (((int) coordy) + 1);
-                    for (int c = 0; c < 4; c++, p--) {
-                        q = (p < 0) ? (-1 - p) : p;
-                        q = (q < doubletargetheight) ? q : q % doubletargetheight;
-                        // calculate linearized coordinates of the coefficient array
-                        yInterpolationIndices[c] = q >= height ? (doubletargetheight - 1 - q) * width : q * width;
-                    }
-                    // get the residuals of the coordinates
-                    rescoordx = coordx - (coordx >= 0.0 ? ((double) ((int) coordx)) : ((double) (((int) coordx) - 1)));
-                    rescoordy = coordy - (coordy >= 0.0 ? ((double) ((int) coordy)) : ((double) (((int) coordy) - 1)));
-                    // calculate the X-weights
-                    s = 1.0 - rescoordx;
-                    xWeights[3] = Math.pow(s, 3.0) / 6.0;
-                    s = rescoordx * rescoordx;
-                    xWeights[2] = (2.0 / 3.0) - 0.5 * s * (2.0 - rescoordx);
-                    xWeights[0] = s * rescoordx / 6.0;
-                    xWeights[1] = 1.0 - xWeights[0] - xWeights[2] - xWeights[3];
-                    // calculate the Y-weights
-                    s = 1.0 - rescoordy;
-                    yWeights[3] = Math.pow(s, 3.0) / 6.0;
-                    s = rescoordy * rescoordy;
-                    yWeights[2] = (2.0 / 3.0) - 0.5 * s * (2.0 - rescoordy);
-                    yWeights[0] = s * rescoordy / 6.0;
-                    yWeights[1] = 1.0 - yWeights[0] - yWeights[2] - yWeights[3];
 
-                    // calculate the interpolated value from the target coefficients
-                    s = 0.0;
-                    for (int y = 0; y < 4; y++) {
-                        rescoordx = 0.0;// To avoid using too many variables this one will be repurposed
-                        tmpindex = yInterpolationIndices[y];
-                        for (int x = 0; x < 4; x++) {
-                            rescoordx += xWeights[x] * doubleTargetCoefficients[tmpindex + xInterpolationIndices[x]];
-                        }
-                        s += yWeights[y] * rescoordx;
-                    }
+                    PlainJavaCPUAligner.computeXInterpolationIndices(coordx, doubletargetwidth, width, xInterpolationIndices);
+                    PlainJavaCPUAligner.computeYInterpolationIndices(coordy, doubletargetheight, height, width, yInterpolationIndices);
 
+                    rescoordx = PlainJavaCPUAligner.getFractional(coordx);
+                    rescoordy = PlainJavaCPUAligner.getFractional(coordy);
+                    
+                    s = PlainJavaCPUAligner.interpolateCubicBSpline(rescoordx, rescoordy, xInterpolationIndices, yInterpolationIndices, doubleTargetCoefficients);
+                    
                     // calculate the values for returning
-                    rescoordx = doubleSourceImage[nIndex] - s;// repurposed for diff
-                    msqe += rescoordx * rescoordx;
-                    // repurposed for Theta
-                    rescoordy = doubleSourceyGradient[nIndex] * (double) n - doubleSourcexGradient[nIndex] * (double) i; 
+                    double diff = doubleSourceImage[nIndex] - s;
+                    msqe += diff * diff;
+                    double theta = doubleSourceyGradient[nIndex] * (double) n - doubleSourcexGradient[nIndex] * (double) i; 
                     /*
                      * TODO/FIXME/KNOWN ISSUE: The following summation is MUCH worse than the
                      * parallel sum reduction done on the GPU, because (relatively speaking) small
@@ -1215,12 +2042,12 @@ public class HybridPrecisionCPUAligner extends CPUAligner {
                      * this is one of many reasons why the GPU version and the CPU version will
                      * never yield the same results!
                      */
-                    gradient[0] += rescoordx * rescoordy;
-                    gradient[1] += rescoordx * doubleSourcexGradient[nIndex];
-                    gradient[2] += rescoordx * doubleSourceyGradient[nIndex];
-                    hessian[0][0] += rescoordy * rescoordy;
-                    hessian[0][1] += rescoordy * doubleSourcexGradient[nIndex];
-                    hessian[0][2] += rescoordy * doubleSourceyGradient[nIndex];
+                    gradient[0] += diff * theta;
+                    gradient[1] += diff * doubleSourcexGradient[nIndex];
+                    gradient[2] += diff * doubleSourceyGradient[nIndex];
+                    hessian[0][0] += theta * theta;
+                    hessian[0][1] += theta * doubleSourcexGradient[nIndex];
+                    hessian[0][2] += theta * doubleSourceyGradient[nIndex];
                     hessian[1][1] += doubleSourcexGradient[nIndex] * doubleSourcexGradient[nIndex];
                     hessian[1][2] += doubleSourcexGradient[nIndex] * doubleSourceyGradient[nIndex];
                     hessian[2][2] += doubleSourceyGradient[nIndex] * doubleSourceyGradient[nIndex];
@@ -1239,26 +2066,25 @@ public class HybridPrecisionCPUAligner extends CPUAligner {
         return msqe / ((double) area);
     }
     
-    
-    private double getTranslationMeanSquaresDouble(double currentoffsetx, double currentoffsety) {
+    private double getScaledRotationMeanSquaresDouble(double currentoffsetx, double currentoffsety, double currentangle, double currentscale) {
         // First reset the global values which will not be reset in the loop
-        gradient[0] = 0.0;
-        gradient[1] = 0.0;
-        hessian[0][0] = 0.0;
-        hessian[0][1] = 0.0;
-        hessian[1][0] = 0.0;
-        hessian[1][1] = 0.0;
+        Arrays.fill(gradient, 0.0);
+        for (int i = 0; (i < 4); i++) {
+            Arrays.fill(hessian[i], 0.0);
+        }
+        
         final int width = (int) sharedContext.img.dimension(0);
         final int height = (int) sharedContext.img.dimension(1);
         final int doubletargetwidth = width * 2;
         final int doubletargetheight = height * 2;
         int nIndex = 0;
         int area = 0;
-        int p;
-        int q;
-        int tmpindex;
         double s;
         double msqe = 0.0;// mean square error
+        double xvecx = Math.cos(currentangle) * currentscale;
+        double xvecy = -Math.sin(currentangle) * currentscale;
+        double yvecx = -xvecy;
+        double yvecy = xvecx;
         double coordx;
         double rescoordx;
         double coordy;
@@ -1268,108 +2094,353 @@ public class HybridPrecisionCPUAligner extends CPUAligner {
         for (int i = 0; i < height; i++) {
             // First walk along the Y-vector direction and reset the X-position (otherwise the
             // y position is initially correct and then lagging behind by one all the time)
-            coordx = currentoffsetx;
-            coordy = currentoffsety + ((double) i);
+            coordx = currentoffsetx + ((double) i) * yvecx;
+            coordy = currentoffsety + ((double) i) * yvecy;
             for (int n = 0; n < width; n++, nIndex++) {
                 mskx = (int) Math.round(coordx);
                 msky = (int) Math.round(coordy);
                 if ((mskx >= 0) && (mskx < width) && (msky >= 0) && (msky < height)) {
                     area++;
-                    // Calculate X-interpolation indices
-                    p = (coordx >= 0) ? (((int) coordx) + 2) : (((int) coordx) + 1);
-                    for (int c = 0; c < 4; c++, p--) {
-                        q = (p < 0) ? (-1 - p) : p;
-                        q = (q < doubletargetwidth) ? q : q % doubletargetwidth;
-                        xInterpolationIndices[c] = q >= width ? (doubletargetwidth - 1 - q) : q;
-                    }
-                    // calculate Y-interpolation indices
-                    p = (coordy >= 0) ? (((int) coordy) + 2) : (((int) coordy) + 1);
-                    for (int c = 0; c < 4; c++, p--) {
-                        q = (p < 0) ? (-1 - p) : p;
-                        q = (q < doubletargetheight) ? q : q % doubletargetheight;
-                        // calculate linearized coordinates of the coefficient array
-                        yInterpolationIndices[c] = q >= height ? (doubletargetheight - 1 - q) * width : q * width;
-                    }
-                    // get the residuals of the coordinates
-                    rescoordx = coordx - (coordx >= 0.0 ? ((double) ((int) coordx)) : ((double) (((int) coordx) - 1)));
-                    rescoordy = coordy - (coordy >= 0.0 ? ((double) ((int) coordy)) : ((double) (((int) coordy) - 1)));
-                    // calculate the X-weights
-                    s = 1.0 - rescoordx;
-                    xWeights[3] = Math.pow(s, 3.0) / 6.0;
-                    s = rescoordx * rescoordx;
-                    xWeights[2] = (2.0 / 3.0) - 0.5 * s * (2.0 - rescoordx);
-                    xWeights[0] = s * rescoordx / 6.0;
-                    xWeights[1] = 1.0 - xWeights[0] - xWeights[2] - xWeights[3];
-                    // calculate the Y-weights
-                    s = 1.0 - rescoordy;
-                    yWeights[3] = Math.pow(s, 3.0) / 6.0;
-                    s = rescoordy * rescoordy;
-                    yWeights[2] = (2.0 / 3.0) - 0.5 * s * (2.0 - rescoordy);
-                    yWeights[0] = s * rescoordy / 6.0;
-                    yWeights[1] = 1.0 - yWeights[0] - yWeights[2] - yWeights[3];
 
-                    // calculate the interpolated value from the target coefficients
-                    s = 0.0;
-                    for (int y = 0; y < 4; y++) {
-                        rescoordx = 0.0;// To avoid using too many variables this one will be repurposed
-                        tmpindex = yInterpolationIndices[y];
-                        for (int x = 0; x < 4; x++) {
-                            rescoordx += xWeights[x] * doubleTargetCoefficients[tmpindex + xInterpolationIndices[x]];
-                        }
-                        s += yWeights[y] * rescoordx;
-                    }
+                    PlainJavaCPUAligner.computeXInterpolationIndices(coordx, doubletargetwidth, width, xInterpolationIndices);
+                    PlainJavaCPUAligner.computeYInterpolationIndices(coordy, doubletargetheight, height, width, yInterpolationIndices);
 
-                    // calculate the values for returning
-                    rescoordx = doubleSourceImage[nIndex] - s;// repurposed for diff
-                    msqe += rescoordx * rescoordx;
+                    rescoordx = PlainJavaCPUAligner.getFractional(coordx);
+                    rescoordy = PlainJavaCPUAligner.getFractional(coordy);
+                    
+                    s = PlainJavaCPUAligner.interpolateCubicBSpline(rescoordx, rescoordy, xInterpolationIndices, yInterpolationIndices, doubleTargetCoefficients);
+                    
+                    // calculate the return values
+                    double diff = doubleSourceImage[nIndex] - s;
+                    msqe += diff * diff;
+                    double theta = doubleSourceyGradient[nIndex] * (double)n - doubleSourcexGradient[nIndex] * (double)i;
+                    final double j_scale = (((double)n) * doubleSourcexGradient[nIndex] + ((double)i) * doubleSourceyGradient[nIndex]);
+                    final double j_logScale = currentscale * j_scale;
                     /*
-                     * TODO/FIXME/KNOWN ISSUE: The following summation is MUCH worse than the
-                     * parallel sum reduction done on the GPU, because (relatively speaking) small
-                     * numbers are added to an ever growing larger number reducing the precision in
-                     * the outcome. Currently I ignore this like the original implementation, but
-                     * this is one of many reasons why the GPU version and the CPU version will
-                     * never yield the same results!
-                     */
-                    gradient[0] += rescoordx * doubleSourcexGradient[nIndex];
-                    gradient[1] += rescoordx * doubleSourceyGradient[nIndex];
-                    hessian[0][0] += doubleSourcexGradient[nIndex] * doubleSourcexGradient[nIndex];
-                    hessian[0][1] += doubleSourcexGradient[nIndex] * doubleSourceyGradient[nIndex];
-                    hessian[1][1] += doubleSourceyGradient[nIndex] * doubleSourceyGradient[nIndex];
+                    TODO/FIXME/KNOWN ISSUE:
+                    The following summation is MUCH worse than the parallel sum reduction done on the GPU, because (relatively speaking)
+                    small numbers are added to an ever growing larger number, reducing the precision in the outcome. Currently
+                    I ignore this like the original implementation, but this is one of many reasons why the GPU version and the CPU version
+                    will never yield the same results!
+                    */
+                    gradient[0] += diff * j_logScale;
+                    gradient[1] += diff * theta;
+                    gradient[2] += diff * doubleSourcexGradient[nIndex];
+                    gradient[3] += diff * doubleSourceyGradient[nIndex];
+                    hessian[0][0] += j_logScale * j_logScale;
+                    hessian[0][1] += j_logScale * theta;
+                    hessian[0][2] += j_logScale * doubleSourcexGradient[nIndex];
+                    hessian[0][3] += j_logScale * doubleSourceyGradient[nIndex];
+                    hessian[1][1] += theta * theta;
+                    hessian[1][2] += theta * doubleSourcexGradient[nIndex];
+                    hessian[1][3] += theta * doubleSourceyGradient[nIndex];
+                    hessian[2][2] += doubleSourcexGradient[nIndex] * doubleSourcexGradient[nIndex];
+                    hessian[2][3] += doubleSourcexGradient[nIndex] * doubleSourceyGradient[nIndex];
+                    hessian[3][3] += doubleSourceyGradient[nIndex] * doubleSourceyGradient[nIndex];
                 }
                 // walk along the X-vector direction
-                coordx += 1.0;
+                coordx += xvecx;
+                coordy += xvecy;
             }
         }
         // symmetrize hessian
-        for (int i = 1; (i < 2); i++) {
+        for (int i = 1; (i < 4); i++) {
             for (int j = 0; (j < i); j++) {
                 hessian[i][j] = hessian[j][i];
             }
         }
-        return msqe / ((double) area);
+        final double jacobianNorm = Math.max(currentscale * currentscale, 1.0e-12);
+        return msqe / (((double) area) * jacobianNorm);
+    }
+    
+    
+    private double getAffineMeanSquaresDouble(double currentoffsetx, double currentoffsety,
+            double currenta11, double currenta12,
+            double currenta21, double currenta22) {
+        // First reset the global values which will not be reset in the loop
+    	Arrays.fill(gradient, 0.0);
+        for (int i = 0; i < 6; i++) {
+            Arrays.fill(hessian[i], 0.0);
+        }
+        //WARNING: Unlike the PlainJavaCPUAligner the width and height of the source and target MUST be the same
+        final int width = (int) sharedContext.img.dimension(0);
+        final int height = (int) sharedContext.img.dimension(1);
+        final int doubletargetwidth = width * 2;
+        final int doubletargetheight = height * 2;
+        int nIndex = 0;
+        int area = 0;
+        double s;
+        double msqe = 0.0;// mean square error
+        double xvecx = currenta11;
+        double xvecy = currenta21;
+        double yvecx = currenta12;
+        double yvecy = currenta22;
+        double coordx;
+        double rescoordx;
+        double coordy;
+        double rescoordy;
+        int mskx;
+        int msky;
+        /*
+         * Jacobian column variables (recomputed per pixel):
+         *   dx0 = n * ∂f/∂x   (∂f/∂a11)
+         *   dx1 = i * ∂f/∂x   (∂f/∂a12)
+         *   dy0 = n * ∂f/∂y   (∂f/∂a21)
+         *   dy1 = i * ∂f/∂y   (∂f/∂a22)
+         *   dx  = ∂f/∂x       (∂f/∂tx)
+         *   dy  = ∂f/∂y       (∂f/∂ty)
+         */
+        double dx0, dx1, dy0, dy1, dx, dy;
+        for (int i = 0; i < height; i++) {
+            // First walk along the Y-vector direction and reset the X-position (otherwise the
+            // y position is initially correct and then lagging behind by one all the time)
+            coordx = currentoffsetx + ((double) i) * yvecx;
+            coordy = currentoffsety + ((double) i) * yvecy;
+            for (int n = 0; n < width; n++, nIndex++) {
+                mskx = (int) Math.round(coordx);
+                msky = (int) Math.round(coordy);
+                if ((mskx >= 0) && (mskx < width) && (msky >= 0) && (msky < height)) {
+                    area++;
+                    
+                    PlainJavaCPUAligner.computeXInterpolationIndices(coordx, doubletargetwidth, width, xInterpolationIndices);
+                    PlainJavaCPUAligner.computeYInterpolationIndices(coordy, doubletargetheight, height, width, yInterpolationIndices);
+
+                    rescoordx = PlainJavaCPUAligner.getFractional(coordx);
+                    rescoordy = PlainJavaCPUAligner.getFractional(coordy);
+                    
+                    s = PlainJavaCPUAligner.interpolateCubicBSpline(rescoordx, rescoordy, xInterpolationIndices, yInterpolationIndices, doubleTargetCoefficients);
+
+                    // ---- Gradient and Hessian accumulation ----
+
+                    /*
+                     * Residual: r_i = f(x_i) - g(T_p(x_i))
+                     * where f is the source image and g is the B-spline-interpolated target.
+                     * We reuse rescoordx to store the residual (same as translation/rigid body).
+                     */
+                    double diff = doubleSourceImage[nIndex] - s;
+                    msqe += diff * diff;
+                    
+                    /*
+                    TODO/FIXME/KNOWN ISSUE:
+                    The following summation is MUCH worse than the parallel sum reduction done on the GPU, because (relatively speaking)
+                    small numbers are added to an ever growing larger number, reducing the precision in the outcome. Currently
+                    I ignore this like the original implementation, but this is one of many reasons why the GPU version and the CPU version
+                    will never yield the same results!
+                    */
+                    
+                    /*
+                     * Jacobian columns for the affine parameterization:
+                     *   ∂f/∂a11 = n * ∂f/∂x       → dx0
+                     *   ∂f/∂a12 = i * ∂f/∂x       → dx1
+                     *   ∂f/∂a21 = n * ∂f/∂y       → dy0
+                     *   ∂f/∂a22 = i * ∂f/∂y       → dy1
+                     *   ∂f/∂tx  = ∂f/∂x           → dx
+                     *   ∂f/∂ty  = ∂f/∂y           → dy
+                     *
+                     * These use the SOURCE gradients (the "inverse" approach).
+                     */
+                    dx = doubleSourcexGradient[nIndex];
+                    dy = doubleSourceyGradient[nIndex];
+                    dx0 = ((double)n) * dx;   // n * ∂f/∂x
+                    dx1 = ((double)i) * dx;   // i * ∂f/∂x
+                    dy0 = ((double)n) * dy;   // n * ∂f/∂y
+                    dy1 = ((double)i) * dy;   // i * ∂f/∂y
+
+                    /*
+                     * Gradient accumulation: g_k += r_i * J_ik
+                     * Parameter order: (a11, a12, a21, a22, tx, ty)
+                     */
+                    gradient[0] += diff * dx0;   // Σ r * n * ∂f/∂x
+                    gradient[1] += diff * dx1;   // Σ r * i * ∂f/∂x
+                    gradient[2] += diff * dy0;   // Σ r * n * ∂f/∂y
+                    gradient[3] += diff * dy1;   // Σ r * i * ∂f/∂y
+                    gradient[4] += diff * dx;    // Σ r * ∂f/∂x
+                    gradient[5] += diff * dy;    // Σ r * ∂f/∂y
+
+                    /*
+                     * Hessian accumulation (upper triangle only):
+                     * H_kl += J_ik * J_il
+                     *
+                     * This is the Gauss-Newton approximation H ≈ J^T J,
+                     * ignoring the second-order terms r_i * ∇²f_i.
+                     * Only 21 unique entries (upper triangle of 6×6 symmetric matrix).
+                     */
+                    // Row 0: a11 × {a11, a12, a21, a22, tx, ty}
+                    hessian[0][0] += dx0 * dx0;
+                    hessian[0][1] += dx0 * dx1;
+                    hessian[0][2] += dx0 * dy0;
+                    hessian[0][3] += dx0 * dy1;
+                    hessian[0][4] += dx0 * dx;
+                    hessian[0][5] += dx0 * dy;
+                    // Row 1: a12 × {a12, a21, a22, tx, ty}
+                    hessian[1][1] += dx1 * dx1;
+                    hessian[1][2] += dx1 * dy0;
+                    hessian[1][3] += dx1 * dy1;
+                    hessian[1][4] += dx1 * dx;
+                    hessian[1][5] += dx1 * dy;
+                    // Row 2: a21 × {a21, a22, tx, ty}
+                    hessian[2][2] += dy0 * dy0;
+                    hessian[2][3] += dy0 * dy1;
+                    hessian[2][4] += dy0 * dx;
+                    hessian[2][5] += dy0 * dy;
+                    // Row 3: a22 × {a22, tx, ty}
+                    hessian[3][3] += dy1 * dy1;
+                    hessian[3][4] += dy1 * dx;
+                    hessian[3][5] += dy1 * dy;
+                    // Row 4: tx × {tx, ty}
+                    hessian[4][4] += dx * dx;
+                    hessian[4][5] += dx * dy;
+                    // Row 5: ty × {ty}
+                    hessian[5][5] += dy * dy;
+                }
+                // walk along the X-vector direction
+                coordx += xvecx;
+                coordy += xvecy;
+            }
+        }
+        // symmetrize hessian
+        for (int i = 1; (i < 6); i++) {
+            for (int j = 0; (j < i); j++) {
+                hessian[i][j] = hessian[j][i];
+            }
+        }
+        final double detA = Math.abs(currenta11 * currenta22 - currenta12 * currenta21);
+        final double jacobianNorm = Math.max(detA, 1.0e-12);
+        return msqe / (((double) area) * jacobianNorm);
+    }
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    /**
+     * Computes 4 mirror-boundary B-spline X-interpolation indices.
+     * Fills indices[c] with the mirrored column index (no stride multiplication).
+     *
+     * @param coord           the (possibly fractional) x-coordinate
+     * @param doubletargetwidth   2 * targetwidth
+     * @param targetwidth     width of the target image
+     * @param indices         output array to fill (length >= 4)
+     */
+    static void computeXInterpolationIndicesFloat(float coord, int doubletargetwidth, int targetwidth, int[] indices)
+    {
+        int p = (coord >= 0) ? (((int)coord) + 2) : (((int)coord) + 1);
+        for (int c = 0; c < 4; c++, p--)
+        {
+            int q = (p < 0) ? (-1 - p) : p;
+            q = (q < doubletargetwidth) ? q : q % doubletargetwidth;
+            indices[c] = q >= targetwidth ? (doubletargetwidth - 1 - q) : q;
+        }
     }
 
-    private double getRigidBodyMeanSquares(int pyramidIndex, float currentoffsetx, float currentoffsety,
-            float currentangle) {
+    /**
+     * Computes 4 mirror-boundary B-spline Y-interpolation indices,
+     * linearized by multiplying by targetwidth for direct use as row offsets.
+     *
+     * @param coord              the (possibly fractional) y-coordinate
+     * @param doubletargetheight 2 * targetheight
+     * @param targetheight       height of the target image
+     * @param targetwidth        width of the target image (stride multiplier)
+     * @param indices            output array to fill (length >= 4)
+     */
+    static void computeYInterpolationIndicesFloat(float coord, int doubletargetheight, int targetheight, int targetwidth, int[] indices)
+    {
+        int p = (coord >= 0) ? (((int)coord) + 2) : (((int)coord) + 1);
+        for (int c = 0; c < 4; c++, p--)
+        {
+            int q = (p < 0) ? (-1 - p) : p;
+            q = (q < doubletargetheight) ? q : q % doubletargetheight;
+            indices[c] = q >= targetheight ? (doubletargetheight - 1 - q) * targetwidth : q * targetwidth;
+        }
+    }
+
+
+    /**
+     * Returns the fractional (sub-pixel) part of a coordinate.
+     * Handles negative coordinates correctly (floor, not truncation).
+     */
+    static float getFractionalFloat(float coord)
+    {
+        return coord - (coord >= 0.0 ? ((float)((int)coord)) : ((float)(((int)coord) - 1)));
+    }
+    
+    /**
+     * Computes the cubic B-spline interpolated value at the given fractional
+     * coordinates, using the precomputed interpolation indices.
+     *
+     * This is mathematically equivalent to:
+     *   - Computing xWeights[0..3] and yWeights[0..3] from rescoordx and rescoordy
+     *   - Performing the separable 4x4 B-spline interpolation over target[]
+     *
+     * The cubic B-spline basis functions used here are the standard ones:
+     *   w3 = (1 - t)^3 / 6
+     *   w2 = 2/3 - t^2*(2-t)/2
+     *   w0 = t^2*t / 6
+     *   w1 = 1 - w0 - w2 - w3
+     *
+     * @param rescoordx            fractional x-coordinate in [0, 1)
+     * @param rescoordy            fractional y-coordinate in [0, 1)
+     * @param xInterpolationIndices precomputed mirror-boundary column indices (length 4)
+     * @param yInterpolationIndices precomputed mirror-boundary row offsets   (length 4)
+     * @param target               the B-spline coefficient array
+     * @return                     the interpolated value at (rescoordx, rescoordy)
+     */
+    static float interpolateCubicBSplineFloat(
+            float rescoordx, float rescoordy,
+            int[] xInterpolationIndices, int[] yInterpolationIndices,
+            float[] target)
+    {
+        // --- X weights ---
+    	float sx = 1.0f - rescoordx;
+    	float xw3 = (sx * sx * sx) / 6.0f;
+    	float sx2 = rescoordx * rescoordx;
+    	float xw2 = (2.0f / 3.0f) - 0.5f * sx2 * (2.0f - rescoordx);
+    	float xw0 = sx2 * rescoordx / 6.0f;
+    	float xw1 = 1.0f - xw0 - xw2 - xw3;
+
+        // --- Y weights ---
+        float sy = 1.0f - rescoordy;
+        float yw3 = (sy * sy * sy) / 6.0f;
+        float sy2 = rescoordy * rescoordy;
+        float yw2 = (2.0f / 3.0f) - 0.5f * sy2 * (2.0f - rescoordy);
+        float yw0 = sy2 * rescoordy / 6.0f;
+        float yw1 = 1.0f - yw0 - yw2 - yw3;
+
+        float[] xWeightsLocal = { xw0, xw1, xw2, xw3 };
+        float[] yWeightsLocal = { yw0, yw1, yw2, yw3 };
+
+        // --- Separable 4x4 interpolation ---
+        float s = 0.0f;
+        for (int y = 0; y < 4; y++)
+        {
+            int tmpindex = yInterpolationIndices[y];
+            float row = 0.0f;
+            for (int x = 0; x < 4; x++)
+            {
+                row += xWeightsLocal[x] * target[tmpindex + xInterpolationIndices[x]];
+            }
+            s += yWeightsLocal[y] * row;
+        }
+        return s;
+    }
+    
+    private double getTranslationMeanSquares(int pyramidIndex, float currentoffsetx, float currentoffsety) {
         // First reset the global values which will not be reset in the loop
-        gradient[0] = 0.0;
-        gradient[1] = 0.0;
-        gradient[2] = 0.0;
-        hessian[0][0] = 0.0;
-        hessian[0][1] = 0.0;
-        hessian[0][2] = 0.0;
-        hessian[1][1] = 0.0;
-        hessian[1][2] = 0.0;
-        hessian[2][2] = 0.0;
-        fgradient[0] = 0.0f;
-        fgradient[1] = 0.0f;
-        fgradient[2] = 0.0f;
-        fhessian[0][0] = 0.0f;
-        fhessian[0][1] = 0.0f;
-        fhessian[0][2] = 0.0f;
-        fhessian[1][1] = 0.0f;
-        fhessian[1][2] = 0.0f;
-        fhessian[2][2] = 0.0f;
+    	Arrays.fill(gradient, 0.0);
+        for (int i = 0; (i < 2); i++) {
+            Arrays.fill(hessian[i], 0.0);
+        }
+        
+        Arrays.fill(fgradient, 0.0f);
+        for (int i = 0; (i < 2); i++) {
+            Arrays.fill(fhessian[i], 0.0f);
+        }
+
         final int width = (int) sourcePyramid[pyramidIndex].width;
         final int height = (int) sourcePyramid[pyramidIndex].height;
         final float[] source = sourcePyramid[pyramidIndex].Image;
@@ -1382,9 +2453,91 @@ public class HybridPrecisionCPUAligner extends CPUAligner {
         final float[] target = targetPyramid[pyramidIndex].Coefficient;
         int nIndex = 0;
         int area = 0;
-        int p;
-        int q;
-        int tmpindex;
+        float s;
+        float msqe = 0.0f;// mean square error
+        float coordx;
+        float rescoordx;
+        float coordy;
+        float rescoordy;
+        int mskx;
+        int msky;
+        for (int i = 0; i < height; i++) {
+            // First walk along the Y-vector direction and reset the X-position (otherwise the
+            // y position is initially correct and then lagging behind by one all the time)
+            coordx = currentoffsetx;
+            coordy = currentoffsety + ((float) i);
+            for (int n = 0; n < width; n++, nIndex++) {
+                mskx = (int) Math.round(coordx);
+                msky = (int) Math.round(coordy);
+                if ((mskx >= 0) && (mskx < targetwidth) && (msky >= 0) && (msky < targetheight)) {
+                    area++;
+                    computeXInterpolationIndicesFloat(coordx, doubletargetwidth, targetwidth, xInterpolationIndices);
+                    computeYInterpolationIndicesFloat(coordy, doubletargetheight, targetheight, targetwidth, yInterpolationIndices);
+
+                    rescoordx = getFractionalFloat(coordx);
+                    rescoordy = getFractionalFloat(coordy);
+                    
+                    s = interpolateCubicBSplineFloat(rescoordx, rescoordy, xInterpolationIndices, yInterpolationIndices, target);
+
+                    // now calculate the return value
+                    float diff = source[nIndex] - s;
+                    msqe += diff * diff;
+                    /*
+                     * TODO/FIXME/KNOWN ISSUE: The following summation is MUCH worse than the
+                     * parallel sum reduction done on the GPU, because (relatively speaking) small
+                     * numbers are added to an ever growing larger number reducing the precision in
+                     * the outcome. Currently I ignore this like the original implementation, but
+                     * this is one of many reasons why the GPU version and the CPU version will
+                     * never yield the same results!
+                     */
+                    fgradient[0] += diff * xGradient[nIndex];
+                    fgradient[1] += diff * yGradient[nIndex];
+                    fhessian[0][0] += xGradient[nIndex] * xGradient[nIndex];
+                    fhessian[0][1] += xGradient[nIndex] * yGradient[nIndex];
+                    fhessian[1][1] += yGradient[nIndex] * yGradient[nIndex];
+                }
+                // walk along the X-vector direction
+                coordx += 1.0f;
+            }
+        }
+        gradient[0] = fgradient[0];
+        gradient[1] = fgradient[1];
+        hessian[0][0] = fhessian[0][0];
+        hessian[0][1] = fhessian[0][1];
+        hessian[1][0] = fhessian[1][0];
+        hessian[1][1] = fhessian[1][1];
+        // symmetrize hessian
+        for (int i = 1; (i < 2); i++) {
+            for (int j = 0; (j < i); j++) {
+                hessian[i][j] = hessian[j][i];
+            }
+        }
+        return msqe / ((double) area);
+    }
+
+    private double getRigidBodyMeanSquares(int pyramidIndex, float currentoffsetx, float currentoffsety,
+            float currentangle) {
+        // First reset the global values which will not be reset in the loop
+        Arrays.fill(gradient, 0.0);
+        for (int i = 0; (i < 3); i++) {
+            Arrays.fill(hessian[i], 0.0);
+        }
+        Arrays.fill(fgradient, 0.0f);
+        for (int i = 0; (i < 3); i++) {
+            Arrays.fill(fhessian[i], 0.0f);
+        }
+        final int width = (int) sourcePyramid[pyramidIndex].width;
+        final int height = (int) sourcePyramid[pyramidIndex].height;
+        final float[] source = sourcePyramid[pyramidIndex].Image;
+        final float[] xGradient = sourcePyramid[pyramidIndex].xGradient;
+        final float[] yGradient = sourcePyramid[pyramidIndex].yGradient;
+        final int targetwidth = (int) targetPyramid[pyramidIndex].width;
+        final int doubletargetwidth = targetwidth * 2;
+        final int targetheight = (int) targetPyramid[pyramidIndex].height;
+        final int doubletargetheight = targetheight * 2;
+        final float[] target = targetPyramid[pyramidIndex].Coefficient;
+        int nIndex = 0;
+        int area = 0;
         float s;
         float msqe = 0.0f;// mean square error
         float xvecx = (float) Math.cos(currentangle);
@@ -1407,54 +2560,20 @@ public class HybridPrecisionCPUAligner extends CPUAligner {
                 msky = (int) Math.round(coordy);
                 if ((mskx >= 0) && (mskx < targetwidth) && (msky >= 0) && (msky < targetheight)) {
                     area++;
-                    // Calculate X-interpolation indices
-                    p = (coordx >= 0) ? (((int) coordx) + 2) : (((int) coordx) + 1);
-                    for (int c = 0; c < 4; c++, p--) {
-                        q = (p < 0) ? (-1 - p) : p;
-                        q = (q < doubletargetwidth) ? q : q % doubletargetwidth;
-                        xInterpolationIndices[c] = q >= targetwidth ? (doubletargetwidth - 1 - q) : q;
-                    }
-                    // calculate Y-interpolation indices
-                    p = (coordy >= 0) ? (((int) coordy) + 2) : (((int) coordy) + 1);
-                    for (int c = 0; c < 4; c++, p--) {
-                        q = (p < 0) ? (-1 - p) : p;
-                        q = (q < doubletargetheight) ? q : q % doubletargetheight;
-                        yInterpolationIndices[c] = q >= targetheight ? (doubletargetheight - 1 - q) * targetwidth
-                                : q * targetwidth;// calculate linearized coordinates of the coefficient array
-                    }
-                    // get the residuals of the coordinates
-                    rescoordx = coordx - (coordx >= 0.0 ? ((float) ((int) coordx)) : ((float) (((int) coordx) - 1)));
-                    rescoordy = coordy - (coordy >= 0.0 ? ((float) ((int) coordy)) : ((float) (((int) coordy) - 1)));
-                    // calculate the X-weights
-                    s = 1.0f - rescoordx;
-                    fxWeights[3] = (float) Math.pow(s, 3.0) / 6.0f;
-                    s = rescoordx * rescoordx;
-                    fxWeights[2] = (2.0f / 3.0f) - 0.5f * s * (2.0f - rescoordx);
-                    fxWeights[0] = s * rescoordx / 6.0f;
-                    fxWeights[1] = 1.0f - fxWeights[0] - fxWeights[2] - fxWeights[3];
-                    // calculate the Y-weights
-                    s = 1.0f - rescoordy;
-                    fyWeights[3] = (float) Math.pow(s, 3.0) / 6.0f;
-                    s = rescoordy * rescoordy;
-                    fyWeights[2] = (2.0f / 3.0f) - 0.5f * s * (2.0f - rescoordy);
-                    fyWeights[0] = s * rescoordy / 6.0f;
-                    fyWeights[1] = 1.0f - fyWeights[0] - fyWeights[2] - fyWeights[3];
 
-                    // calculate the interpolated value from the target coefficients
-                    s = 0.0f;
-                    for (int y = 0; y < 4; y++) {
-                        rescoordx = 0.0f;// To avoid using too many variables this one will be repurposed
-                        tmpindex = yInterpolationIndices[y];
-                        for (int x = 0; x < 4; x++) {
-                            rescoordx += fxWeights[x] * target[tmpindex + xInterpolationIndices[x]];
-                        }
-                        s += fyWeights[y] * rescoordx;
-                    }
+                    computeXInterpolationIndicesFloat(coordx, doubletargetwidth, targetwidth, xInterpolationIndices);
+                    computeYInterpolationIndicesFloat(coordy, doubletargetheight, targetheight, targetwidth, yInterpolationIndices);
 
-                    // calculate the values for returning
-                    rescoordx = source[nIndex] - s;// repurposed for diff
-                    msqe += rescoordx * rescoordx;
-                    rescoordy = yGradient[nIndex] * (float) n - xGradient[nIndex] * (float) i;// repurposed for Theta
+                    rescoordx = getFractionalFloat(coordx);
+                    rescoordy = getFractionalFloat(coordy);
+                    
+                    s = interpolateCubicBSplineFloat(rescoordx, rescoordy, xInterpolationIndices, yInterpolationIndices, target);
+
+                    // calculate the return values
+                    float diff = source[nIndex] - s;
+                    msqe += diff * diff;
+                    float theta = yGradient[nIndex] * (float)n - xGradient[nIndex] * (float)i;
+                    
                     /*
                      * TODO/FIXME/KNOWN ISSUE: The following summation is MUCH worse than the
                      * parallel sum reduction done on the GPU, because (relatively speaking) small
@@ -1463,12 +2582,12 @@ public class HybridPrecisionCPUAligner extends CPUAligner {
                      * this is one of many reasons why the GPU version and the CPU version will
                      * never yield the same results!
                      */
-                    fgradient[0] += rescoordx * rescoordy;
-                    fgradient[1] += rescoordx * xGradient[nIndex];
-                    fgradient[2] += rescoordx * yGradient[nIndex];
-                    fhessian[0][0] += rescoordy * rescoordy;
-                    fhessian[0][1] += rescoordy * xGradient[nIndex];
-                    fhessian[0][2] += rescoordy * yGradient[nIndex];
+                    fgradient[0] += diff * theta;
+                    fgradient[1] += diff * xGradient[nIndex];
+                    fgradient[2] += diff * yGradient[nIndex];
+                    fhessian[0][0] += theta * theta;
+                    fhessian[0][1] += theta * xGradient[nIndex];
+                    fhessian[0][2] += theta * yGradient[nIndex];
                     fhessian[1][1] += xGradient[nIndex] * xGradient[nIndex];
                     fhessian[1][2] += xGradient[nIndex] * yGradient[nIndex];
                     fhessian[2][2] += yGradient[nIndex] * yGradient[nIndex];
@@ -1493,23 +2612,20 @@ public class HybridPrecisionCPUAligner extends CPUAligner {
                 hessian[i][j] = hessian[j][i];
             }
         }
-        return msqe / ((float) area);
+        return msqe / ((double) area);
     }
-
-    private double getTranslationMeanSquares(int pyramidIndex, float currentoffsetx, float currentoffsety) {
+    
+    private double getScaledRotationMeanSquares(int pyramidIndex, float currentoffsetx, float currentoffsety,
+            float currentangle, float currentscale) {
         // First reset the global values which will not be reset in the loop
-        gradient[0] = 0.0;
-        gradient[1] = 0.0;
-        hessian[0][0] = 0.0;
-        hessian[0][1] = 0.0;
-        hessian[1][0] = 0.0;
-        hessian[1][1] = 0.0;
-        fgradient[0] = 0.0f;
-        fgradient[1] = 0.0f;
-        fhessian[0][0] = 0.0f;
-        fhessian[0][1] = 0.0f;
-        fhessian[1][0] = 0.0f;
-        fhessian[1][1] = 0.0f;
+        Arrays.fill(gradient, 0.0);
+        for (int i = 0; (i < 4); i++) {
+            Arrays.fill(hessian[i], 0.0);
+        }
+        Arrays.fill(fgradient, 0.0f);
+        for (int i = 0; (i < 4); i++) {
+            Arrays.fill(fhessian[i], 0.0f);
+        }
         final int width = (int) sourcePyramid[pyramidIndex].width;
         final int height = (int) sourcePyramid[pyramidIndex].height;
         final float[] source = sourcePyramid[pyramidIndex].Image;
@@ -1522,11 +2638,12 @@ public class HybridPrecisionCPUAligner extends CPUAligner {
         final float[] target = targetPyramid[pyramidIndex].Coefficient;
         int nIndex = 0;
         int area = 0;
-        int p;
-        int q;
-        int tmpindex;
         float s;
         float msqe = 0.0f;// mean square error
+        float xvecx = (float)Math.cos(currentangle) * currentscale;
+        float xvecy = (float)-Math.sin(currentangle) * currentscale;
+        float yvecx = -xvecy;
+        float yvecy = xvecx;
         float coordx;
         float rescoordx;
         float coordy;
@@ -1536,60 +2653,29 @@ public class HybridPrecisionCPUAligner extends CPUAligner {
         for (int i = 0; i < height; i++) {
             // First walk along the Y-vector direction and reset the X-position (otherwise the
             // y position is initially correct and then lagging behind by one all the time)
-            coordx = currentoffsetx;
-            coordy = currentoffsety + ((float) i);
+            coordx = currentoffsetx + ((float) i) * yvecx;
+            coordy = currentoffsety + ((float) i) * yvecy;
             for (int n = 0; n < width; n++, nIndex++) {
                 mskx = (int) Math.round(coordx);
                 msky = (int) Math.round(coordy);
                 if ((mskx >= 0) && (mskx < targetwidth) && (msky >= 0) && (msky < targetheight)) {
                     area++;
-                    // Calculate X-interpolation indices
-                    p = (coordx >= 0) ? (((int) coordx) + 2) : (((int) coordx) + 1);
-                    for (int c = 0; c < 4; c++, p--) {
-                        q = (p < 0) ? (-1 - p) : p;
-                        q = (q < doubletargetwidth) ? q : q % doubletargetwidth;
-                        xInterpolationIndices[c] = q >= targetwidth ? (doubletargetwidth - 1 - q) : q;
-                    }
-                    // calculate Y-interpolation indices
-                    p = (coordy >= 0) ? (((int) coordy) + 2) : (((int) coordy) + 1);
-                    for (int c = 0; c < 4; c++, p--) {
-                        q = (p < 0) ? (-1 - p) : p;
-                        q = (q < doubletargetheight) ? q : q % doubletargetheight;
-                        yInterpolationIndices[c] = q >= targetheight ? (doubletargetheight - 1 - q) * targetwidth
-                                : q * targetwidth;// calculate linearized coordinates of the coefficient array
-                    }
-                    // get the residuals of the coordinates
-                    rescoordx = coordx - (coordx >= 0.0 ? ((float) ((int) coordx)) : ((float) (((int) coordx) - 1)));
-                    rescoordy = coordy - (coordy >= 0.0 ? ((float) ((int) coordy)) : ((float) (((int) coordy) - 1)));
-                    // calculate the X-weights
-                    s = 1.0f - rescoordx;
-                    fxWeights[3] = (float) Math.pow(s, 3.0) / 6.0f;
-                    s = rescoordx * rescoordx;
-                    fxWeights[2] = (2.0f / 3.0f) - 0.5f * s * (2.0f - rescoordx);
-                    fxWeights[0] = s * rescoordx / 6.0f;
-                    fxWeights[1] = 1.0f - fxWeights[0] - fxWeights[2] - fxWeights[3];
-                    // calculate the Y-weights
-                    s = 1.0f - rescoordy;
-                    fyWeights[3] = (float) Math.pow(s, 3.0) / 6.0f;
-                    s = rescoordy * rescoordy;
-                    fyWeights[2] = (2.0f / 3.0f) - 0.5f * s * (2.0f - rescoordy);
-                    fyWeights[0] = s * rescoordy / 6.0f;
-                    fyWeights[1] = 1.0f - fyWeights[0] - fyWeights[2] - fyWeights[3];
 
-                    // calculate the interpolated value from the target coefficients
-                    s = 0.0f;
-                    for (int y = 0; y < 4; y++) {
-                        rescoordx = 0.0f;// To avoid using too many variables this one will be repurposed
-                        tmpindex = yInterpolationIndices[y];
-                        for (int x = 0; x < 4; x++) {
-                            rescoordx += fxWeights[x] * target[tmpindex + xInterpolationIndices[x]];
-                        }
-                        s += fyWeights[y] * rescoordx;
-                    }
+                    computeXInterpolationIndicesFloat(coordx, doubletargetwidth, targetwidth, xInterpolationIndices);
+                    computeYInterpolationIndicesFloat(coordy, doubletargetheight, targetheight, targetwidth, yInterpolationIndices);
 
-                    // calculate the values for returning
-                    rescoordx = source[nIndex] - s;// repurposed for diff
-                    msqe += rescoordx * rescoordx;
+                    rescoordx = getFractionalFloat(coordx);
+                    rescoordy = getFractionalFloat(coordy);
+                    
+                    s = interpolateCubicBSplineFloat(rescoordx, rescoordy, xInterpolationIndices, yInterpolationIndices, target);
+
+                    // calculate the return values
+                    float diff = source[nIndex] - s;
+                    msqe += diff * diff;
+                    float theta = yGradient[nIndex] * (float)n - xGradient[nIndex] * (float)i;
+                    final float j_scale = (((float)n) * xGradient[nIndex] + ((float)i) * yGradient[nIndex]);
+                    final float j_logScale = currentscale * j_scale;
+                    
                     /*
                      * TODO/FIXME/KNOWN ISSUE: The following summation is MUCH worse than the
                      * parallel sum reduction done on the GPU, because (relatively speaking) small
@@ -1598,29 +2684,283 @@ public class HybridPrecisionCPUAligner extends CPUAligner {
                      * this is one of many reasons why the GPU version and the CPU version will
                      * never yield the same results!
                      */
-                    fgradient[0] += rescoordx * xGradient[nIndex];
-                    fgradient[1] += rescoordx * yGradient[nIndex];
-                    fhessian[0][0] += xGradient[nIndex] * xGradient[nIndex];
-                    fhessian[0][1] += xGradient[nIndex] * yGradient[nIndex];
-                    fhessian[1][1] += yGradient[nIndex] * yGradient[nIndex];
+                    fgradient[0] += diff * j_logScale;
+                    fgradient[1] += diff * theta;
+                    fgradient[2] += diff * xGradient[nIndex];
+                    fgradient[3] += diff * yGradient[nIndex];
+                    fhessian[0][0] += j_logScale * j_logScale;
+                    fhessian[0][1] += j_logScale * theta;
+                    fhessian[0][2] += j_logScale * xGradient[nIndex];
+                    fhessian[0][3] += j_logScale * yGradient[nIndex];
+                    fhessian[1][1] += theta * theta;
+                    fhessian[1][2] += theta * xGradient[nIndex];
+                    fhessian[1][3] += theta * yGradient[nIndex];
+                    fhessian[2][2] += xGradient[nIndex] * xGradient[nIndex];
+                    fhessian[2][3] += xGradient[nIndex] * yGradient[nIndex];
+                    fhessian[3][3] += yGradient[nIndex] * yGradient[nIndex];
                 }
                 // walk along the X-vector direction
-                coordx += 1.0f;
+                coordx += xvecx;
+                coordy += xvecy;
             }
         }
         gradient[0] = fgradient[0];
         gradient[1] = fgradient[1];
+        gradient[2] = fgradient[2];
+        gradient[3] = fgradient[3];
         hessian[0][0] = fhessian[0][0];
         hessian[0][1] = fhessian[0][1];
-        hessian[1][0] = fhessian[1][0];
+        hessian[0][2] = fhessian[0][2];
+        hessian[0][3] = fhessian[0][3];
         hessian[1][1] = fhessian[1][1];
+        hessian[1][2] = fhessian[1][2];
+        hessian[1][3] = fhessian[1][3];
+        hessian[2][2] = fhessian[2][2];
+        hessian[2][3] = fhessian[2][3];
+        hessian[3][3] = fhessian[3][3];
         // symmetrize hessian
-        for (int i = 1; (i < 2); i++) {
+        for (int i = 1; (i < 4); i++) {
             for (int j = 0; (j < i); j++) {
                 hessian[i][j] = hessian[j][i];
             }
         }
-        return msqe / ((float) area);
+        final double jacobianNorm = Math.max((double)currentscale * (double)currentscale, 1.0e-12);
+        return msqe / (((double) area) * jacobianNorm);
+    }
+    
+    private double getAffineMeanSquares(int pyramidIndex, float currentoffsetx, float currentoffsety,
+    		float currenta11, float currenta12,
+    		float currenta21, float currenta22) {
+        // First reset the global values which will not be reset in the loop
+        Arrays.fill(gradient, 0.0);
+        for (int i = 0; (i < 6); i++) {
+            Arrays.fill(hessian[i], 0.0);
+        }
+        Arrays.fill(fgradient, 0.0f);
+        for (int i = 0; (i < 6); i++) {
+            Arrays.fill(fhessian[i], 0.0f);
+        }
+        final int width = (int) sourcePyramid[pyramidIndex].width;
+        final int height = (int) sourcePyramid[pyramidIndex].height;
+        final float[] source = sourcePyramid[pyramidIndex].Image;
+        final float[] xGradient = sourcePyramid[pyramidIndex].xGradient;
+        final float[] yGradient = sourcePyramid[pyramidIndex].yGradient;
+        final int targetwidth = (int) targetPyramid[pyramidIndex].width;
+        final int doubletargetwidth = targetwidth * 2;
+        final int targetheight = (int) targetPyramid[pyramidIndex].height;
+        final int doubletargetheight = targetheight * 2;
+        final float[] target = targetPyramid[pyramidIndex].Coefficient;
+        int nIndex = 0;
+        int area = 0;
+        float s;
+        float msqe = 0.0f;// mean square error
+        float xvecx = currenta11;
+        float xvecy = currenta21;
+        float yvecx = currenta12;
+        float yvecy = currenta22;
+        float coordx;
+        float rescoordx;
+        float coordy;
+        float rescoordy;
+        int mskx;
+        int msky;
+        /*
+         * Jacobian column variables (recomputed per pixel):
+         *   dx0 = n * ∂f/∂x   (∂f/∂a11)
+         *   dx1 = i * ∂f/∂x   (∂f/∂a12)
+         *   dy0 = n * ∂f/∂y   (∂f/∂a21)
+         *   dy1 = i * ∂f/∂y   (∂f/∂a22)
+         *   dx  = ∂f/∂x       (∂f/∂tx)
+         *   dy  = ∂f/∂y       (∂f/∂ty)
+         */
+        float dx0, dx1, dy0, dy1, dx, dy;
+        for (int i = 0; i < height; i++) {
+            // First walk along the Y-vector direction and reset the X-position (otherwise the
+            // y position is initially correct and then lagging behind by one all the time)
+            coordx = currentoffsetx + ((float) i) * yvecx;
+            coordy = currentoffsety + ((float) i) * yvecy;
+            for (int n = 0; n < width; n++, nIndex++) {
+                mskx = (int) Math.round(coordx);
+                msky = (int) Math.round(coordy);
+                if ((mskx >= 0) && (mskx < targetwidth) && (msky >= 0) && (msky < targetheight)) {
+                    area++;
+
+                    computeXInterpolationIndicesFloat(coordx, doubletargetwidth, targetwidth, xInterpolationIndices);
+                    computeYInterpolationIndicesFloat(coordy, doubletargetheight, targetheight, targetwidth, yInterpolationIndices);
+
+                    rescoordx = getFractionalFloat(coordx);
+                    rescoordy = getFractionalFloat(coordy);
+                    
+                    s = interpolateCubicBSplineFloat(rescoordx, rescoordy, xInterpolationIndices, yInterpolationIndices, target);
+
+                    /*
+                     * Residual: r_i = f(x_i) - g(T_p(x_i))
+                     * where f is the source image and g is the B-spline-interpolated target.
+                     * We reuse rescoordx to store the residual (same as translation/rigid body).
+                     */
+                    float diff = source[nIndex] - s;
+                    msqe += diff * diff;
+                    
+                    /*
+                     * Jacobian columns for the affine parameterization:
+                     *   ∂f/∂a11 = n * ∂f/∂x       → dx0
+                     *   ∂f/∂a12 = i * ∂f/∂x       → dx1
+                     *   ∂f/∂a21 = n * ∂f/∂y       → dy0
+                     *   ∂f/∂a22 = i * ∂f/∂y       → dy1
+                     *   ∂f/∂tx  = ∂f/∂x           → dx
+                     *   ∂f/∂ty  = ∂f/∂y           → dy
+                     *
+                     * These use the SOURCE gradients (the "inverse" approach).
+                     */
+                    dx = xGradient[nIndex];
+                    dy = yGradient[nIndex];
+                    dx0 = ((float)n) * dx;   // n * ∂f/∂x
+                    dx1 = ((float)i) * dx;   // i * ∂f/∂x
+                    dy0 = ((float)n) * dy;   // n * ∂f/∂y
+                    dy1 = ((float)i) * dy;   // i * ∂f/∂y
+                    
+                    /*
+                     * TODO/FIXME/KNOWN ISSUE: The following summation is MUCH worse than the
+                     * parallel sum reduction done on the GPU, because (relatively speaking) small
+                     * numbers are added to an ever growing larger number reducing the precision in
+                     * the outcome. Currently I ignore this like the original implementation, but
+                     * this is one of many reasons why the GPU version and the CPU version will
+                     * never yield the same results!
+                     */
+
+                    /*
+                     * Gradient accumulation: g_k += r_i * J_ik
+                     * Parameter order: (a11, a12, a21, a22, tx, ty)
+                     */
+                    fgradient[0] += diff * dx0;   // Σ r * n * ∂f/∂x
+                    fgradient[1] += diff * dx1;   // Σ r * i * ∂f/∂x
+                    fgradient[2] += diff * dy0;   // Σ r * n * ∂f/∂y
+                    fgradient[3] += diff * dy1;   // Σ r * i * ∂f/∂y
+                    fgradient[4] += diff * dx;    // Σ r * ∂f/∂x
+                    fgradient[5] += diff * dy;    // Σ r * ∂f/∂y
+
+                    /*
+                     * Hessian accumulation (upper triangle only):
+                     * H_kl += J_ik * J_il
+                     *
+                     * This is the Gauss-Newton approximation H ≈ J^T J,
+                     * ignoring the second-order terms r_i * ∇²f_i.
+                     * Only 21 unique entries (upper triangle of 6×6 symmetric matrix).
+                     */
+                    // Row 0: a11 × {a11, a12, a21, a22, tx, ty}
+                    fhessian[0][0] += dx0 * dx0;
+                    fhessian[0][1] += dx0 * dx1;
+                    fhessian[0][2] += dx0 * dy0;
+                    fhessian[0][3] += dx0 * dy1;
+                    fhessian[0][4] += dx0 * dx;
+                    fhessian[0][5] += dx0 * dy;
+                    // Row 1: a12 × {a12, a21, a22, tx, ty}
+                    fhessian[1][1] += dx1 * dx1;
+                    fhessian[1][2] += dx1 * dy0;
+                    fhessian[1][3] += dx1 * dy1;
+                    fhessian[1][4] += dx1 * dx;
+                    fhessian[1][5] += dx1 * dy;
+                    // Row 2: a21 × {a21, a22, tx, ty}
+                    fhessian[2][2] += dy0 * dy0;
+                    fhessian[2][3] += dy0 * dy1;
+                    fhessian[2][4] += dy0 * dx;
+                    fhessian[2][5] += dy0 * dy;
+                    // Row 3: a22 × {a22, tx, ty}
+                    fhessian[3][3] += dy1 * dy1;
+                    fhessian[3][4] += dy1 * dx;
+                    fhessian[3][5] += dy1 * dy;
+                    // Row 4: tx × {tx, ty}
+                    fhessian[4][4] += dx * dx;
+                    fhessian[4][5] += dx * dy;
+                    // Row 5: ty × {ty}
+                    fhessian[5][5] += dy * dy;
+                }
+                // walk along the X-vector direction
+                coordx += xvecx;
+                coordy += xvecy;
+            }
+        }
+        gradient[0] = fgradient[0];
+        gradient[1] = fgradient[1];
+        gradient[2] = fgradient[2];
+        gradient[3] = fgradient[3];
+        gradient[4] = fgradient[4];
+        gradient[5] = fgradient[5];
+        hessian[0][0] = fhessian[0][0];
+        hessian[0][1] = fhessian[0][1];
+        hessian[0][2] = fhessian[0][2];
+        hessian[0][3] = fhessian[0][3];
+        hessian[0][4] = fhessian[0][4];
+        hessian[0][5] = fhessian[0][5];
+        hessian[1][1] = fhessian[1][1];
+        hessian[1][2] = fhessian[1][2];
+        hessian[1][3] = fhessian[1][3];
+        hessian[1][4] = fhessian[1][4];
+        hessian[1][5] = fhessian[1][5];
+        hessian[2][2] = fhessian[2][2];
+        hessian[2][3] = fhessian[2][3];
+        hessian[2][4] = fhessian[2][4];
+        hessian[2][5] = fhessian[2][5];
+        hessian[3][3] = fhessian[3][3];
+        hessian[3][4] = fhessian[3][4];
+        hessian[3][5] = fhessian[3][5];
+        hessian[4][4] = fhessian[4][4];
+        hessian[4][5] = fhessian[4][5];
+        hessian[5][5] = fhessian[5][5];
+        // symmetrize hessian
+        for (int i = 1; (i < 6); i++) {
+            for (int j = 0; (j < i); j++) {
+                hessian[i][j] = hessian[j][i];
+            }
+        }
+        final double detA = Math.abs((double)currenta11 * (double)currenta22 - (double)currenta12 * (double)currenta21);
+        final double jacobianNorm = Math.max(detA, 1.0e-12);
+        return msqe / (((double) area) * jacobianNorm);
+    }
+    
+    private double getTranslationMeanSquaresWithoutHessianDouble(double currentoffsetx, double currentoffsety) {
+        final int width = (int) sharedContext.img.dimension(0);
+        final int height = (int) sharedContext.img.dimension(1);
+        final int doubletargetwidth = width * 2;
+        final int doubletargetheight = height * 2;
+        int nIndex = 0;
+        int area = 0;
+        double s;
+        double msqe = 0.0;// mean square error
+        double coordx;
+        double rescoordx;
+        double coordy;
+        double rescoordy;
+        int mskx;
+        int msky;
+        for (int i = 0; i < height; i++) {
+            // First walk along the Y-vector direction and reset the X-position (otherwise the
+            // y position is initially correct and then lagging behind by one all the time)
+            coordx = currentoffsetx;
+            coordy = currentoffsety + ((double) i);
+            for (int n = 0; n < width; n++, nIndex++) {
+                mskx = (int) Math.round(coordx);
+                msky = (int) Math.round(coordy);
+                if ((mskx >= 0) && (mskx < width) && (msky >= 0) && (msky < height)) {
+                    area++;
+                    
+                    PlainJavaCPUAligner.computeXInterpolationIndices(coordx, doubletargetwidth, width, xInterpolationIndices);
+                    PlainJavaCPUAligner.computeYInterpolationIndices(coordy, doubletargetheight, height, width, yInterpolationIndices);
+
+                    rescoordx = PlainJavaCPUAligner.getFractional(coordx);
+                    rescoordy = PlainJavaCPUAligner.getFractional(coordy);
+                    
+                    s = PlainJavaCPUAligner.interpolateCubicBSpline(rescoordx, rescoordy, xInterpolationIndices, yInterpolationIndices, doubleTargetCoefficients);
+
+                    // calculate the return values
+                    double diff = doubleSourceImage[nIndex] - s;
+                    msqe += diff * diff;
+                }
+                // walk along the X-vector direction
+                coordx += 1.0;
+            }
+        }
+        return msqe / ((double) area);
     }
     
     private double getRigidBodyMeanSquaresWithoutHessianDouble(double currentoffsetx, double currentoffsety,
@@ -1631,9 +2971,6 @@ public class HybridPrecisionCPUAligner extends CPUAligner {
         final int doubletargetheight = height * 2;
         int nIndex = 0;
         int area = 0;
-        int p;
-        int q;
-        int tmpindex;
         double s;
         double msqe = 0.0;// mean square error
         double xvecx = Math.cos(currentangle);
@@ -1656,53 +2993,18 @@ public class HybridPrecisionCPUAligner extends CPUAligner {
                 msky = (int) Math.round(coordy);
                 if ((mskx >= 0) && (mskx < width) && (msky >= 0) && (msky < height)) {
                     area++;
-                    // Calculate X-interpolation indices
-                    p = (coordx >= 0) ? (((int) coordx) + 2) : (((int) coordx) + 1);
-                    for (int c = 0; c < 4; c++, p--) {
-                        q = (p < 0) ? (-1 - p) : p;
-                        q = q < doubletargetwidth ? q : q % doubletargetwidth;
-                        xInterpolationIndices[c] = q >= width ? (doubletargetwidth - 1 - q) : q;
-                    }
-                    // calculate Y-interpolation indices
-                    p = (coordy >= 0) ? (((int) coordy) + 2) : (((int) coordy) + 1);
-                    for (int c = 0; c < 4; c++, p--) {
-                        q = (p < 0) ? (-1 - p) : p;
-                        q = q < doubletargetheight ? q : q % doubletargetheight;
-                        // calculate linearized coordinates of the coefficient array
-                        yInterpolationIndices[c] = q >= height ? (doubletargetheight - 1 - q) * width : q * width;
-                    }
-                    // get the residuals of the coordinates
-                    rescoordx = coordx - (coordx >= 0.0 ? ((double) ((int) coordx)) : ((double) (((int) coordx) - 1)));
-                    rescoordy = coordy - (coordy >= 0.0 ? ((double) ((int) coordy)) : ((double) (((int) coordy) - 1)));
-                    // calculate the X-weights
-                    s = 1.0 - rescoordx;
-                    xWeights[3] = Math.pow(s, 3.0) / 6.0;
-                    s = rescoordx * rescoordx;
-                    xWeights[2] = (2.0 / 3.0) - 0.5 * s * (2.0 - rescoordx);
-                    xWeights[0] = s * rescoordx / 6.0;
-                    xWeights[1] = 1.0 - xWeights[0] - xWeights[2] - xWeights[3];
-                    // calculate the Y-weights
-                    s = 1.0 - rescoordy;
-                    yWeights[3] = Math.pow(s, 3.0) / 6.0;
-                    s = rescoordy * rescoordy;
-                    yWeights[2] = (2.0 / 3.0) - 0.5 * s * (2.0 - rescoordy);
-                    yWeights[0] = s * rescoordy / 6.0;
-                    yWeights[1] = 1.0 - yWeights[0] - yWeights[2] - yWeights[3];
+                    
+                    PlainJavaCPUAligner.computeXInterpolationIndices(coordx, doubletargetwidth, width, xInterpolationIndices);
+                    PlainJavaCPUAligner.computeYInterpolationIndices(coordy, doubletargetheight, height, width, yInterpolationIndices);
 
-                    // calculate the interpolated value from the target coefficients
-                    s = 0.0;
-                    for (int y = 0; y < 4; y++) {
-                        rescoordx = 0.0;// To avoid using too many variables this one will be repurposed
-                        tmpindex = yInterpolationIndices[y];
-                        for (int x = 0; x < 4; x++) {
-                            rescoordx += xWeights[x] * doubleTargetCoefficients[tmpindex + xInterpolationIndices[x]];
-                        }
-                        s += yWeights[y] * rescoordx;
-                    }
+                    rescoordx = PlainJavaCPUAligner.getFractional(coordx);
+                    rescoordy = PlainJavaCPUAligner.getFractional(coordy);
+                    
+                    s = PlainJavaCPUAligner.interpolateCubicBSpline(rescoordx, rescoordy, xInterpolationIndices, yInterpolationIndices, doubleTargetCoefficients);
 
-                    // calculate the values for returning
-                    rescoordx = doubleSourceImage[nIndex] - s;// repurposed for diff
-                    msqe += rescoordx * rescoordx;
+                    // calculate the return values
+                    double diff = doubleSourceImage[nIndex] - s;
+                    msqe += diff * diff;
                 }
                 // walk along the X-vector direction
                 coordx += xvecx;
@@ -1712,18 +3014,20 @@ public class HybridPrecisionCPUAligner extends CPUAligner {
         return msqe / ((double) area);
     }
     
-    private double getTranslationMeanSquaresWithoutHessianDouble(double currentoffsetx, double currentoffsety) {
+    private double getScaledRotationMeanSquaresWithoutHessianDouble(double currentoffsetx, double currentoffsety,
+            double currentangle, double currentscale) {
         final int width = (int) sharedContext.img.dimension(0);
         final int height = (int) sharedContext.img.dimension(1);
         final int doubletargetwidth = width * 2;
         final int doubletargetheight = height * 2;
         int nIndex = 0;
         int area = 0;
-        int p;
-        int q;
-        int tmpindex;
         double s;
         double msqe = 0.0;// mean square error
+        double xvecx = Math.cos(currentangle) * currentscale;
+        double xvecy = -Math.sin(currentangle) * currentscale;
+        double yvecx = -xvecy;
+        double yvecy = xvecx;
         double coordx;
         double rescoordx;
         double coordy;
@@ -1733,63 +3037,133 @@ public class HybridPrecisionCPUAligner extends CPUAligner {
         for (int i = 0; i < height; i++) {
             // First walk along the Y-vector direction and reset the X-position (otherwise the
             // y position is initially correct and then lagging behind by one all the time)
-            coordx = currentoffsetx;
-            coordy = currentoffsety + ((double) i);
+            coordx = currentoffsetx + ((double) i) * yvecx;
+            coordy = currentoffsety + ((double) i) * yvecy;
             for (int n = 0; n < width; n++, nIndex++) {
                 mskx = (int) Math.round(coordx);
                 msky = (int) Math.round(coordy);
                 if ((mskx >= 0) && (mskx < width) && (msky >= 0) && (msky < height)) {
                     area++;
-                    // Calculate X-interpolation indices
-                    p = (coordx >= 0) ? (((int) coordx) + 2) : (((int) coordx) + 1);
-                    for (int c = 0; c < 4; c++, p--) {
-                        q = (p < 0) ? (-1 - p) : p;
-                        q = q < doubletargetwidth ? q : q % doubletargetwidth;
-                        xInterpolationIndices[c] = q >= width ? (doubletargetwidth - 1 - q) : q;
-                    }
-                    // calculate Y-interpolation indices
-                    p = (coordy >= 0) ? (((int) coordy) + 2) : (((int) coordy) + 1);
-                    for (int c = 0; c < 4; c++, p--) {
-                        q = (p < 0) ? (-1 - p) : p;
-                        q = q < doubletargetheight ? q : q % doubletargetheight;
-                        // calculate linearized coordinates of the coefficient array
-                        yInterpolationIndices[c] = q >= height ? (doubletargetheight - 1 - q) * width : q * width;
-                    }
-                    // get the residuals of the coordinates
-                    rescoordx = coordx - (coordx >= 0.0 ? ((double) ((int) coordx)) : ((double) (((int) coordx) - 1)));
-                    rescoordy = coordy - (coordy >= 0.0 ? ((double) ((int) coordy)) : ((double) (((int) coordy) - 1)));
-                    // calculate the X-weights
-                    s = 1.0 - rescoordx;
-                    xWeights[3] = Math.pow(s, 3.0) / 6.0;
-                    s = rescoordx * rescoordx;
-                    xWeights[2] = (2.0 / 3.0) - 0.5 * s * (2.0 - rescoordx);
-                    xWeights[0] = s * rescoordx / 6.0;
-                    xWeights[1] = 1.0 - xWeights[0] - xWeights[2] - xWeights[3];
-                    // calculate the Y-weights
-                    s = 1.0 - rescoordy;
-                    yWeights[3] = Math.pow(s, 3.0) / 6.0;
-                    s = rescoordy * rescoordy;
-                    yWeights[2] = (2.0 / 3.0) - 0.5 * s * (2.0 - rescoordy);
-                    yWeights[0] = s * rescoordy / 6.0;
-                    yWeights[1] = 1.0 - yWeights[0] - yWeights[2] - yWeights[3];
+                    
+                    PlainJavaCPUAligner.computeXInterpolationIndices(coordx, doubletargetwidth, width, xInterpolationIndices);
+                    PlainJavaCPUAligner.computeYInterpolationIndices(coordy, doubletargetheight, height, width, yInterpolationIndices);
 
-                    // calculate the interpolated value from the target coefficients
-                    s = 0.0;
-                    for (int y = 0; y < 4; y++) {
-                        rescoordx = 0.0;// To avoid using too many variables this one will be repurposed
-                        tmpindex = yInterpolationIndices[y];
-                        for (int x = 0; x < 4; x++) {
-                            rescoordx += xWeights[x] * doubleTargetCoefficients[tmpindex + xInterpolationIndices[x]];
-                        }
-                        s += yWeights[y] * rescoordx;
-                    }
+                    rescoordx = PlainJavaCPUAligner.getFractional(coordx);
+                    rescoordy = PlainJavaCPUAligner.getFractional(coordy);
+                    
+                    s = PlainJavaCPUAligner.interpolateCubicBSpline(rescoordx, rescoordy, xInterpolationIndices, yInterpolationIndices, doubleTargetCoefficients);
 
-                    // calculate the values for returning
-                    rescoordx = doubleSourceImage[nIndex] - s;// repurposed for diff
-                    msqe += rescoordx * rescoordx;
+                    // calculate the return values
+                    double diff = doubleSourceImage[nIndex] - s;
+                    msqe += diff * diff;
                 }
                 // walk along the X-vector direction
-                coordx += 1.0;
+                coordx += xvecx;
+                coordy += xvecy;
+            }
+        }
+        final double jacobianNorm = Math.max(currentscale * currentscale, 1.0e-12);
+        return msqe / (((double) area) * jacobianNorm);
+    }
+    
+    private double getAffineMeanSquaresWithoutHessianDouble(double currentoffsetx, double currentoffsety,
+            double currenta11, double currenta12,
+            double currenta21, double currenta22) {
+        final int width = (int) sharedContext.img.dimension(0);
+        final int height = (int) sharedContext.img.dimension(1);
+        final int doubletargetwidth = width * 2;
+        final int doubletargetheight = height * 2;
+        int nIndex = 0;
+        int area = 0;
+        double s;
+        double msqe = 0.0;// mean square error
+        double xvecx = currenta11;
+        double xvecy = currenta21;
+        double yvecx = currenta12;
+        double yvecy = currenta22;
+        double coordx;
+        double rescoordx;
+        double coordy;
+        double rescoordy;
+        int mskx;
+        int msky;
+        for (int i = 0; i < height; i++) {
+            // First walk along the Y-vector direction and reset the X-position (otherwise the
+            // y position is initially correct and then lagging behind by one all the time)
+            coordx = currentoffsetx + ((double) i) * yvecx;
+            coordy = currentoffsety + ((double) i) * yvecy;
+            for (int n = 0; n < width; n++, nIndex++) {
+                mskx = (int) Math.round(coordx);
+                msky = (int) Math.round(coordy);
+                if ((mskx >= 0) && (mskx < width) && (msky >= 0) && (msky < height)) {
+                    area++;
+                    
+                    PlainJavaCPUAligner.computeXInterpolationIndices(coordx, doubletargetwidth, width, xInterpolationIndices);
+                    PlainJavaCPUAligner.computeYInterpolationIndices(coordy, doubletargetheight, height, width, yInterpolationIndices);
+
+                    rescoordx = PlainJavaCPUAligner.getFractional(coordx);
+                    rescoordy = PlainJavaCPUAligner.getFractional(coordy);
+                    
+                    s = PlainJavaCPUAligner.interpolateCubicBSpline(rescoordx, rescoordy, xInterpolationIndices, yInterpolationIndices, doubleTargetCoefficients);
+
+                    // calculate the return values
+                    double diff = doubleSourceImage[nIndex] - s;
+                    msqe += diff * diff;
+                }
+                // walk along the X-vector direction
+                coordx += xvecx;
+                coordy += xvecy;
+            }
+        }
+        final double detA = Math.abs(currenta11 * currenta22 - currenta12 * currenta21);
+        final double jacobianNorm = Math.max(detA, 1.0e-12);
+        return msqe / (((double) area) * jacobianNorm);
+    }
+    
+    private double getTranslationMeanSquaresWithoutHessian(int pyramidIndex, float currentoffsetx, float currentoffsety) {
+        final int width = (int) sourcePyramid[pyramidIndex].width;
+        final int height = (int) sourcePyramid[pyramidIndex].height;
+        final float[] source = sourcePyramid[pyramidIndex].Image;
+        final int targetwidth = (int) targetPyramid[pyramidIndex].width;
+        final int targetheight = (int) targetPyramid[pyramidIndex].height;
+        final int doubletargetwidth = targetwidth * 2;
+        final int doubletargetheight = targetheight * 2;
+        final float[] target = targetPyramid[pyramidIndex].Coefficient;
+        int nIndex = 0;
+        int area = 0;
+        float s;
+        float msqe = 0.0f;// mean square error
+        float coordx;
+        float rescoordx;
+        float coordy;
+        float rescoordy;
+        int mskx;
+        int msky;
+        for (int i = 0; i < height; i++) {
+            // First walk along the Y-vector direction and reset the X-position (otherwise the
+            // y position is initially correct and then lagging behind by one all the time)
+            coordx = currentoffsetx;
+            coordy = currentoffsety + ((float) i);
+            for (int n = 0; n < width; n++, nIndex++) {
+                mskx = (int) Math.round(coordx);
+                msky = (int) Math.round(coordy);
+                if ((mskx >= 0) && (mskx < targetwidth) && (msky >= 0) && (msky < targetheight)) {
+                    area++;
+                    
+                    computeXInterpolationIndicesFloat(coordx, doubletargetwidth, targetwidth, xInterpolationIndices);
+                    computeYInterpolationIndicesFloat(coordy, doubletargetheight, targetheight, targetwidth, yInterpolationIndices);
+
+                    rescoordx = getFractionalFloat(coordx);
+                    rescoordy = getFractionalFloat(coordy);
+                    
+                    s = interpolateCubicBSplineFloat(rescoordx, rescoordy, xInterpolationIndices, yInterpolationIndices, target);
+
+                    // calculate the return values
+                    float diff = source[nIndex] - s;
+                    msqe += diff * diff;
+                }
+                // walk along the X-vector direction
+                coordx += 1.0f;
             }
         }
         return msqe / ((double) area);
@@ -1807,9 +3181,6 @@ public class HybridPrecisionCPUAligner extends CPUAligner {
         final float[] target = targetPyramid[pyramidIndex].Coefficient;
         int nIndex = 0;
         int area = 0;
-        int p;
-        int q;
-        int tmpindex;
         float s;
         float msqe = 0.0f;// mean square error
         float xvecx = (float) Math.cos(currentangle);
@@ -1832,63 +3203,28 @@ public class HybridPrecisionCPUAligner extends CPUAligner {
                 msky = (int) Math.round(coordy);
                 if ((mskx >= 0) && (mskx < targetwidth) && (msky >= 0) && (msky < targetheight)) {
                     area++;
-                    // Calculate X-interpolation indices
-                    p = (coordx >= 0) ? (((int) coordx) + 2) : (((int) coordx) + 1);
-                    for (int c = 0; c < 4; c++, p--) {
-                        q = (p < 0) ? (-1 - p) : p;
-                        q = q < doubletargetwidth ? q : q % doubletargetwidth;
-                        xInterpolationIndices[c] = q >= targetwidth ? (doubletargetwidth - 1 - q) : q;
-                    }
-                    // calculate Y-interpolation indices
-                    p = (coordy >= 0) ? (((int) coordy) + 2) : (((int) coordy) + 1);
-                    for (int c = 0; c < 4; c++, p--) {
-                        q = (p < 0) ? (-1 - p) : p;
-                        q = q < doubletargetheight ? q : q % doubletargetheight;
-                        yInterpolationIndices[c] = q >= targetheight ? (doubletargetheight - 1 - q) * targetwidth
-                                : q * targetwidth;// calculate linearized coordinates of the coefficient array
-                    }
-                    // get the residuals of the coordinates
-                    rescoordx = coordx - (coordx >= 0.0f ? ((float) ((int) coordx)) : ((float) (((int) coordx) - 1)));
-                    rescoordy = coordy - (coordy >= 0.0f ? ((float) ((int) coordy)) : ((float) (((int) coordy) - 1)));
-                    // calculate the X-weights
-                    s = 1.0f - rescoordx;
-                    fxWeights[3] = (float) Math.pow(s, 3.0) / 6.0f;
-                    s = rescoordx * rescoordx;
-                    fxWeights[2] = (2.0f / 3.0f) - 0.5f * s * (2.0f - rescoordx);
-                    fxWeights[0] = s * rescoordx / 6.0f;
-                    fxWeights[1] = 1.0f - fxWeights[0] - fxWeights[2] - fxWeights[3];
-                    // calculate the Y-weights
-                    s = 1.0f - rescoordy;
-                    fyWeights[3] = (float) Math.pow(s, 3.0) / 6.0f;
-                    s = rescoordy * rescoordy;
-                    fyWeights[2] = (2.0f / 3.0f) - 0.5f * s * (2.0f - rescoordy);
-                    fyWeights[0] = s * rescoordy / 6.0f;
-                    fyWeights[1] = 1.0f - fyWeights[0] - fyWeights[2] - fyWeights[3];
+                    
+                    computeXInterpolationIndicesFloat(coordx, doubletargetwidth, targetwidth, xInterpolationIndices);
+                    computeYInterpolationIndicesFloat(coordy, doubletargetheight, targetheight, targetwidth, yInterpolationIndices);
 
-                    // calculate the interpolated value from the target coefficients
-                    s = 0.0f;
-                    for (int y = 0; y < 4; y++) {
-                        rescoordx = 0.0f;// To avoid using too many variables this one will be repurposed
-                        tmpindex = yInterpolationIndices[y];
-                        for (int x = 0; x < 4; x++) {
-                            rescoordx += fxWeights[x] * target[tmpindex + xInterpolationIndices[x]];
-                        }
-                        s += fyWeights[y] * rescoordx;
-                    }
+                    rescoordx = getFractionalFloat(coordx);
+                    rescoordy = getFractionalFloat(coordy);
+                    
+                    s = interpolateCubicBSplineFloat(rescoordx, rescoordy, xInterpolationIndices, yInterpolationIndices, target);
 
-                    // calculate the values for returning
-                    rescoordx = source[nIndex] - s;// repurposed for diff
-                    msqe += rescoordx * rescoordx;
+                    // calculate the return values
+                    float diff = source[nIndex] - s;
+                    msqe += diff * diff;
                 }
                 // walk along the X-vector direction
                 coordx += xvecx;
                 coordy += xvecy;
             }
         }
-        return msqe / ((float) area);
+        return msqe / ((double) area);
     }
     
-    private double getTranslationMeanSquaresWithoutHessian(int pyramidIndex, float currentoffsetx, float currentoffsety) {
+    private double getScaledRotationMeanSquaresWithoutHessian(int pyramidIndex, float currentoffsetx, float currentoffsety, float currentangle, float currentscale) {
         final int width = (int) sourcePyramid[pyramidIndex].width;
         final int height = (int) sourcePyramid[pyramidIndex].height;
         final float[] source = sourcePyramid[pyramidIndex].Image;
@@ -1899,11 +3235,12 @@ public class HybridPrecisionCPUAligner extends CPUAligner {
         final float[] target = targetPyramid[pyramidIndex].Coefficient;
         int nIndex = 0;
         int area = 0;
-        int p;
-        int q;
-        int tmpindex;
         float s;
         float msqe = 0.0f;// mean square error
+        float xvecx = (float)Math.cos(currentangle) * currentscale;
+        float xvecy = (float)-Math.sin(currentangle) * currentscale;
+        float yvecx = -xvecy;
+        float yvecy = xvecx;
         float coordx;
         float rescoordx;
         float coordy;
@@ -1913,65 +3250,90 @@ public class HybridPrecisionCPUAligner extends CPUAligner {
         for (int i = 0; i < height; i++) {
             // First walk along the Y-vector direction and reset the X-position (otherwise the
             // y position is initially correct and then lagging behind by one all the time)
-            coordx = currentoffsetx;
-            coordy = currentoffsety + ((float) i);
+            coordx = currentoffsetx + ((float) i) * yvecx;
+            coordy = currentoffsety + ((float) i) * yvecy;
             for (int n = 0; n < width; n++, nIndex++) {
                 mskx = (int) Math.round(coordx);
                 msky = (int) Math.round(coordy);
                 if ((mskx >= 0) && (mskx < targetwidth) && (msky >= 0) && (msky < targetheight)) {
                     area++;
-                    // Calculate X-interpolation indices
-                    p = (coordx >= 0) ? (((int) coordx) + 2) : (((int) coordx) + 1);
-                    for (int c = 0; c < 4; c++, p--) {
-                        q = (p < 0) ? (-1 - p) : p;
-                        q = q < doubletargetwidth ? q : q % doubletargetwidth;
-                        xInterpolationIndices[c] = q >= targetwidth ? (doubletargetwidth - 1 - q) : q;
-                    }
-                    // calculate Y-interpolation indices
-                    p = (coordy >= 0) ? (((int) coordy) + 2) : (((int) coordy) + 1);
-                    for (int c = 0; c < 4; c++, p--) {
-                        q = (p < 0) ? (-1 - p) : p;
-                        q = q < doubletargetheight ? q : q % doubletargetheight;
-                        yInterpolationIndices[c] = q >= targetheight ? (doubletargetheight - 1 - q) * targetwidth
-                                : q * targetwidth;// calculate linearized coordinates of the coefficient array
-                    }
-                    // get the residuals of the coordinates
-                    rescoordx = coordx - (coordx >= 0.0f ? ((float) ((int) coordx)) : ((float) (((int) coordx) - 1)));
-                    rescoordy = coordy - (coordy >= 0.0f ? ((float) ((int) coordy)) : ((float) (((int) coordy) - 1)));
-                    // calculate the X-weights
-                    s = 1.0f - rescoordx;
-                    fxWeights[3] = (float) Math.pow(s, 3.0) / 6.0f;
-                    s = rescoordx * rescoordx;
-                    fxWeights[2] = (2.0f / 3.0f) - 0.5f * s * (2.0f - rescoordx);
-                    fxWeights[0] = s * rescoordx / 6.0f;
-                    fxWeights[1] = 1.0f - fxWeights[0] - fxWeights[2] - fxWeights[3];
-                    // calculate the Y-weights
-                    s = 1.0f - rescoordy;
-                    fyWeights[3] = (float) Math.pow(s, 3.0) / 6.0f;
-                    s = rescoordy * rescoordy;
-                    fyWeights[2] = (2.0f / 3.0f) - 0.5f * s * (2.0f - rescoordy);
-                    fyWeights[0] = s * rescoordy / 6.0f;
-                    fyWeights[1] = 1.0f - fyWeights[0] - fyWeights[2] - fyWeights[3];
+                    
+                    computeXInterpolationIndicesFloat(coordx, doubletargetwidth, targetwidth, xInterpolationIndices);
+                    computeYInterpolationIndicesFloat(coordy, doubletargetheight, targetheight, targetwidth, yInterpolationIndices);
 
-                    // calculate the interpolated value from the target coefficients
-                    s = 0.0f;
-                    for (int y = 0; y < 4; y++) {
-                        rescoordx = 0.0f;// To avoid using too many variables this one will be repurposed
-                        tmpindex = yInterpolationIndices[y];
-                        for (int x = 0; x < 4; x++) {
-                            rescoordx += fxWeights[x] * target[tmpindex + xInterpolationIndices[x]];
-                        }
-                        s += fyWeights[y] * rescoordx;
-                    }
+                    rescoordx = getFractionalFloat(coordx);
+                    rescoordy = getFractionalFloat(coordy);
+                    
+                    s = interpolateCubicBSplineFloat(rescoordx, rescoordy, xInterpolationIndices, yInterpolationIndices, target);
 
-                    // calculate the values for returning
-                    rescoordx = source[nIndex] - s;// repurposed for diff
-                    msqe += rescoordx * rescoordx;
+                    // calculate the return values
+                    float diff = source[nIndex] - s;
+                    msqe += diff * diff;
                 }
                 // walk along the X-vector direction
-                coordx += 1.0;
+                coordx += xvecx;
+                coordy += xvecy;
             }
         }
-        return msqe / ((float) area);
+        final double jacobianNorm = Math.max((double)currentscale * (double)currentscale, 1.0e-12);
+        return msqe / (((double) area) * jacobianNorm);
+    }
+    
+    private double getAffineMeanSquaresWithoutHessian(int pyramidIndex, float currentoffsetx, float currentoffsety,
+    		float currenta11, float currenta12,
+    		float currenta21, float currenta22) {
+        final int width = (int) sourcePyramid[pyramidIndex].width;
+        final int height = (int) sourcePyramid[pyramidIndex].height;
+        final float[] source = sourcePyramid[pyramidIndex].Image;
+        final int targetwidth = (int) targetPyramid[pyramidIndex].width;
+        final int targetheight = (int) targetPyramid[pyramidIndex].height;
+        final int doubletargetwidth = targetwidth * 2;
+        final int doubletargetheight = targetheight * 2;
+        final float[] target = targetPyramid[pyramidIndex].Coefficient;
+        int nIndex = 0;
+        int area = 0;
+        float s;
+        float msqe = 0.0f;// mean square error
+        float xvecx = currenta11;
+        float xvecy = currenta21;
+        float yvecx = currenta12;
+        float yvecy = currenta22;
+        float coordx;
+        float rescoordx;
+        float coordy;
+        float rescoordy;
+        int mskx;
+        int msky;
+        for (int i = 0; i < height; i++) {
+            // First walk along the Y-vector direction and reset the X-position (otherwise the
+            // y position is initially correct and then lagging behind by one all the time)
+            coordx = currentoffsetx + ((float) i) * yvecx;
+            coordy = currentoffsety + ((float) i) * yvecy;
+            for (int n = 0; n < width; n++, nIndex++) {
+                mskx = (int) Math.round(coordx);
+                msky = (int) Math.round(coordy);
+                if ((mskx >= 0) && (mskx < targetwidth) && (msky >= 0) && (msky < targetheight)) {
+                    area++;
+                    
+                    computeXInterpolationIndicesFloat(coordx, doubletargetwidth, targetwidth, xInterpolationIndices);
+                    computeYInterpolationIndicesFloat(coordy, doubletargetheight, targetheight, targetwidth, yInterpolationIndices);
+
+                    rescoordx = getFractionalFloat(coordx);
+                    rescoordy = getFractionalFloat(coordy);
+                    
+                    s = interpolateCubicBSplineFloat(rescoordx, rescoordy, xInterpolationIndices, yInterpolationIndices, target);
+
+                    // calculate the return values
+                    float diff = source[nIndex] - s;
+                    msqe += diff * diff;
+                }
+                // walk along the X-vector direction
+                coordx += xvecx;
+                coordy += xvecy;
+            }
+        }
+        final double detA = Math.abs((double)currenta11 * (double)currenta22 - (double)currenta12 * (double)currenta21);
+        final double jacobianNorm = Math.max(detA, 1.0e-12);
+        return msqe / (((double) area) * jacobianNorm);
     }
 }
