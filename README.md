@@ -155,6 +155,9 @@ Ringel (2018) Mechanisms of delivery and mode of action of type VI secretion sys
 * [x] Maybe: Add image resizing
 * [ ] Maybe: Add ops or service functionality
 
+## Disclosure:
+Various models from GitHub Copilot were used in the development of version 0.2.0.
+
 ## References:
 
 1. Ringel (2018) Mechanisms of delivery and mode of action of type VI secretion system effectors. *Doctoral Thesis* (DOI: [10.5451/unibas-006805400](https://doi.org/10.5451/unibas-006805400))
