@@ -2010,15 +2010,16 @@ public class PlainJavaCPUAligner extends CPUAligner
                     double diff = source[nIndex] - s;
                     msqe += diff * diff;
                     double theta = yGradient[nIndex] * (double)n - xGradient[nIndex] * (double)i;
-                    //double j_scale = (((double)n) * xGradient[nIndex] + ((double)i) * yGradient[nIndex]); // scale contribution to j
                     /*
-                     * Switched to log scale for the scale parameter, which is more stable for optimization. 
-                     * The original implementation used a linear scale parameter, but this can lead to large 
-                     * updates and instability when the scale is far from 1. By optimizing in log space, 
-                     * we ensure that updates are multiplicative and more stable across a wide range of scales.
+                     * Log-scale parameter (kappa = log s) with multiplicative composition s <- s*exp(dkappa).
+                     * The scale Jacobian column in the inverse method is n*fx + i*fy WITHOUT any current-scale
+                     * factor: the forward derivative carries s, but the inverse substitution
+                     * grad f_T(W) ~= grad f_S * M^{-1} carries 1/s, and the two cancel exactly. This matches the
+                     * identity-frame convention used by the rotation column (theta) and the translation columns
+                     * (fx, fy), and by the verified rigid-body optimizer. (Previously this multiplied by
+                     * currentscale, which double-counted the scale and mis-scaled the kappa step by O(s) for s != 1.)
                      */
-                    final double j_scale = (((double)n) * xGradient[nIndex] + ((double)i) * yGradient[nIndex]);
-                    final double j_logScale = currentscale * j_scale;
+                    final double j_logScale = (((double)n) * xGradient[nIndex] + ((double)i) * yGradient[nIndex]);
                     /*
                     TODO/FIXME/KNOWN ISSUE:
                     The following summation is MUCH worse than the parallel sum reduction done on the GPU, because (relatively speaking)

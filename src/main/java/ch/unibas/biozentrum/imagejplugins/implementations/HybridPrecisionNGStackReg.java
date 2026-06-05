@@ -6212,8 +6212,13 @@ public class HybridPrecisionNGStackReg extends RegistrationAndTransformation
                             double diff = sourceImageDoubleSlice[nIndex] - s;
                             mse += diff * diff;
                             double theta = sourceyGradientDoubleSlice[nIndex] * (double)n - sourcexGradientDoubleSlice[nIndex] * (double)i;
-                            final double j_scale = (((double)n) * sourcexGradientDoubleSlice[nIndex] + ((double)i) * sourceyGradientDoubleSlice[nIndex]);
-                            final double j_logScale = currentscale * j_scale;
+                            /*
+                             * Log-scale (kappa = log s) scale Jacobian column = n*fx + i*fy, WITHOUT a current-scale
+                             * factor: the forward s and the inverse-method 1/s cancel exactly, matching the identity-frame
+                             * rotation/translation columns and the rigid-body convention. (Previously multiplied by
+                             * currentscale, which mis-scaled the kappa step by O(s) for s != 1.)
+                             */
+                            final double j_logScale = (((double)n) * sourcexGradientDoubleSlice[nIndex] + ((double)i) * sourceyGradientDoubleSlice[nIndex]);
                             /*
                             TODO/FIXME/KNOWN ISSUE:
                             The following summation is MUCH worse than the parallel sum reduction done on the GPU, because (relatively speaking)

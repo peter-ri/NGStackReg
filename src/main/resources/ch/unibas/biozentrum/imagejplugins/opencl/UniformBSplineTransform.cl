@@ -2728,7 +2728,7 @@ const FPT scale)
              * we ensure that updates are multiplicative and more stable across a wide range of scales.
              */
             //__private FPT j_scale = dot((FPTTWO)(xGradient[nIndex], yGradient[nIndex]), (FPTTWO)((FPT)column, (FPT)row));
-            __private FPT j_logScale = dot((FPTTWO)(xGradient[nIndex], yGradient[nIndex]), (FPTTWO)((FPT)column, (FPT)row)) * scale; //chain rule for log scale, this is the derivative of the error with respect to log(scale)
+            __private FPT j_logScale = dot((FPTTWO)(xGradient[nIndex], yGradient[nIndex]), (FPTTWO)((FPT)column, (FPT)row)); //log-scale (kappa=log s) column = n*fx+i*fy; forward s and inverse-method 1/s cancel, so NO * scale factor (matches rotation/translation identity frame)
             
             //diffout[nIndex] = pown(diff,2);
             //grad0[nIndex] = diff * j_logScale;
@@ -3460,7 +3460,7 @@ const int doubleTargetHeight)
              * we ensure that updates are multiplicative and more stable across a wide range of scales.
              */
             //j_scale = dot((FPTTWO)(xGradient[i], yGradient[i]), (FPTTWO)((FPT)column, (FPT)row));
-            j_logScale = dot((FPTTWO)(xGradient[i], yGradient[i]), (FPTTWO)((FPT)column, (FPT)row)) * scale; //chain rule for log scale, this is the derivative of the error with respect to log(scale)
+            j_logScale = dot((FPTTWO)(xGradient[i], yGradient[i]), (FPTTWO)((FPT)column, (FPT)row)); //log-scale (kappa=log s) column = n*fx+i*fy; forward s and inverse-method 1/s cancel, so NO * scale factor (matches rotation/translation identity frame)
 
             //ldiffout[nIndex] += pown(diff,2);
             //lgrad0[nIndex] += diff * j_logScale;
@@ -3519,7 +3519,7 @@ const int doubleTargetHeight)
                 Theta = dot((FPTTWO)(yGradient[lIdx], -xGradient[lIdx]), (FPTTWO)((FPT)column, (FPT)row));
                 
                 //j_scale = dot((FPTTWO)(xGradient[lIdx], yGradient[lIdx]), (FPTTWO)((FPT)column, (FPT)row));
-                j_logScale = dot((FPTTWO)(xGradient[lIdx], yGradient[lIdx]), (FPTTWO)((FPT)column, (FPT)row)) * scale; //chain rule for log scale, this is the derivative of the error with respect to log(scale)
+                j_logScale = dot((FPTTWO)(xGradient[lIdx], yGradient[lIdx]), (FPTTWO)((FPT)column, (FPT)row)); //log-scale (kappa=log s) column = n*fx+i*fy; forward s and inverse-method 1/s cancel, so NO * scale factor (matches rotation/translation identity frame)
                 
                 //ldiffout[nIndex] += pown(diff,2);
                 //lgrad0[nIndex] += diff * j_logScale;

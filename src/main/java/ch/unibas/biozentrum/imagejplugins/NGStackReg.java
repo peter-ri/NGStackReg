@@ -194,6 +194,25 @@ public class NGStackReg implements Command
 	        }
         }
         
+        /*
+         * Under Ubutnu using an NVidia graphics card the OpenCL implementation seems to break when using the hybrid precision code, but not when using the double or single precision only GPU code.
+         * Thus I will silently remap the hybrid precision code to the double precision only code when not running on Windows. 
+         * This is of course not ideal but I cannot figure out why this happens and I want to provide a working solution for non Windows users anyway.
+         */
+        if(!SystemUtils.IS_OS_WINDOWS)
+        {
+        	switch(alignmentMode)
+	        {
+	            case "GPU + CPU (hybrid prec.)":
+	            	alignmentMode = "GPU + CPU (double prec.)";
+	                break;
+	            case "GPU (hybrid prec.)":
+	            	alignmentMode = "GPU (double prec.)";
+	            	forceDoublePrecisionRepr = true;
+	                break;
+	        }
+        }
+        
         switch(alignmentMode)
         {
             case "GPU + CPU (hybrid prec.)":
@@ -528,12 +547,12 @@ public class NGStackReg implements Command
             //Unfortunately my test show that there is some kind of race condition happening with NVidia graphics card drivers on Ubuntu.
             //When reading back the buffers and writing them to disk everything works fine, but otherwise there is an unpredictable generation of NaNs.
             //Since I cannot figure out why this happens, I have decided to remove the OpenCL accelerated implementation when not running on Windows.
-            if(!SystemUtils.IS_OS_WINDOWS)
+            /*if(!SystemUtils.IS_OS_WINDOWS)
             {
                 useCPUOnly = true;
                 useFloatGPUOnly = false;
                 doNotUseCPU = false;
-            }
+            }*/
 
             //Do not change the order of the instantiations as they set dependent data in the shared context
             //Test if OpenCL is available

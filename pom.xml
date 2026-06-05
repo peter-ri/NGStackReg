@@ -14,7 +14,7 @@
 
     <groupId>ch.unibas.biozentrum</groupId>
     <artifactId>NGStackReg_</artifactId>
-    <version>0.2.0</version>
+    <version>0.2.1</version>
 
     <name>NGStackReg</name>
     <description>NGStackReg provides a parallelized and OpenCL accelerated complete rewrite of the StackReg/TurboReg plugins.</description>

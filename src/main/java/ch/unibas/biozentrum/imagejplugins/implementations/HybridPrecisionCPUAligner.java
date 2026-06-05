@@ -2114,8 +2114,13 @@ public class HybridPrecisionCPUAligner extends CPUAligner {
                     double diff = doubleSourceImage[nIndex] - s;
                     msqe += diff * diff;
                     double theta = doubleSourceyGradient[nIndex] * (double)n - doubleSourcexGradient[nIndex] * (double)i;
-                    final double j_scale = (((double)n) * doubleSourcexGradient[nIndex] + ((double)i) * doubleSourceyGradient[nIndex]);
-                    final double j_logScale = currentscale * j_scale;
+                    /*
+                     * Log-scale (kappa = log s) scale Jacobian column = n*fx + i*fy, WITHOUT a current-scale
+                     * factor: the forward s and the inverse-method 1/s cancel exactly, matching the identity-frame
+                     * rotation/translation columns and the rigid-body convention. (Previously multiplied by
+                     * currentscale, which mis-scaled the kappa step by O(s) for s != 1.)
+                     */
+                    final double j_logScale = (((double)n) * doubleSourcexGradient[nIndex] + ((double)i) * doubleSourceyGradient[nIndex]);
                     /*
                     TODO/FIXME/KNOWN ISSUE:
                     The following summation is MUCH worse than the parallel sum reduction done on the GPU, because (relatively speaking)
@@ -2673,8 +2678,13 @@ public class HybridPrecisionCPUAligner extends CPUAligner {
                     float diff = source[nIndex] - s;
                     msqe += diff * diff;
                     float theta = yGradient[nIndex] * (float)n - xGradient[nIndex] * (float)i;
-                    final float j_scale = (((float)n) * xGradient[nIndex] + ((float)i) * yGradient[nIndex]);
-                    final float j_logScale = currentscale * j_scale;
+                    /*
+                     * Log-scale (kappa = log s) scale Jacobian column = n*fx + i*fy, WITHOUT a current-scale
+                     * factor: the forward s and the inverse-method 1/s cancel exactly, matching the identity-frame
+                     * rotation/translation columns and the rigid-body convention. (Previously multiplied by
+                     * currentscale, which mis-scaled the kappa step by O(s) for s != 1.)
+                     */
+                    final float j_logScale = (((float)n) * xGradient[nIndex] + ((float)i) * yGradient[nIndex]);
                     
                     /*
                      * TODO/FIXME/KNOWN ISSUE: The following summation is MUCH worse than the
