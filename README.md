@@ -144,7 +144,7 @@ Ringel (2018) Mechanisms of delivery and mode of action of type VI secretion sys
 * Transformations cannot be imported and applied to a stack.
 * ImageJ/FIJI can sometimes assign the Z axis to the time axis. When running an alignment with the axes mixed up, this may result in unanticipated behavior.
 * When aligning an already aligned stack along another axis, the black pixels on the border of the aligned images will cause the second alignment to produce non-optimal results. This is because the black pixels will skew the error calculation between the images. Use the multidimensional alignment mode.
-* On Ubuntu using NVIDIA drivers resulted in irreproducible results and random NaNs using the hybrid precision OpenCL code. Because the root cause could not yet be identified the OpenCL acceleration is completely disabled on all platforms except for Windows on which it seems to work just fine. 
+* On Ubuntu using NVIDIA drivers resulted in unexpected behavior when using the hybrid-precision OpenCL code path so I remap these to the double precision paths on any non-Windows system which seem to work.
 
 ## TODO:
 
